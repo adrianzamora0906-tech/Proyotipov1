@@ -48,6 +48,7 @@ if (process.env.NETLIFY === 'true' && parsedApiUrl.protocol !== 'https:') {
   throw new Error('En Netlify, API_BASE_URL debe utilizar https para evitar bloqueo por contenido mixto.');
 }
 
+if (parsedApiUrl.pathname === '/') parsedApiUrl.pathname = '/api';
 parsedApiUrl.pathname = `${parsedApiUrl.pathname.replace(/\/+$/, '')}/`;
 const normalizedApiBaseUrl = parsedApiUrl.toString().replace(/\/$/, '');
 const publicConfig = {

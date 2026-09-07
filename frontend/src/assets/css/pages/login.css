@@ -1,0 +1,48 @@
+/* Login Page */
+
+.login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
+  padding: 2rem;
+}
+
+.login-card {
+  background-color: #fff;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  max-width: 400px;
+  width: 100%;
+  padding: 3rem 2rem;
+  animation: slideUp 0.5s ease;
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.login-brand-logo {
+  display: block;
+  width: min(100%, 280px);
+  height: auto;
+  margin: 0 auto;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+@media (max-width: 480px) {
+  .login-card {
+    padding: 2rem 1.5rem;
+  }
+
+  .login-brand-logo {
+    width: min(100%, 235px);
+  }
+}

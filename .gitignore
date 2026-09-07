@@ -1,0 +1,40 @@
+# Variables y credenciales locales
+.env
+**/.env
+**/.env.*
+!**/.env.example
+
+# Dependencias y entornos locales
+node_modules/
+**/node_modules/
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+
+# Registros y archivos temporales
+*.log
+*.out.log
+*.err.log
+.DS_Store
+Thumbs.db
+
+# Respaldos y datos locales
+*.dump
+*.bak
+Respaldo.sql
+
+# El repositorio de despliegue publica solamente el frontend estático
+backend/
+documentos/
+internos/
+Rutas/
+frontend-react/
+
+# Lanzadores locales que no forman parte del despliegue en Netlify
+/package.json
+/package-lock.json
+/serve.py
+/start.bat
+/start.sh
+/ELIMINAR_DATOS_PRUEBA_ALEJANDRO.bat

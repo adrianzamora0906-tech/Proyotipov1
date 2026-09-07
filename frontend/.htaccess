@@ -1,0 +1,21 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # No reescribir archivos reales
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+
+  # Reescribir todas las rutas a index.html
+  RewriteRule ^ index.html [QSA,L]
+</IfModule>
+
+# Cachés
+<FilesMatch "\.js$|\.css$|\.svg$|\.png$|\.jpg$|\.gif$">
+  Header set Cache-Control "max-age=31536000, public"
+</FilesMatch>
+
+# Compresión
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/plain text/html text/xml text/css text/javascript application/javascript
+</IfModule>

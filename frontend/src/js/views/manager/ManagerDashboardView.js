@@ -1,0 +1,122 @@
+import Component from '../../components/Component.js';
+import SidebarLayout from '../../layouts/SidebarLayout.js';
+import ManagerService from '../../services/ManagerService.js';
+
+const number = value => new Intl.NumberFormat('es-EC').format(Number(value) || 0);
+const money = value => new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD' }).format(Number(value) || 0);
+const date = value => value ? new Intl.DateTimeFormat('es-EC', { dateStyle: 'medium' }).format(new Date(value)) : '';
+const esc = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' })[char]);
+const variation = (current, previous) => {
+  const a = Number(current) || 0; const b = Number(previous) || 0;
+  if (!b) return a ? 'Sin valor en el periodo anterior' : 'Sin variación';
+  const percent = ((a - b) / b) * 100;
+  return `${percent >= 0 ? '+' : ''}${percent.toFixed(1)}% frente al periodo anterior`;
+};
+
+export default class ManagerDashboardView extends Component {
+  async render() {
+    return SidebarLayout.render(`<main class="admin-dashboard manager-dashboard">
+      <header class="admin-dashboard__header"><div><h1>Resumen ejecutivo</h1><p>Resultados financieros y operativos consolidados</p></div><button class="btn btn-secondary" id="manager-refresh" type="button">↻ Actualizar</button></header>
+      <section class="dashboard-filters manager-filter-bar" aria-label="Filtros del resumen">
+        <label>Sucursal<select id="manager-branch"><option value="">Todas las sucursales</option></select></label>
+        <label>Provincia<select id="manager-province"><option value="">Todas</option></select></label>
+        <label>Cantón / ciudad<select id="manager-city"><option value="">Todos</option></select></label>
+        <label>Tipo de curso<select id="manager-course-type"><option value="">Todos</option><option value="moto">Moto</option><option value="carro">Automóvil</option></select></label>
+        <label>Desde<input id="manager-from" type="date"></label><label>Hasta<input id="manager-to" type="date"></label><button class="btn btn-secondary" id="manager-clear-filters" type="button">Limpiar filtros</button>
+      </section>
+      <div id="manager-status" class="dashboard-status" aria-live="polite"></div>
+      <section id="manager-kpis" class="dashboard-kpis manager-kpis dashboard-skeleton"></section>
+      <div class="dashboard-columns manager-summary-columns"><section class="dashboard-panel"><div class="panel-title"><h2>Distribución de ingresos</h2></div><div id="manager-income" class="dashboard-skeleton"></div></section><section class="dashboard-panel"><div class="panel-title"><h2>Lectura del periodo</h2></div><div id="manager-reading" class="dashboard-skeleton"></div></section></div>
+      <section class="dashboard-panel"><div class="panel-title"><h2>Comparación por sucursal</h2></div><div id="manager-branches" class="dashboard-table-wrap dashboard-skeleton"></div></section>
+      <section class="dashboard-panel"><div class="panel-title"><h2>Rendimiento por curso</h2></div><div id="manager-courses" class="dashboard-table-wrap dashboard-skeleton"></div></section>
+      <p class="manager-data-note">Las evaluaciones independientes y recuperaciones se mostrarán cuando sus cobros se registren como servicios diferenciados.</p>
+      <div class="modal-overlay" id="manager-income-modal" aria-hidden="true"><div class="modal manager-income-modal" role="dialog" aria-modal="true" aria-labelledby="manager-income-modal-title"><div class="modal-header"><div><h2 class="modal-title" id="manager-income-modal-title">Detalle de ingresos cobrados</h2><p class="manager-modal-subtitle" id="manager-income-modal-range"></p></div><button type="button" class="modal-close" id="manager-income-modal-close" aria-label="Cerrar">&times;</button></div><div class="modal-body"><div class="manager-method-total"><span>Total cobrado</span><strong id="manager-method-total">$0,00</strong></div><div id="manager-method-list"></div><p class="manager-method-note">Solo se muestran los métodos habilitados en las sucursales incluidas en los filtros.</p></div><div class="modal-footer"><button type="button" class="btn btn-secondary" id="manager-income-modal-done">Cerrar</button></div></div></div>
+      <div class="modal-overlay" id="manager-people-modal" aria-hidden="true"><div class="modal manager-people-modal" role="dialog" aria-modal="true" aria-labelledby="manager-people-title"><div class="modal-header"><div><h2 class="modal-title" id="manager-people-title">Detalle</h2><p class="manager-modal-subtitle" id="manager-people-summary"></p></div><button type="button" class="modal-close" id="manager-people-close" aria-label="Cerrar">&times;</button></div><div class="modal-body"><div id="manager-people-table" class="dashboard-table-wrap"></div><div id="manager-people-pagination" class="manager-people-pagination"></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" id="manager-people-export">Descargar Excel completo</button><button type="button" class="btn btn-secondary" id="manager-people-done">Cerrar</button></div></div></div>
+      <div class="modal-overlay" id="manager-service-modal" aria-hidden="true"><div class="modal manager-people-modal" role="dialog" aria-modal="true" aria-labelledby="manager-service-title"><div class="modal-header"><div><h2 class="modal-title" id="manager-service-title">Detalle del servicio</h2><p class="manager-modal-subtitle" id="manager-service-summary"></p></div><button type="button" class="modal-close" id="manager-service-close" aria-label="Cerrar">&times;</button></div><div class="modal-body"><div id="manager-service-table" class="dashboard-table-wrap"></div><div id="manager-service-pagination" class="manager-people-pagination"></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" id="manager-service-done">Cerrar</button></div></div></div>
+    </main>`);
+  }
+  async mount() {
+    document.getElementById('manager-refresh')?.addEventListener('click', () => this.load());
+    document.getElementById('manager-province')?.addEventListener('change', () => { document.getElementById('manager-city').value=''; document.getElementById('manager-branch').value=''; this.syncLocationFilters(); this.load(); });
+    document.getElementById('manager-city')?.addEventListener('change', () => { document.getElementById('manager-branch').value=''; this.syncLocationFilters(); this.load(); });
+    document.getElementById('manager-branch')?.addEventListener('change', event => { const selected=this.branchOptions?.find(item=>String(item.id)===event.target.value); if(selected){document.getElementById('manager-province').value=selected.province||'';this.syncLocationFilters({preserveBranch:true});document.getElementById('manager-city').value=selected.city||'';this.syncLocationFilters({preserveBranch:true});document.getElementById('manager-branch').value=String(selected.id);} this.load(); });
+    document.getElementById('manager-course-type')?.addEventListener('change', () => this.load());
+    const today = new Date(); const fifteenDaysAgo = new Date(today); fifteenDaysAgo.setDate(today.getDate() - 14);
+    const localDate = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    document.getElementById('manager-from').value = localDate(fifteenDaysAgo);
+    document.getElementById('manager-to').value = localDate(today);
+    this.defaultDates = { from: localDate(fifteenDaysAgo), to: localDate(today) };
+    ['manager-from','manager-to'].forEach(id => document.getElementById(id)?.addEventListener('change', () => { if (document.getElementById('manager-from').value && document.getElementById('manager-to').value) this.load(); }));
+    document.getElementById('manager-clear-filters')?.addEventListener('click', () => { document.getElementById('manager-province').value='';document.getElementById('manager-city').value='';document.getElementById('manager-branch').value='';document.getElementById('manager-course-type').value='';document.getElementById('manager-from').value=this.defaultDates.from;document.getElementById('manager-to').value=this.defaultDates.to;this.syncLocationFilters();this.load(); });
+    document.getElementById('manager-income-modal-close')?.addEventListener('click', () => this.closeIncomeModal());
+    document.getElementById('manager-income-modal-done')?.addEventListener('click', () => this.closeIncomeModal());
+    document.getElementById('manager-income-modal')?.addEventListener('click', event => { if (event.target.id === 'manager-income-modal') this.closeIncomeModal(); });
+    document.getElementById('manager-people-close')?.addEventListener('click', () => this.closePeopleModal());
+    document.getElementById('manager-people-done')?.addEventListener('click', () => this.closePeopleModal());
+    document.getElementById('manager-people-modal')?.addEventListener('click', event => { if (event.target.id === 'manager-people-modal') this.closePeopleModal(); });
+    document.getElementById('manager-people-export')?.addEventListener('click', () => this.exportPeople());
+    document.getElementById('manager-people-pagination')?.addEventListener('click', event => { const button=event.target.closest('[data-people-page]'); if(button&&!button.disabled)this.loadPeople(Number(button.dataset.peoplePage)); });
+    document.getElementById('manager-service-close')?.addEventListener('click',()=>this.closeServiceModal());
+    document.getElementById('manager-service-done')?.addEventListener('click',()=>this.closeServiceModal());
+    document.getElementById('manager-service-modal')?.addEventListener('click',event=>{if(event.target.id==='manager-service-modal')this.closeServiceModal();});
+    document.getElementById('manager-service-pagination')?.addEventListener('click',event=>{const button=event.target.closest('[data-service-page]');if(button&&!button.disabled)this.loadServicePeople(Number(button.dataset.servicePage));});
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') { this.closeIncomeModal(); this.closePeopleModal(); this.closeServiceModal(); } });
+    await this.load();
+  }
+  filters() { return { branchId: document.getElementById('manager-branch')?.value, province: document.getElementById('manager-province')?.value, city: document.getElementById('manager-city')?.value, courseType: document.getElementById('manager-course-type')?.value, period: 'custom', dateFrom: document.getElementById('manager-from')?.value, dateTo: document.getElementById('manager-to')?.value }; }
+  fillFilters(options = []) {
+    this.branchOptions=options; const province=document.getElementById('manager-province'); const selectedProvince=province.value;
+    const provinces=[...new Set(options.map(item=>item.province).filter(Boolean))].sort(); province.innerHTML='<option value="">Todas</option>'+provinces.map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join(''); province.value=provinces.includes(selectedProvince)?selectedProvince:'';
+    this.syncLocationFilters({preserveBranch:true});
+  }
+  syncLocationFilters({preserveBranch=false}={}) {
+    const options=this.branchOptions||[]; const province=document.getElementById('manager-province'); const city=document.getElementById('manager-city'); const branch=document.getElementById('manager-branch');
+    const selectedProvince=province.value; const selectedCity=city.value; const selectedBranch=branch.value;
+    const cities=[...new Set(options.filter(item=>!selectedProvince||item.province===selectedProvince).map(item=>item.city).filter(Boolean))].sort();
+    city.innerHTML='<option value="">Todos</option>'+cities.map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join(''); city.value=cities.includes(selectedCity)?selectedCity:'';
+    const effectiveCity=city.value; const branches=options.filter(item=>(!selectedProvince||item.province===selectedProvince)&&(!effectiveCity||item.city===effectiveCity));
+    const allLabel=effectiveCity?`Todas en ${effectiveCity}`:selectedProvince?`Todas en ${selectedProvince}`:'Todas las sucursales';
+    branch.innerHTML=`<option value="">${esc(allLabel)}</option>`+branches.map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('');
+    if(preserveBranch&&branches.some(item=>String(item.id)===selectedBranch))branch.value=selectedBranch;else branch.value='';
+  }
+  async load() {
+    const status = document.getElementById('manager-status'); const button = document.getElementById('manager-refresh'); status.textContent = 'Actualizando resultados…'; button.disabled = true;
+    try { const response = await ManagerService.dashboard(this.filters()); this.paint(response.data || {}); status.textContent = `Actualizado ${new Date().toLocaleTimeString('es-EC', { hour:'2-digit', minute:'2-digit' })}`; }
+    catch (error) { status.textContent = error.message || 'No se pudo cargar el resumen ejecutivo'; status.classList.add('dashboard-error'); }
+    finally { button.disabled = false; }
+  }
+  paint(data) {
+    this.fillFilters(data.branchOptions || []); const k = data.kpis || {};
+    const cards = [['Ingresos cobrados',money(k.collected),variation(k.collected,k.previous_collected),'money'],['Saldo pendiente',money(k.pending),'Valor pendiente de las matrículas del periodo','pending'],['Participantes confirmados',number(k.people),'Personas únicas con al menos un pago confirmado','people'],['Matrículas registradas',number(k.enrollments),`Incluye ${number(Math.max((Number(k.enrollments)||0)-(Number(k.people)||0),0))} pendiente(s) del primer pago`,'enrollments'],['Evaluaciones independientes',number(k.evaluations),`${money(k.evaluation_collected)} por exámenes psicosensométricos`,'evaluations'],['Recuperaciones',number(k.recoveries),`${money(k.recovery_collected)} por exámenes de recuperación`,'recoveries']];
+    document.getElementById('manager-kpis').innerHTML = cards.map((item,index) => { const detail=[0,2,3,4,5].includes(index); const ids=['manager-income-card','', 'manager-attended-card','manager-enrollments-card','manager-evaluations-card','manager-recoveries-card']; const id=ids[index]||''; const detailText=index===0?'Ver detalle por método':index===2||index===3?'Ver personas y descargar Excel':'Ver personas'; return `<article class="dashboard-kpi manager-kpi manager-kpi--${item[3]}${detail?' manager-kpi--clickable':''}" ${detail?`id="${id}" role="button" tabindex="0"`:''}><strong>${item[1]}</strong><span>${item[0]}</span><small>${item[2]}</small>${detail?`<em>${detailText}</em>`:''}</article>`; }).join('');
+    const incomeCard=document.getElementById('manager-income-card'); incomeCard?.addEventListener('click',()=>this.openIncomeModal()); incomeCard?.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();this.openIncomeModal();}});
+    [['manager-attended-card','attended'],['manager-enrollments-card','enrollments']].forEach(([id,type])=>{const card=document.getElementById(id);card?.addEventListener('click',()=>this.openPeopleModal(type));card?.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();this.openPeopleModal(type);}});});
+    [['manager-evaluations-card','evaluations'],['manager-recoveries-card','recoveries']].forEach(([id,type])=>{const card=document.getElementById(id);card?.addEventListener('click',()=>this.openServiceModal(type));card?.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();this.openServiceModal(type);}});});
+    this.paymentMethods=data.paymentMethods||[]; this.currentCollected=k.collected;
+    const distribution=data.incomeDistribution||[]; const maximum=Math.max(...distribution.map(item=>Number(item.amount)||0),1); document.getElementById('manager-income').innerHTML=distribution.map(item=>`<div class="manager-income-row${item.available===false?' is-unavailable':''}"><div><strong>${esc(item.name)}</strong><span>${item.available===false?'Pendiente de configurar':money(item.amount)}</span></div><div class="manager-income-track"><i style="width:${Math.max(((Number(item.amount)||0)/maximum)*100,item.amount?2:0)}%"></i></div></div>`).join('');
+    document.getElementById('manager-reading').innerHTML=`<div class="manager-reading"><strong>${money(k.collected)}</strong><p>cobrados mediante ${number((data.branches||[]).filter(item=>Number(item.collected)>0).length)} sucursal(es).</p><strong>${number(k.enrollments)}</strong><p>inscripciones realizadas en el periodo.</p><strong>${money(k.pending)}</strong><p>todavía pendientes de cobro.</p></div>`;
+    document.getElementById('manager-branches').innerHTML=data.branches?.length?`<table><thead><tr><th>Sucursal</th><th>Personas</th><th>Inscripciones</th><th>Cobrado</th><th>Pendiente</th><th>Participación</th></tr></thead><tbody>${data.branches.map(item=>`<tr><td><strong>${esc(item.name)}</strong><small>${esc([item.city,item.province].filter(Boolean).join(', '))}</small></td><td>${number(item.people)}</td><td>${number(item.enrollments)}</td><td>${money(item.collected)}</td><td>${money(item.pending)}</td><td>${Number(k.collected)?((Number(item.collected)/Number(k.collected))*100).toFixed(1):'0.0'}%</td></tr>`).join('')}</tbody></table>`:'<p class="dashboard-empty">No hay sucursales con los filtros seleccionados.</p>';
+    document.getElementById('manager-courses').innerHTML=data.courses?.length?`<table><thead><tr><th>Curso</th><th>Precio configurado</th><th>Personas</th><th>Inscripciones</th><th>Cobrado</th><th>Pendiente</th></tr></thead><tbody>${data.courses.map(item=>`<tr><td><strong>${esc(item.name)}</strong></td><td>${money(item.price)}</td><td>${number(item.people)}</td><td>${number(item.enrollments)}</td><td>${money(item.collected)}</td><td>${money(item.pending)}</td></tr>`).join('')}</tbody></table>`:'<p class="dashboard-empty">No hay cursos configurados.</p>';
+  }
+  openIncomeModal() {
+    const modal=document.getElementById('manager-income-modal'); const methods=this.paymentMethods||[];
+    document.getElementById('manager-method-total').textContent=money(this.currentCollected);
+    document.getElementById('manager-income-modal-range').textContent=`Del ${document.getElementById('manager-from').value} al ${document.getElementById('manager-to').value}`;
+    document.getElementById('manager-method-list').innerHTML=methods.length?methods.map(item=>`<article class="manager-method-row manager-method-row--${esc(item.code)}"><div class="manager-method-icon">${item.code==='efectivo'?'$':item.code==='tarjeta'?'▣':'↗'}</div><div><strong>${esc(item.name)}</strong><small>${number(item.transactions)} transacción(es) · Habilitado en ${number(item.enabled_branches)} sucursal(es)</small><small>${esc(item.enabled_branch_names||'')}</small></div><strong>${money(item.amount)}</strong></article>`).join(''):'<p class="dashboard-empty">No hay métodos de pago habilitados con estos filtros.</p>';
+    modal.classList.add('active'); modal.setAttribute('aria-hidden','false'); document.getElementById('manager-income-modal-close').focus();
+  }
+  closeIncomeModal() { const modal=document.getElementById('manager-income-modal'); if(!modal?.classList.contains('active'))return; modal.classList.remove('active'); modal.setAttribute('aria-hidden','true'); document.getElementById('manager-income-card')?.focus(); }
+  async openPeopleModal(type) { this.peopleType=type; const modal=document.getElementById('manager-people-modal'); document.getElementById('manager-people-title').textContent=type==='attended'?'Participantes confirmados':'Matrículas registradas'; modal.classList.add('active');modal.setAttribute('aria-hidden','false');await this.loadPeople(1); }
+  async loadPeople(page) {
+    const table=document.getElementById('manager-people-table');table.innerHTML='<p class="dashboard-empty">Cargando personas…</p>';
+    try{const response=await ManagerService.people({...this.filters(),type:this.peopleType,page});const result=response.data||{};const rows=result.data||[];const pagination=result.pagination||{};document.getElementById('manager-people-summary').textContent=`${number(pagination.total)} registro(s) · 5 por página`;
+      table.innerHTML=rows.length?`<table><thead><tr><th>Cédula</th><th>Nombre</th><th>Correo</th><th>Teléfono</th></tr></thead><tbody>${rows.map(item=>`<tr><td>${esc(item.identification)}</td><td><strong>${esc(item.name)}</strong></td><td>${esc(item.email||'Sin correo')}</td><td>${esc(item.phone||'Sin teléfono')}</td></tr>`).join('')}</tbody></table>`:'<p class="dashboard-empty">No existen personas para los filtros seleccionados.</p>';
+      document.getElementById('manager-people-pagination').innerHTML=`<button class="btn btn-secondary" type="button" data-people-page="${pagination.page-1}" ${pagination.page<=1?'disabled':''}>Anterior</button><span>Página ${pagination.page||1} de ${pagination.totalPages||1}</span><button class="btn btn-primary" type="button" data-people-page="${pagination.page+1}" ${pagination.page>=pagination.totalPages?'disabled':''}>Siguiente</button>`;
+    }catch(error){table.innerHTML=`<p class="dashboard-empty dashboard-error">${esc(error.message)}</p>`;}
+  }
+  async exportPeople(){const button=document.getElementById('manager-people-export');button.disabled=true;button.textContent='Generando Excel…';try{const file=await ManagerService.exportPeople({...this.filters(),type:this.peopleType});const url=URL.createObjectURL(file.blob);const link=document.createElement('a');link.href=url;link.download=file.filename;document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);}catch(error){alert(error.message||'No se pudo generar el Excel');}finally{button.disabled=false;button.textContent='Descargar Excel completo';}}
+  closePeopleModal(){const modal=document.getElementById('manager-people-modal');if(!modal?.classList.contains('active'))return;modal.classList.remove('active');modal.setAttribute('aria-hidden','true');document.getElementById(this.peopleType==='attended'?'manager-attended-card':'manager-enrollments-card')?.focus();}
+  async openServiceModal(type){this.serviceType=type;const modal=document.getElementById('manager-service-modal');document.getElementById('manager-service-title').textContent=type==='recoveries'?'Exámenes de recuperación':'Exámenes psicosensométricos';modal.classList.add('active');modal.setAttribute('aria-hidden','false');await this.loadServicePeople(1);}
+  async loadServicePeople(page){const table=document.getElementById('manager-service-table');table.innerHTML='<p class="dashboard-empty">Cargando registros…</p>';try{const response=await ManagerService.servicePeople({...this.filters(),type:this.serviceType,page});const result=response.data||{};const rows=result.data||[];const pagination=result.pagination||{};document.getElementById('manager-service-summary').textContent=`${number(pagination.total)} registro(s) · 5 por página`;const recovery=this.serviceType==='recoveries';table.innerHTML=rows.length?`<table><thead><tr><th>Cédula</th><th>Nombre</th><th>Correo</th>${recovery?'<th>Curso recuperado</th>':''}<th>Fecha de realización</th></tr></thead><tbody>${rows.map(item=>`<tr><td>${esc(item.identification)}</td><td><strong>${esc(item.name)}</strong></td><td>${esc(item.email||'Sin correo')}</td>${recovery?`<td>${esc(item.course_name||'Sin curso')}</td>`:''}<td>${date(item.performed_at)}</td></tr>`).join('')}</tbody></table>`:'<p class="dashboard-empty">No existen registros para los filtros seleccionados.</p>';document.getElementById('manager-service-pagination').innerHTML=`<button class="btn btn-secondary" type="button" data-service-page="${pagination.page-1}" ${pagination.page<=1?'disabled':''}>Anterior</button><span>Página ${pagination.page||1} de ${pagination.totalPages||1}</span><button class="btn btn-primary" type="button" data-service-page="${pagination.page+1}" ${pagination.page>=pagination.totalPages?'disabled':''}>Siguiente</button>`;}catch(error){table.innerHTML=`<p class="dashboard-empty dashboard-error">${esc(error.message)}</p>`;}}
+  closeServiceModal(){const modal=document.getElementById('manager-service-modal');if(!modal?.classList.contains('active'))return;modal.classList.remove('active');modal.setAttribute('aria-hidden','true');document.getElementById(this.serviceType==='recoveries'?'manager-recoveries-card':'manager-evaluations-card')?.focus();}
+}

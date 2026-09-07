@@ -1,0 +1,33 @@
+/* Paleta institucional del portal estudiantil. */
+:root {
+  --student-purple: #1256a3;
+  --student-ink: #10233f;
+  --student-muted: #64748b;
+  --student-bg: #f4f8fc;
+}
+
+.student-welcome {
+  background: linear-gradient(135deg, #0b3f7a, #1976c9);
+}
+
+.student-welcome p {
+  color: #ffd166;
+  opacity: 1;
+  font-weight: 600;
+}
+
+.student-portal__nav button.active,
+.student-metrics article > span,
+.student-class-number,
+.student-document-list article > span {
+  background: #e6f1fb;
+}
+
+.student-scan:hover,
+.student-primary:hover {
+  background: #0b4688;
+}
+
+.student-welcome .student-scan:hover {
+  background: #edf6ff;
+}

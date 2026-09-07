@@ -37,7 +37,7 @@ import SidebarLayout from "./layouts/SidebarLayout.js?v=menu-perfil-unico-202609
 import AdminDashboardView from "./views/admin/AdminDashboardView.js";
 import AdminSecurityView from "./views/admin/AdminSecurityView.js?v=tipo-instructor-20260819";
 import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js";
-import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=conversion-secretaria-profesor-teoria-20260907";
+import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=clave-temporal-segura-20260907";
 import ManagerReportsView from "./views/manager/ManagerReportsView.js?v=modal-ciclo-ancho-completo-20260812";
 import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=permiso-sin-filtro-pago-20260820";
 import AdminSettingsView from "./views/admin/AdminSettingsView.js";

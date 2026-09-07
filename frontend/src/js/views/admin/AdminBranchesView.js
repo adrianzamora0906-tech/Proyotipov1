@@ -418,7 +418,39 @@ export default class AdminBranchesView extends Component {
     }));
     document.querySelectorAll('.view-user-sessions').forEach(button => button.addEventListener('click', () => { const user=staff.find(item=>String(item.id)===String(button.dataset.userId));if(user)this.openSessionsModal(user); }));
     document.querySelectorAll('.toggle-branch-user').forEach(button => button.addEventListener('click', async()=>{try{button.disabled=true;await AdminService.setActive(button.dataset.userId,button.dataset.active==='true','Cambio desde Personal y Accesos');await this.renderStaff(body);}catch(error){button.disabled=false;window.alert(error.message||'No se pudo cambiar el estado del usuario.');}}));
-    document.querySelectorAll('.reset-user-access').forEach(button => button.addEventListener('click', async()=>{try{button.disabled=true;await AdminService.resetUserAccess(button.dataset.userId,'Restablecido desde Personal y Accesos');window.alert('Acceso restablecido correctamente. El usuario deberá cambiar su contraseña al ingresar.');await this.renderStaff(body);}catch(error){button.disabled=false;window.alert(error.message||'No se pudo restablecer el acceso.');}}));
+    document.querySelectorAll('.reset-user-access').forEach(button=>{
+      const user=staff.find(item=>String(item.id)===String(button.dataset.userId));
+      if((user?.roles||[]).some(role=>role.code==='ADMIN_SYSTEM'))button.remove();
+      else button.textContent='Generar clave temporal';
+    });
+    document.querySelectorAll('.reset-user-access').forEach(button => button.addEventListener('click', async()=>{
+      const user=staff.find(item=>String(item.id)===String(button.dataset.userId));
+      if(!user)return;
+      if(!window.confirm(`Se cerrarán las sesiones de ${user.first_name} y su contraseña actual dejará de funcionar. ¿Continuar?`))return;
+      try{
+        button.disabled=true;
+        const response=await AdminService.resetUserAccess(user.id,'Clave temporal generada desde Personal y Accesos');
+        this.showTemporaryPassword(user,response.data,body);
+      }catch(error){button.disabled=false;window.alert(error.message||'No se pudo generar la clave temporal.');}
+    }));
+  }
+
+  showTemporaryPassword(user, data, body) {
+    const modal = document.getElementById('branch-modal');
+    modal.innerHTML = `<div class="branch-modal-backdrop"><section class="branch-modal temporary-password-modal">
+      <div class="permission-modal__header"><div><h2>Clave temporal generada</h2><p>${esc(`${user.first_name || ''} ${user.last_name || ''}`.trim())} · @${esc(data.username || user.username)}</p></div><button type="button" class="permission-modal__close close-temporary-password" aria-label="Cerrar">×</button></div>
+      <div class="temporary-password-warning"><strong>Se mostrará una sola vez</strong><span>Entrégala de forma privada. El usuario deberá cambiarla al iniciar sesión.</span></div>
+      <label class="temporary-password-field">Clave temporal<div><input class="form-input" id="generated-temporary-password" value="${esc(data.temporaryPassword || '')}" readonly><button type="button" class="btn btn-primary" id="copy-temporary-password">Copiar</button></div></label>
+      <div id="temporary-password-status" class="branch-status" aria-live="polite"></div>
+      <div class="branch-modal-actions"><button type="button" class="btn btn-primary close-temporary-password">Entendido</button></div>
+    </section></div>`;
+    const close=async()=>{modal.innerHTML='';await this.renderStaff(body);};
+    modal.querySelectorAll('.close-temporary-password').forEach(button=>button.addEventListener('click',close));
+    modal.querySelector('#copy-temporary-password')?.addEventListener('click',async()=>{
+      const status=modal.querySelector('#temporary-password-status');
+      try{await navigator.clipboard.writeText(data.temporaryPassword);status.textContent='Clave copiada al portapapeles.';}
+      catch{modal.querySelector('#generated-temporary-password')?.select();status.textContent='Selecciona y copia la clave manualmente.';}
+    });
   }
 
   openEditUserProfile(user, body) {
@@ -426,6 +458,8 @@ export default class AdminBranchesView extends Component {
     const initials = `${user.first_name?.[0] || ''}${user.last_name?.[0] || ''}`.toUpperCase() || 'U';
     const isInstructor = (user.roles || []).some(role => role.code === 'INSTRUCTOR');
     const isSecretary = (user.roles || []).some(role => role.code === 'SECRETARY');
+    const isSystemAdmin = (user.roles || []).some(role => role.code === 'ADMIN_SYSTEM');
+    const canResetAccess = permissionService.can('USER_RESET_ACCESS') && !isSystemAdmin;
     const canConvertRole = isSecretary && authService.getCurrentUser()?.roles?.includes('ADMIN_SYSTEM');
     modal.innerHTML = `<div class="branch-modal-backdrop"><form class="branch-modal user-profile-modal" id="edit-user-profile-form">
       <div class="user-profile-modal__hero"><div class="user-profile-modal__avatar">${esc(initials)}</div><div><span class="user-profile-modal__eyebrow">Perfil del usuario</span><h2>${esc(`${user.first_name || ''} ${user.last_name || ''}`.trim())}</h2><p>@${esc(user.username)} · ${esc(this.branch.name)}</p></div><button type="button" class="permission-modal__close close-modal" aria-label="Cerrar">×</button></div>
@@ -438,10 +472,7 @@ export default class AdminBranchesView extends Component {
         <label>Rol<select class="form-input" name="roleCode" id="edit-user-role"><option value="SECRETARY">Secretaría</option><option value="INSTRUCTOR">Instructor</option></select></label>
         <label id="edit-instructor-area-wrap" hidden>Tipo de instructor<input class="form-input" value="Profesor de teoría" readonly><input type="hidden" name="practiceArea" value="teoria"></label>
       </div><div class="user-profile-modal__notice user-profile-modal__role-notice" id="edit-user-role-notice" hidden>Al guardar, el usuario perderá el acceso de Secretaría y será registrado únicamente como profesor de teoría. Sus sesiones abiertas se cerrarán.</div></section>` : ''}
-      <section class="user-profile-modal__section user-profile-modal__security"><div class="user-profile-modal__section-title"><strong>Seguridad de acceso</strong><span>Déjalo vacío si no deseas cambiar la contraseña.</span></div><div class="user-profile-modal__grid">
-        <label>Nueva contraseña<input class="form-input" name="password" type="password" minlength="8" autocomplete="new-password" placeholder="Mínimo 8 caracteres"></label>
-        <label>Confirmar contraseña<input class="form-input" name="passwordConfirmation" type="password" minlength="8" autocomplete="new-password" placeholder="Repita la contraseña"></label>
-      </div><div class="user-profile-modal__notice">Al cambiarla, las sesiones abiertas de esta persona se cerrarán por seguridad.</div></section>
+      <section class="user-profile-modal__section user-profile-modal__security"><div class="user-profile-modal__section-title"><strong>Seguridad de acceso</strong><span>${isSystemAdmin?'La credencial principal está protegida.':'Genera una credencial individual y de un solo uso.'}</span></div>${canResetAccess?'<button type="button" class="btn btn-primary" id="generate-user-temporary-password">Generar clave temporal</button><div class="user-profile-modal__notice">La contraseña actual dejará de funcionar, se cerrarán las sesiones abiertas y el usuario deberá cambiar la nueva clave al ingresar.</div>':'<div class="user-profile-modal__notice">La contraseña del Administrador del sistema no puede cambiarse desde esta interfaz.</div>'}</section>
       ${isInstructor ? `<section class="user-profile-modal__section"><div class="user-profile-modal__section-title"><strong>Disponibilidad del instructor</strong><span>Define los días y bloques en que puede recibir clases.</span></div><button type="button" class="btn btn-primary" id="configure-instructor-availability">Configurar disponibilidad</button></section>` : ''}
       <div id="edit-user-profile-status" class="branch-status" aria-live="polite"></div>
       <div class="branch-modal-actions"><button type="button" class="btn close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar perfil</button></div>
@@ -459,15 +490,27 @@ export default class AdminBranchesView extends Component {
     roleSelect?.addEventListener('change', syncRoleFields);
     syncRoleFields();
     modal.querySelector('#configure-instructor-availability')?.addEventListener('click', () => this.openBranchInstructorAvailability(user, body));
+    modal.querySelector('#generate-user-temporary-password')?.addEventListener('click',async event=>{
+      if(!window.confirm(`Se cerrarán las sesiones de ${user.first_name} y su contraseña actual dejará de funcionar. ¿Continuar?`))return;
+      const button=event.currentTarget;
+      try{
+        button.disabled=true;
+        const response=await AdminService.resetUserAccess(user.id,'Clave temporal generada desde Editar perfil');
+        this.showTemporaryPassword(user,response.data,body);
+      }catch(error){
+        button.disabled=false;
+        const status=modal.querySelector('#edit-user-profile-status');
+        status.textContent=error.message||'No se pudo generar la clave temporal';
+        status.classList.add('dashboard-error');
+      }
+    });
     modal.querySelector('#edit-user-profile-form')?.addEventListener('submit', async event => {
       event.preventDefault();
       const form = event.currentTarget;
       const data = Object.fromEntries(new FormData(form));
       const status = form.querySelector('#edit-user-profile-status');
       const submit = form.querySelector('button[type="submit"]');
-      if (data.password !== data.passwordConfirmation) { status.textContent = 'Las contraseñas no coinciden.'; status.classList.add('dashboard-error'); return; }
       const payload = { firstName: data.firstName.trim(), lastName: data.lastName.trim(), email: data.email.trim() || null };
-      if (data.password) payload.password = data.password;
       if (canConvertRole && data.roleCode === 'INSTRUCTOR') {
         if (!window.confirm('¿Confirmas cambiar este usuario de Secretaría a profesor de teoría? Sus sesiones abiertas se cerrarán.')) return;
         payload.roleCode = 'INSTRUCTOR';

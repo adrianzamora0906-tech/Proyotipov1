@@ -60,3 +60,5 @@
 
 /* Los diálogos de sucursales también deben cubrir la navegación fija. */
 .branch-modal-backdrop,.branch-map-backdrop{z-index:10000}
+
+.temporary-password-warning{display:grid;gap:.25rem;padding:.9rem;border-radius:10px;background:#fff8e7;color:#8a4b08}.temporary-password-warning span{font-size:.78rem}.temporary-password-field{display:grid;gap:.45rem;color:#344054;font-size:.8rem;font-weight:700}.temporary-password-field>div{display:grid;grid-template-columns:1fr auto;gap:.6rem}.temporary-password-field input{font-family:Consolas,monospace;font-size:1rem;letter-spacing:.03em}.temporary-password-modal .branch-status{text-align:left}@media(max-width:650px){.temporary-password-field>div{grid-template-columns:1fr}.temporary-password-field .btn{width:100%}}

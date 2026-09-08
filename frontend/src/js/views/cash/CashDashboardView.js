@@ -1,16 +1,30 @@
 import Component from '../../components/Component.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
 import PaymentService from '../../services/PaymentService.js';
-import { storageService } from '../../core/storage/StorageService.js';
+import ApiService from '../../core/api/apiService.js';
 import { authService } from '../../core/auth/AuthService.js';
 
 class CashDashboardView extends Component {
   async render() {
     const pending = await PaymentService.getPendingPayments();
     const statistics = await PaymentService.getStatistics();
-    const receiptsCount = storageService.count('receipts');
-    const recentReceipts = storageService.findAll('receipts').slice(-4).reverse();
+    let receipts = [];
+    try {
+      const receiptsResult = await ApiService.getReceipts();
+      receipts = receiptsResult.success ? receiptsResult.data : [];
+    } catch (error) {
+      console.warn('No se pudieron cargar los comprobantes recientes:', error.message);
+    }
+    const todayKey = new Date().toLocaleDateString('en-CA');
+    const activeReceiptsToday = receipts.filter(receipt => {
+      const receiptDate = new Date(receipt.created_at || receipt.date);
+      const isActive = String(receipt.payment_detail_status || 'ACTIVE').toUpperCase() !== 'VOIDED';
+      return isActive && !Number.isNaN(receiptDate.getTime()) && receiptDate.toLocaleDateString('en-CA') === todayKey;
+    });
+    const receiptsCount = activeReceiptsToday.length;
+    const recentReceipts = receipts.slice(0, 4);
     const moneyFormatter = new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD' });
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
     const money = moneyFormatter.format(Number(statistics.totalAmount || 0));
     const today = new Intl.DateTimeFormat('es-EC', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
 
@@ -24,7 +38,7 @@ class CashDashboardView extends Component {
         <div class="stats-grid cash-stats-grid">
           <button class="stat-card cash-stat cash-stat--pending cash-open-charge" type="button"><div class="stat-icon cash-stat__icon">$</div><div><div class="stat-number">${pending.length}</div><div class="stat-label">Estudiantes esperando pago</div><small>Buscar estudiante →</small></div></button>
           <div class="stat-card cash-stat cash-stat--collected"><div class="stat-icon cash-stat__icon">↑</div><div><div class="stat-number">${money}</div><div class="stat-label">Valor recaudado hoy</div><small>Ingresos confirmados</small></div></div>
-          <a class="stat-card cash-stat cash-stat--receipts" href="/cash/pending"><div class="stat-icon cash-stat__icon">✓</div><div><div class="stat-number">${receiptsCount}</div><div class="stat-label">Comprobantes generados</div><small>Consultar movimientos →</small></div></a>
+          <a class="stat-card cash-stat cash-stat--receipts" href="/cash/pending"><div class="stat-icon cash-stat__icon">✓</div><div><div class="stat-number">${receiptsCount}</div><div class="stat-label">Comprobantes generados hoy</div><small>Consultar movimientos →</small></div></a>
         </div>
 
         <div class="dashboard-grid cash-dashboard__grid">
@@ -37,9 +51,9 @@ class CashDashboardView extends Component {
           </section>
 
           <section class="card cash-panel">
-            <div class="card-header cash-panel__header"><div><h3>Actividad reciente</h3><p>Últimos comprobantes de este dispositivo</p></div><a href="/cash/pending">Ver todos</a></div>
+            <div class="card-header cash-panel__header"><div><h3>Actividad reciente</h3><p>Últimos comprobantes registrados en el sistema</p></div><a href="/cash/pending">Ver todos</a></div>
             <div class="card-body cash-activity-list">
-              ${recentReceipts.length ? recentReceipts.map(receipt => `<article class="cash-activity-item"><span class="cash-activity-item__mark">✓</span><div><strong>Pago registrado</strong><small>${receipt.number || 'Comprobante'} · ${receipt.method || 'Método no registrado'}</small></div><div><strong>${moneyFormatter.format(Number(receipt.amount || 0))}</strong><time>${new Date(receipt.date || receipt.createdAt).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' })}</time></div></article>`).join('') : `<div class="cash-empty-state"><span>✓</span><strong>Sin movimientos recientes</strong><p>Los pagos que registres aparecerán en este espacio.</p></div>`}
+              ${recentReceipts.length ? recentReceipts.map(receipt => `<article class="cash-activity-item"><span class="cash-activity-item__mark">✓</span><div><strong>${escapeHtml(receipt.studentName || 'Pago registrado')}</strong><small>${escapeHtml(receipt.receipt_number || receipt.number || 'Comprobante')} · ${escapeHtml(receipt.payment_method || receipt.method || 'Método no registrado')}</small></div><div><strong>${moneyFormatter.format(Number(receipt.amount || 0))}</strong><time>${new Date(receipt.created_at || receipt.date).toLocaleString('es-EC', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</time></div></article>`).join('') : `<div class="cash-empty-state"><span>✓</span><strong>Sin movimientos recientes</strong><p>Los pagos que registres aparecerán en este espacio.</p></div>`}
             </div>
           </section>
         </div>
@@ -113,7 +127,7 @@ class CashDashboardView extends Component {
           <form id="cash-charge-form" class="cash-charge-form">
             <label>Monto a pagar <span>*</span><input class="form-input" type="number" name="amount" value="${Number(payment.balance || 0).toFixed(2)}" min="0.01" max="${Number(payment.balance || 0).toFixed(2)}" step="0.01" required></label>
             <label>Método <span>*</span><select class="form-select" name="method" required>${methodOptions || '<option value="">No hay métodos configurados</option>'}</select></label>
-            <label class="cash-charge-form__wide">Referencia<input class="form-input" name="reference" placeholder="Número de comprobante o referencia"></label>
+            <label class="cash-charge-form__wide">Número de transferencia / referencia<input class="form-input" name="reference" placeholder="Número del comprobante o transferencia"></label>
             <label class="cash-charge-form__wide">Comentario<textarea class="form-textarea" name="note" rows="3" placeholder="Opcional"></textarea></label>
           </form>
           <div class="cash-charge-message" id="cash-charge-message" role="alert"></div>
@@ -154,6 +168,11 @@ class CashDashboardView extends Component {
         result = { success: false, error: error.message };
       }
       if (!result.success) { message.textContent = result.error || 'No se pudo registrar el pago.'; message.className = 'cash-charge-message error'; submit.disabled = false; submit.textContent = 'Registrar pago'; return; }
+      if (result.pendingTransfer) {
+        overlay.querySelector('.cash-charge-modal').innerHTML = `<div class="cash-charge-success"><span>⌛</span><h2>Transferencia por confirmar</h2><p>La transferencia de <strong>${money(amount)}</strong> fue enviada para revisión. El saldo todavía no se modificará.</p><div><a class="btn btn-secondary" href="/cash/operations">Ver transferencias</a><button type="button" class="btn btn-primary" id="cash-finish-payment">Finalizar</button></div></div>`;
+        overlay.querySelector('#cash-finish-payment')?.addEventListener('click', () => window.dispatchEvent(new PopStateEvent('popstate')));
+        return;
+      }
       overlay.querySelector('.cash-charge-modal').innerHTML = `<div class="cash-charge-success"><span>✓</span><h2>Pago registrado</h2><p>El cobro de <strong>${money(amount)}</strong> fue guardado correctamente.</p><div><a class="btn btn-secondary" href="/cash/pending?search=${encodeURIComponent(String(student.cedula || '').replace(/\D/g, ''))}">Ver movimientos</a><button type="button" class="btn btn-primary" id="cash-finish-payment">Finalizar</button></div></div>`;
       overlay.querySelector('#cash-finish-payment')?.addEventListener('click', () => window.dispatchEvent(new PopStateEvent('popstate')));
     });

@@ -220,6 +220,7 @@ class InstructorDashboardView extends Component {
 
   renderSessionActions(item) {
     const buttons=[];
+    if (item.isExamOnly) return '<div class="instructor-actions"><a href="/instructor/evaluations" class="btn btn-primary btn-small">Evaluar</a><a href="/instructor/agenda" class="btn btn-secondary btn-small">Ver detalle</a></div>';
     if (item.isExpired) buttons.push(`<a href="/instructor/agenda?session=${item.id}" class="btn btn-secondary btn-small">Registrar asistencia</a>`);
     else if (item.canStart) buttons.push(`<button class="btn btn-primary btn-small js-start-session" data-id="${item.id}">Iniciar</button>`);
     else if (item.status === 'EN_CURSO') buttons.push(`<button class="btn btn-success btn-small js-complete-session" data-id="${item.id}">Registrar salida</button>`);

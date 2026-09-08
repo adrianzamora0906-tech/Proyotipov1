@@ -159,6 +159,19 @@ class SidebarLayout {
                 </svg>
                 <span class="nav-text">Estudiantes</span>
               </a>` : ''}
+              <a href="/cash/history" class="nav-item ${currentPath === '/cash/history' ? 'active' : ''}">
+                <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 7 12 12 15 14"></polyline>
+                </svg>
+                <span class="nav-text">Historial de cobros</span>
+              </a>
+              <a href="/cash/operations" class="nav-item ${currentPath === '/cash/operations' ? 'active' : ''}">
+                <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 6h16M4 12h16M4 18h10"></path><circle cx="18" cy="18" r="3"></circle>
+                </svg>
+                <span class="nav-text">Control de cartera</span>
+              </a>
             ` : `
               <a href="/dashboard" class="nav-item ${currentPath === '/dashboard' ? 'active' : ''}">
                 <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -204,6 +217,10 @@ class SidebarLayout {
               ` : ''}
             `}
 
+            ${!isAdminSystem && !isGeneralManager && !isCashOnly && user?.permissions?.includes('TRANSFER_VERIFY') ? `<a href="/cash/operations" class="nav-item ${currentPath === '/cash/operations' ? 'active' : ''}">
+              <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"></path><circle cx="18" cy="18" r="3"></circle></svg><span class="nav-text">Confirmar transferencias</span>
+            </a>` : ''}
+
             ${!isAdminSystem && !isGeneralManager && user?.permissions?.includes('REPORT_VIEW') ? `<a href="/reports" class="nav-item ${currentPath === '/reports' ? 'active' : ''}">
               <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"></path></svg><span class="nav-text">Reportes</span>
             </a>` : ''}
@@ -213,7 +230,7 @@ class SidebarLayout {
             ${!isAdminSystem && !isGeneralManager && user?.permissions?.includes('GESTION_PERSONAL') ? `<a href="/branch-access" class="nav-item ${currentPath === '/branch-access' ? 'active' : ''}">
               <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="M9 12l2 2 4-4"></path></svg><span class="nav-text">Personal y accesos</span>
             </a>` : ''}
-            ${!isAdminSystem && !isGeneralManager && !isTheoryInstructor ? `<a href="/history" class="nav-item ${currentPath === '/history' ? 'active' : ''}">
+            ${!isAdminSystem && !isGeneralManager && !isTheoryInstructor && !isCashOnly ? `<a href="/history" class="nav-item ${currentPath === '/history' ? 'active' : ''}">
               <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10"></circle>
                 <polyline points="12 7 12 12 15 14"></polyline>

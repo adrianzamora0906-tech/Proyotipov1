@@ -522,18 +522,37 @@
   line-height: 1.25;
 }
 
-.agenda-summary__students {
+.agenda-summary__students,
+.agenda-summary__exams {
   position: relative;
   cursor: pointer;
   transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
 }
 
 .agenda-summary__students:hover,
-.agenda-summary__students:focus-visible {
+.agenda-summary__students:focus-visible,
+.agenda-summary__exams:hover,
+.agenda-summary__exams:focus-visible {
   border-color: #8277f2;
   outline: 0;
   box-shadow: 0 8px 20px rgba(79, 70, 229, .12);
   transform: translateY(-1px);
+}
+
+.agenda-exams-results { padding: .7rem 1rem; border-bottom: 1px solid #e7ecf2; background: #f8faff; color: #60758d; font-size: .72rem; font-weight: 800; }
+.agenda-exams-list { display: grid; gap: .65rem; min-height: 0; padding: 1rem; overflow-y: auto; }
+.agenda-exam-item { display: grid; grid-template-columns: minmax(145px,.8fr) minmax(220px,1.4fr) auto auto; align-items: center; gap: .8rem; padding: .85rem; border: 1px solid #dfe7f1; border-radius: 12px; background: #fff; }
+.agenda-exam-item.is-next { border-color: #8bd5bd; background: #f2fcf8; box-shadow: 0 5px 16px rgba(8,122,87,.08); }
+.agenda-exam-date,.agenda-exam-student { display: grid; gap: .16rem; min-width: 0; }
+.agenda-exam-date small { color: #087a57; font-size: .58rem; font-weight: 900; text-transform: uppercase; }
+.agenda-exam-date strong,.agenda-exam-student strong { color: #263b53; font-size: .78rem; }
+.agenda-exam-date span,.agenda-exam-student span,.agenda-exam-student small { color: #718399; font-size: .66rem; overflow-wrap: anywhere; }
+.agenda-exam-wait { display: inline-flex; align-items: center; justify-content: center; padding: .42rem .65rem; border-radius: 8px; background: #fff2dd; color: #9a5900; font-size: .66rem; font-weight: 800; text-align: center; white-space: nowrap; }
+
+@media (max-width: 768px) {
+  .agenda-exam-item { grid-template-columns: 1fr auto; }
+  .agenda-exam-student { grid-column: 1 / -1; }
+  .agenda-exam-item .btn { grid-column: 1 / -1; width: 100%; min-height: 44px; }
 }
 
 .agenda-summary__open {
@@ -649,3 +668,4 @@
   .agenda-class-sheet__footer { grid-template-columns: 1fr; }
   .agenda-class-sheet__footer .btn { width: 100%; min-height: 48px; }
 }
+.exam-only-badge{display:inline-flex;padding:.18rem .45rem;border-radius:999px;background:#dcfce7;color:#047857;font-size:.72rem}.agenda-session.exam-only-session{border-left:4px solid #10b981}

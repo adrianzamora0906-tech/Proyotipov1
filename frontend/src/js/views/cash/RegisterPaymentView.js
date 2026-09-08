@@ -71,7 +71,7 @@ class RegisterPaymentView extends Component {
                   </select>
                 </div>
               </div>
-              <div class="form-group"><label class="form-label">Referencia</label><input name="reference" class="form-input" placeholder="Número de comprobante o referencia"></div>
+              <div class="form-group"><label class="form-label">Número de transferencia / referencia</label><input name="reference" class="form-input" placeholder="Número del comprobante o transferencia"></div>
 
               <div class="form-footer">
                 <button type="button" class="btn btn-secondary" id="cancel-payment">Cancelar</button>
@@ -95,6 +95,11 @@ class RegisterPaymentView extends Component {
         const res = await PaymentService.registerPayment({ studentId: student.id, amount, method, reference:fd.get('reference'), cedula:student.cedula, cashier });
         if (!res.success) {
           alert(res.error);
+          return;
+        }
+
+        if (res.pendingTransfer) {
+          studentCard.innerHTML = `<div class="alert alert-warning">Transferencia registrada y pendiente de confirmación. El saldo todavía no fue modificado.</div>`;
           return;
         }
 

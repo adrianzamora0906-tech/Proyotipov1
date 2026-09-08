@@ -2,17 +2,29 @@ import Component from '../../components/Component.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
 import EvaluationService from '../../services/evaluationService.js';
 import InstructorStudentService from '../../services/instructorStudentService.js';
+import InstructorAgendaService from '../../services/instructorAgendaService.js';
 import { badgeClass, escapeHtml, stateMessage } from './InstructorHelpers.js';
 
 class InstructorEvaluationsView extends Component {
   async render() {
     try {
+      const params = new URLSearchParams(window.location.search);
+      this.selectedEnrollmentId = params.get('enrollment') || '';
+      this.practicalSessionId = params.get('session') || '';
       const [evaluations, students] = await Promise.all([
         EvaluationService.getEvaluations(),
         InstructorStudentService.getStudents({ limit: 100 }),
       ]);
       this.criteria = evaluations.criteria || [];
       this.evaluations = evaluations.data || [];
+      const evaluationStudents = [...(students.data || [])];
+      if (this.practicalSessionId && this.selectedEnrollmentId && !evaluationStudents.some(item => String(item.enrollmentId) === String(this.selectedEnrollmentId))) {
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const examAgenda = await InstructorAgendaService.getAgenda({ date: today, appointmentType: 'EXAM_ONLY' });
+        const exam = (examAgenda.data || []).find(item => String(item.id) === String(this.practicalSessionId));
+        if (exam) evaluationStudents.push({ enrollmentId: exam.enrollmentId, name: exam.studentName, course: exam.course });
+      }
 
       const content = `
         <div class="instructor-page">
@@ -22,7 +34,7 @@ class InstructorEvaluationsView extends Component {
           <div class="dashboard-grid">
             <div class="card">
               <div class="card-header"><h3 class="card-title">Examen práctico final</h3></div>
-              <div class="card-body">${this.renderForm(students.data, this.criteria)}</div>
+              <div class="card-body">${this.renderForm(evaluationStudents, this.criteria)}</div>
             </div>
             <div class="card">
               <div class="card-header"><h3 class="card-title">Evaluaciones realizadas</h3></div>
@@ -49,9 +61,10 @@ class InstructorEvaluationsView extends Component {
           <label class="form-label required">Estudiante</label>
           <select class="form-select" name="enrollmentId" required>
             <option value="">Seleccionar...</option>
-            ${students.map(item => `<option value="${item.enrollmentId}">${escapeHtml(item.name)} - ${escapeHtml(item.course)}</option>`).join('')}
+            ${students.map(item => `<option value="${item.enrollmentId}" ${String(item.enrollmentId) === String(this.selectedEnrollmentId) ? 'selected' : ''}>${escapeHtml(item.name)} - ${escapeHtml(item.course)}</option>`).join('')}
           </select>
         </div>
+        <input type="hidden" name="practicalSessionId" value="${escapeHtml(this.practicalSessionId || '')}">
         <input type="hidden" name="evaluationType" value="PRACTICA">
         <div class="evaluation-scale-help"><strong>Examen práctico final</strong><span>Marca un porcentaje en cada criterio.</span></div>
         <div class="evaluation-criteria-list">
@@ -177,6 +190,7 @@ class InstructorEvaluationsView extends Component {
         });
         await EvaluationService.createEvaluation({
           enrollmentId: formData.get('enrollmentId'),
+          practicalSessionId: formData.get('practicalSessionId') || null,
           evaluationType: formData.get('evaluationType') || 'PRACTICA',
           generalObservations: null,
           scores,

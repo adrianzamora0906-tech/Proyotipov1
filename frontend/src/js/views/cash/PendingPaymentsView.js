@@ -17,6 +17,38 @@ class PendingPaymentsView extends Component {
     })[character]);
   }
 
+  showMessageModal(message, { title = 'Información', type = 'info' } = {}) {
+    document.getElementById('cash-message-modal')?.remove();
+    const icons = { success: '✓', error: '!', warning: '!', info: 'i' };
+    const overlay = document.createElement('div');
+    overlay.id = 'cash-message-modal';
+    overlay.className = 'modal-overlay active';
+    overlay.innerHTML = `
+      <style>
+        .cash-message-dialog{width:min(92vw,440px);padding:0;overflow:hidden;border-radius:18px;background:#fff;box-shadow:0 24px 70px rgba(15,23,42,.28);animation:cashMessageIn .18s ease-out}
+        .cash-message-body{padding:30px 28px 22px;text-align:center}
+        .cash-message-icon{display:grid;place-items:center;width:58px;height:58px;margin:0 auto 16px;border-radius:50%;font-size:28px;font-weight:800}
+        .cash-message-icon.success{color:#087a55;background:#dcfce7}.cash-message-icon.error{color:#b42318;background:#fee2e2}.cash-message-icon.warning{color:#a15c00;background:#fff1cc}.cash-message-icon.info{color:#4338ca;background:#e9e7ff}
+        .cash-message-body h2{margin:0 0 9px;color:#172033;font-size:22px}.cash-message-body p{margin:0;color:#667085;line-height:1.55}
+        .cash-message-footer{display:flex;justify-content:center;padding:0 28px 26px}.cash-message-footer .btn{min-width:150px}
+        @keyframes cashMessageIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
+        @media(max-width:520px){.cash-message-body{padding:25px 20px 18px}.cash-message-footer{padding:0 20px 22px}.cash-message-footer .btn{width:100%}}
+      </style>
+      <section class="cash-message-dialog" role="dialog" aria-modal="true" aria-labelledby="cash-message-title">
+        <div class="cash-message-body">
+          <span class="cash-message-icon ${type}" aria-hidden="true">${icons[type] || icons.info}</span>
+          <h2 id="cash-message-title">${this.escape(title)}</h2>
+          <p>${this.escape(message)}</p>
+        </div>
+        <div class="cash-message-footer"><button type="button" class="btn btn-primary" id="cash-message-close">Aceptar</button></div>
+      </section>`;
+    const close = () => overlay.remove();
+    overlay.querySelector('#cash-message-close').addEventListener('click', close);
+    overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
+    document.body.appendChild(overlay);
+    overlay.querySelector('#cash-message-close').focus();
+  }
+
   async render() {
     const initialSearch = new URLSearchParams(window.location.search).get('search') || '';
     this.initialSearch = initialSearch;
@@ -157,7 +189,7 @@ class PendingPaymentsView extends Component {
                   </select>
                 </div>
               </div>
-              <div class="form-group"><label class="form-label">Referencia</label><input name="reference" class="form-input" placeholder="Número de comprobante o referencia"></div>
+              <div class="form-group"><label class="form-label">Número de transferencia / referencia</label><input name="reference" class="form-input" placeholder="Número del comprobante o transferencia"></div>
               <div class="form-group">
                 <label class="form-label">Comentario</label>
                 <textarea name="note" class="form-input" rows="3" placeholder="Opcional"></textarea>
@@ -190,9 +222,9 @@ class PendingPaymentsView extends Component {
         const method = fd.get('method');
         const cashier = (sessionStorage.getItem('erp_session') && JSON.parse(sessionStorage.getItem('erp_session')).username) || 'cajera';
         // validate method exists
-        if (!method) { alert('Selecciona un método de pago.'); return; }
+        if (!method) { this.showMessageModal('Selecciona un método de pago.', { title: 'Falta información', type: 'warning' }); return; }
         const selectedMethod = form.elements && form.elements.method && form.elements.method.selectedOptions ? form.elements.method.selectedOptions[0] : null;
-        if (selectedMethod?.dataset.requiresReference === 'true' && !String(fd.get('reference') || '').trim()) { alert('La referencia es obligatoria para este método de pago.'); return; }
+        if (selectedMethod?.dataset.requiresReference === 'true' && !String(fd.get('reference') || '').trim()) { this.showMessageModal('El número de transferencia o referencia es obligatorio para este método de pago.', { title: 'Falta información', type: 'warning' }); return; }
 
         const result = await PaymentService.registerPayment({
           studentId: student.id,
@@ -205,7 +237,14 @@ class PendingPaymentsView extends Component {
           notify: false,
         });
         if (!result.success) {
-          alert(result.error);
+          this.showMessageModal(result.error, { title: 'No se pudo registrar', type: 'error' });
+          return;
+        }
+
+        if (result.pendingTransfer) {
+          closeModal();
+          this.showMessageModal('La transferencia quedó registrada y permanecerá por confirmar hasta que la responsable la revise.', { title: 'Transferencia registrada', type: 'success' });
+          PaymentService.notifyPaymentChanged();
           return;
         }
 
@@ -409,7 +448,7 @@ class PendingPaymentsView extends Component {
       html = result.html;
     } catch (error) {
       this.receiptOpen = false;
-      alert('No se pudo cargar el comprobante. Intenta nuevamente.');
+      this.showMessageModal('No se pudo cargar el comprobante. Intenta nuevamente.', { title: 'Comprobante no disponible', type: 'error' });
       console.error('Error al cargar comprobante:', error);
       return;
     }
@@ -448,7 +487,7 @@ class PendingPaymentsView extends Component {
   printReceipt(html) {
     const printWindow = window.open('', '_blank', 'width=460,height=720');
     if (!printWindow) {
-      alert('El navegador bloqueó la ventana de impresión. Permite ventanas emergentes e intenta nuevamente.');
+      this.showMessageModal('El navegador bloqueó la ventana de impresión. Permite ventanas emergentes e intenta nuevamente.', { title: 'No se pudo imprimir', type: 'warning' });
       return;
     }
     printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Voucher de pago</title><style>body{margin:0;padding:18px;background:#fff}.receipt{max-width:340px!important}@page{size:80mm auto;margin:5mm}@media print{body{padding:0}}</style></head><body>${html}<script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}<\/script></body></html>`);
@@ -458,7 +497,7 @@ class PendingPaymentsView extends Component {
   openDirectVoidModal(detailId, amount) {
     const modal = document.getElementById('payment-modal');
     if (!modal || !detailId) return;
-    modal.innerHTML = `<div class="modal" style="max-width:520px"><div class="modal-header"><h3 class="modal-title">Anular pago</h3><button class="modal-close" data-close>&times;</button></div><div class="modal-body"><div class="alert alert-warning" style="display:block">Esta anulación es directa y restaurará <strong>$${amount.toFixed(2)}</strong> al saldo pendiente. La operación quedará auditada.</div><form id="cash-void-form"><label class="form-label required">Motivo</label><textarea class="form-textarea" name="reason" minlength="5" required placeholder="Indique por qué se anula el pago"></textarea></form></div><div class="modal-footer"><button class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-danger" id="cash-void-submit">Confirmar anulación</button></div></div>`;
+    modal.innerHTML = `<div class="modal" style="max-width:520px"><div class="modal-header"><h3 class="modal-title">Solicitar anulación</h3><button class="modal-close" data-close>&times;</button></div><div class="modal-body"><div class="alert alert-warning" style="display:block">Se solicitará anular el pago de <strong>$${amount.toFixed(2)}</strong>. El saldo solo se restaurará cuando el Administrador de Sucursal apruebe la solicitud. Todo el proceso quedará auditado.</div><form id="cash-void-form"><label class="form-label required">Motivo</label><textarea class="form-textarea" name="reason" minlength="5" required placeholder="Indique por qué solicita anular el pago"></textarea></form></div><div class="modal-footer"><button class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-danger" id="cash-void-submit">Enviar solicitud</button></div></div>`;
     modal.classList.add('active');
     const close = () => { modal.classList.remove('active'); modal.innerHTML = ''; };
     modal.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', close));
@@ -466,9 +505,9 @@ class PendingPaymentsView extends Component {
       const form = modal.querySelector('#cash-void-form');
       if (!form.reportValidity()) return;
       const submit = modal.querySelector('#cash-void-submit');
-      submit.disabled = true; submit.textContent = 'Anulando…';
-      try { await ApiService.voidPaymentDirectly(detailId, String(new FormData(form).get('reason') || '').trim()); close(); window.dispatchEvent(new PopStateEvent('popstate')); }
-      catch (error) { submit.disabled = false; submit.textContent = 'Confirmar anulación'; alert(error.message || 'No se pudo anular el pago.'); }
+      submit.disabled = true; submit.textContent = 'Enviando…';
+      try { await ApiService.voidPaymentDirectly(detailId, String(new FormData(form).get('reason') || '').trim()); close(); this.showMessageModal('La solicitud fue enviada al Administrador de Sucursal.', { title: 'Solicitud enviada', type: 'success' }); window.dispatchEvent(new PopStateEvent('popstate')); }
+      catch (error) { submit.disabled = false; submit.textContent = 'Enviar solicitud'; this.showMessageModal(error.message || 'No se pudo enviar la solicitud.', { title: 'No se pudo enviar', type: 'error' }); }
     });
   }
 }

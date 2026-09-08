@@ -90,6 +90,9 @@ class PaymentService {
           serviceTransactionId: serviceTransactionId || null,
         });
         if (result.success) {
+          if (result.data.pendingTransfer) {
+            return { success:true, pendingTransfer:true, transfer:result.data.transfer };
+          }
           const response = {
             success: true,
             payment: result.data.payment,

@@ -692,20 +692,52 @@ class StudentsView extends Component {
                   <h3>Horario de pr&aacute;cticas</h3>
                 </div>
 
-                <div class="regular-enrollment-only">
+                <div class="regular-enrollment-only schedule-workflow">
+                <div class="schedule-setup-grid">
+                <section class="schedule-workflow-card" aria-labelledby="practice-type-title">
+                <div class="schedule-workflow-heading">
+                  <span class="schedule-workflow-step">1</span>
+                  <div><h4 id="practice-type-title">Tipo de pr&aacute;ctica</h4><p>Indica si realizar&aacute; el curso completo o solamente el examen.</p></div>
+                </div>
+                <div class="practical-mode-selector" role="group" aria-label="Modalidad práctica">
+                  <button type="button" class="practical-mode-option active" data-practical-mode="classes">Clases prácticas</button>
+                  <button type="button" class="practical-mode-option" data-practical-mode="exam_only">Solo examen</button>
+                  <input type="hidden" name="practicalMode" id="selected-practical-mode" value="classes">
+                </div>
+                <p class="exam-only-help" id="exam-only-help" hidden>Elige un instructor y una sola fecha. El examen no ocupa el cupo de clases del bloque.</p>
+                </section>
+                <section class="schedule-workflow-card" id="advanced-start-card" aria-labelledby="advanced-start-title">
+                <div class="schedule-workflow-heading">
+                  <span class="schedule-workflow-step">2</span>
+                  <div><h4 id="advanced-start-title">Inicio anticipado</h4><p>Permite iniciar las pr&aacute;cticas antes de la fecha oficial del curso.</p></div>
+                </div>
                 <div class="schedule-preferences-grid">
-                <div class="form-group referred-instructor-field">
-                  <label class="form-label">Instructor solicitado <small>(opcional)</small></label>
+                <div class="form-group referred-instructor-field" hidden>
+                  <label class="form-label" id="preferred-instructor-label">Instructor solicitado <small>(opcional)</small></label>
                   <select class="form-select" name="preferredInstructorId" id="preferred-instructor-select" disabled>
                     <option value="">Asignación automática</option>
                   </select>
                   <button type="button" class="btn btn-light" id="toggle-canton-instructors" hidden>Ver otros instructores del cantón</button>
                 </div>
-                <input type="checkbox" name="advancedPracticalStartEnabled" id="advanced-practical-start-enabled" hidden>
-                <div id="advanced-practical-start-fields" hidden>
-                  <input type="date" name="practicalStartDate" id="practical-start-date">
-                  <input name="practicalStartReason" value="Inicio desde la primera disponibilidad real del instructor">
+                <div class="advanced-practical-start">
+                  <label class="advanced-practical-start-toggle" for="advanced-practical-start-enabled">
+                    <input type="checkbox" name="advancedPracticalStartEnabled" id="advanced-practical-start-enabled">
+                    <span><strong>Activar inicio anticipado</strong><small>Utiliza una fecha anterior al inicio oficial cuando exista disponibilidad.</small></span>
+                  </label>
+                  <div class="advanced-practical-start-fields" id="advanced-practical-start-fields" hidden>
+                    <label class="form-label" for="practical-start-date">Fecha deseada</label>
+                    <input class="form-input" type="date" name="practicalStartDate" id="practical-start-date">
+                    <small>El calendario se actualizar&aacute; con la disponibilidad real desde esta fecha.</small>
+                    <input type="hidden" name="practicalStartReason" value="Inicio anticipado solicitado durante la matr&iacute;cula">
+                  </div>
                 </div>
+                </div>
+                </section>
+                </div>
+                <section class="schedule-workflow-card schedule-workflow-card--calendar" aria-labelledby="practice-schedule-title">
+                <div class="schedule-workflow-heading schedule-workflow-heading--calendar">
+                  <span class="schedule-workflow-step">3</span>
+                  <div><h4 id="practice-schedule-title">Fecha y horario</h4><p id="practice-schedule-help">Selecciona una hora disponible en el curso correspondiente.</p></div>
                 </div>
                 <div class="practical-schedule-panel">
                 <div id="student-schedule-calendar">
@@ -714,18 +746,26 @@ class StudentsView extends Component {
                 </div>
                 <input type="hidden" name="scheduleId" id="selected-schedule-id">
                 <input type="hidden" name="schedulePlan" id="selected-schedule-plan">
+                <div class="schedule-selection-summary is-empty" id="schedule-selection-summary" aria-live="polite">
+                  <span class="schedule-selection-summary-icon">&#10003;</span>
+                  <div><small>Selecci&oacute;n actual</small><strong>A&uacute;n no has elegido un horario</strong></div>
+                </div>
                 <label class="late-pickup-notice" id="late-pickup-notice" hidden>
                   <input type="checkbox" name="latePickupConfirmed">
                   <span><strong>Punto de encuentro: Flavio Reyes</strong>El horario de las 20:00 s&iacute; est&aacute; disponible. Confirma que informaste al estudiante que el instructor lo recoger&aacute; en la sucursal Flavio Reyes.</span>
                 </label>
                 <div class="form-error" id="schedule-error"></div>
-                <div class="student-modal-section-title theory-section-title">
-                  <h3>Horario de teoría</h3>
+                </section>
+                <section class="schedule-workflow-card schedule-workflow-card--theory" aria-labelledby="theory-schedule-title">
+                <div class="schedule-workflow-heading">
+                  <span class="schedule-workflow-step">4</span>
+                  <div><h4 id="theory-schedule-title">Horario de teor&iacute;a</h4><p>Escoge la modalidad te&oacute;rica del estudiante.</p></div>
                 </div>
                 <div class="theory-schedule-panel">
                   <div class="enrollment-modality-selector theory-schedule-selector">${this.renderTheoryScheduleOptions()}</div>
                 </div>
                 <div class="form-error" id="theory-schedule-error"></div>
+                </section>
                 </div>
                 <div class="additional-practice-only additional-practice-schedule" hidden>
                   <div class="student-modal-section-title"><h3>Programar prácticas adicionales</h3></div>
@@ -849,6 +889,7 @@ class StudentsView extends Component {
     });
     document.getElementById('additional-practice-toggle')?.addEventListener('change', event => this.toggleAdditionalPracticeMode(event.target.checked));
     form?.querySelectorAll('[name="registrationMode"]').forEach(input => input.addEventListener('change', event => this.setRegistrationMode(event.target.value)));
+    form?.querySelectorAll('[data-practical-mode]').forEach(button => button.addEventListener('click', () => this.setPracticalMode(button.dataset.practicalMode)));
     const referrerSearch = document.getElementById('student-referrer-search');
     referrerSearch?.addEventListener('input', event => this.scheduleReferralStaffSearch(event.target.value));
     referrerSearch?.addEventListener('focus', event => {
@@ -1355,6 +1396,7 @@ class StudentsView extends Component {
     const capacity = Number(dateCapacity.capacity ?? schedule.capacity);
     const occupied = Number(dateCapacity.occupied ?? schedule.occupied ?? 0);
     const reserved = dateCapacity.status === 'reserved';
+    const examCount = Number(dateCapacity.examCount || 0);
     const disabled = available <= 0;
     const courseKey = this.getScheduleCourseKey(schedule.course);
     const schedulePayload = JSON.stringify({
@@ -1368,15 +1410,17 @@ class StudentsView extends Component {
     }).replace(/"/g, '&quot;');
     return `
       <button type="button"
-        class="schedule-option ${schedule.examDay ? 'exam-day' : ''} ${reserved ? 'reserved' : ''} ${disabled ? 'disabled' : ''}"
+        class="schedule-option ${examCount ? 'has-exam' : ''} ${reserved ? 'reserved' : ''} ${disabled ? 'disabled' : ''}"
         data-course="${courseKey}"
         data-schedule="${schedulePayload}"
         data-schedule-id="${schedule.id}"
         data-time="${schedule.time}"
         data-date="${schedule.date || ''}"
         data-day-index="${schedule.dayIndex ?? ''}"
+        data-normal-disabled="${disabled}"
         ${disabled ? 'disabled' : ''}>
         <span class="schedule-option-status ${reserved ? 'reserved' : (disabled ? 'full' : 'available')}">${reserved ? 'Reservado' : (disabled ? 'Completo' : 'Disponible')}</span>
+        ${examCount ? `<span class="schedule-option-exams">Examen ${examCount}/2</span>` : ''}
         <span class="schedule-option-capacity">${available}/${capacity} cupos</span>
       </button>
     `;
@@ -1490,11 +1534,6 @@ class StudentsView extends Component {
               <span>Curso ${cycleIndex + 1}${cycleCount > 1 ? ` de ${cycleCount}` : ''}</span>
               <button type="button" class="course-cycle-btn" data-cycle-direction="1" data-load-next="${cycleIndex === cycleCount - 1 ? 'true' : 'false'}">Próximo</button>
             </div>
-            <div class="calendar-window-controls">
-              <button type="button" class="calendar-window-btn" data-direction="-1" aria-label="Dias anteriores">&lt;</button>
-              <span class="calendar-window-label"></span>
-              <button type="button" class="calendar-window-btn" data-direction="1" aria-label="Dias siguientes">&gt;</button>
-            </div>
             <button type="button" class="schedule-rotation-toggle" aria-pressed="false" data-course="${courseKey}">
               <span class="schedule-rotation-switch" aria-hidden="true"></span>
               <span>Horario rotativo</span>
@@ -1516,14 +1555,28 @@ class StudentsView extends Component {
         ` : ''}
         <div class="schedule-instructor-preview" aria-live="polite" hidden></div>
         <div class="schedule-rotation-message" hidden>Puedes variar el horario por día y tomar dos bloques consecutivos. Debes completar <strong>${Number(cycle.durationBusinessDays) || days.length} clases en total</strong>, con un máximo de cuatro días con dos bloques cada uno. <span class="schedule-selection-count">0/${Number(cycle.durationBusinessDays) || days.length} seleccionadas</span></div>
+        <nav class="calendar-window-controls" aria-label="Navegar entre los días del curso">
+          <button type="button" class="calendar-window-btn" data-direction="-1" aria-label="Mostrar días anteriores">
+            <span aria-hidden="true">&#8592;</span><span>D&iacute;as anteriores</span>
+          </button>
+          <span class="calendar-window-label" aria-live="polite"></span>
+          <button type="button" class="calendar-window-btn" data-direction="1" aria-label="Mostrar días siguientes">
+            <span>D&iacute;as siguientes</span><span aria-hidden="true">&#8594;</span>
+          </button>
+        </nav>
         <div class="enrollment-calendar-grid" style="--cycle-count: ${Math.min(days.length, 5)};">
             <div class="enrollment-calendar-heading">Hora</div>
-            ${days.map((day, dayIndex) => `
-              <div class="enrollment-calendar-heading ${day.isExamDay ? 'exam-day' : ''}" data-day-index="${dayIndex}">
+            ${days.map((day, dayIndex) => {
+              const hasAssignedExam = cycleSchedules.some(schedule =>
+                Number(schedule.availabilityByDate?.[day.date]?.examCount || 0) > 0
+              );
+              return `
+              <div class="enrollment-calendar-heading ${hasAssignedExam ? 'exam-day' : ''}" data-day-index="${dayIndex}">
                 <strong>${day.name}</strong>
-                <span>${day.isExamDay ? `${day.label} · Examen` : day.label}</span>
+                <span>${day.label}</span>
+                ${hasAssignedExam ? '<small class="calendar-exam-badge">Examen</small>' : ''}
               </div>
-            `).join('')}
+            `}).join('')}
             ${times.map(time => `
               <div class="enrollment-calendar-time">${time}</div>
               ${days.map((day, dayIndex) => {
@@ -1845,6 +1898,7 @@ class StudentsView extends Component {
     }));
     host.querySelectorAll('.enrollment-calendar').forEach(calendar => this.updateCalendarWindow(calendar));
     this.syncScheduleOptions();
+    this.setPracticalMode(document.getElementById('selected-practical-mode')?.value || 'classes');
     host.removeAttribute('aria-busy');
     host.querySelectorAll('.enrollment-calendar-grid.is-refreshing').forEach(grid => grid.classList.remove('is-refreshing'));
   }
@@ -2436,12 +2490,46 @@ class StudentsView extends Component {
     if (error) error.textContent = '';
   }
 
+  setPracticalMode(mode) {
+    const examOnly = mode === 'exam_only';
+    const input = document.getElementById('selected-practical-mode');
+    if (input) input.value = examOnly ? 'exam_only' : 'classes';
+    document.querySelectorAll('[data-practical-mode]').forEach(button => button.classList.toggle('active', button.dataset.practicalMode === input?.value));
+    const help = document.getElementById('exam-only-help');
+    if (help) help.hidden = !examOnly;
+    const instructor = document.getElementById('preferred-instructor-select');
+    if (instructor) instructor.required = examOnly;
+    const instructorLabel = document.getElementById('preferred-instructor-label');
+    if (instructorLabel) instructorLabel.innerHTML = examOnly
+      ? 'Instructor del examen <span aria-hidden="true">*</span>'
+      : 'Instructor solicitado <small>(opcional)</small>';
+    const instructorHelp = document.getElementById('practice-instructor-help');
+    if (instructorHelp) instructorHelp.textContent = examOnly
+      ? 'Para el examen es obligatorio seleccionar quién lo evaluará.'
+      : 'Puedes elegirlo o dejar que el sistema lo asigne.';
+    const scheduleHelp = document.getElementById('practice-schedule-help');
+    if (scheduleHelp) scheduleHelp.textContent = examOnly
+      ? 'Selecciona una sola celda, incluso si el bloque ya tiene una clase.'
+      : 'Selecciona una hora disponible en el curso correspondiente.';
+    document.querySelectorAll('.schedule-option').forEach(option => {
+      option.disabled = !examOnly && option.dataset.normalDisabled === 'true';
+      option.classList.toggle('exam-selectable', examOnly);
+    });
+    document.querySelectorAll('.schedule-rotation-toggle').forEach(toggle => {
+      toggle.hidden = examOnly;
+      if (examOnly) { toggle.classList.remove('active'); toggle.setAttribute('aria-pressed', 'false'); }
+    });
+    document.querySelectorAll('.enrollment-calendar').forEach(calendar => this.resetCalendarSelection(calendar));
+  }
+
   shiftCalendarWindow(calendar, direction) {
     if (!calendar) return;
     const dayCount = Number(calendar.dataset.dayCount || 0);
-    const maximumStart = Math.max(0, dayCount - 5);
+    const maximumStart = Math.max(0, Math.floor((dayCount - 1) / 5) * 5);
     const currentStart = Number(calendar.dataset.dayWindowStart || 0);
-    const nextStart = Math.max(0, Math.min(maximumStart, currentStart + direction));
+    const nextStart = direction > 0
+      ? Math.min(maximumStart, currentStart + 5)
+      : Math.max(0, currentStart - 5);
     calendar.dataset.dayWindowStart = String(nextStart);
     this.updateCalendarWindow(calendar);
   }
@@ -2451,12 +2539,16 @@ class StudentsView extends Component {
     const dayCount = Number(calendar.dataset.dayCount || 0);
     const start = Number(calendar.dataset.dayWindowStart || 0);
     const end = Math.min(dayCount, start + 5);
+    const grid = calendar.querySelector('.enrollment-calendar-grid');
+    if (grid) grid.style.setProperty('--cycle-count', String(Math.max(1, end - start)));
     calendar.querySelectorAll('[data-day-index]').forEach(element => {
       const dayIndex = Number(element.dataset.dayIndex);
       element.classList.toggle('calendar-day-hidden', dayIndex < start || dayIndex >= end);
     });
     const label = calendar.querySelector('.calendar-window-label');
-    if (label) label.textContent = dayCount > 5 ? `${start + 1}-${end} de ${dayCount}` : `${dayCount} dias`;
+    if (label) label.textContent = dayCount > 5
+      ? `Días ${start + 1} al ${end} de ${dayCount}`
+      : `${dayCount} ${dayCount === 1 ? 'día' : 'días'}`;
     const previous = calendar.querySelector('.calendar-window-btn[data-direction="-1"]');
     const next = calendar.querySelector('.calendar-window-btn[data-direction="1"]');
     if (previous) previous.disabled = start <= 0;
@@ -2464,11 +2556,19 @@ class StudentsView extends Component {
   }
 
   handleScheduleCellClick(option) {
-    if (!option || option.classList.contains('disabled')) return;
+    const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';
+    if (!option || (!examOnly && option.classList.contains('disabled'))) return;
     const calendar = option.closest('.enrollment-calendar');
     const rotationEnabled = this.isRotationEnabled(calendar);
     const error = document.getElementById('schedule-error');
     if (error) error.textContent = '';
+
+    if (examOnly) {
+      document.querySelectorAll('.schedule-option.selected').forEach(cell => cell.classList.remove('selected'));
+      option.classList.add('selected');
+      this.storeSchedulePlan(calendar);
+      return;
+    }
 
     if (!rotationEnabled) {
       calendar.querySelectorAll('.schedule-option').forEach(cell => {
@@ -2570,16 +2670,48 @@ class StudentsView extends Component {
     if (scheduleIdInput) scheduleIdInput.value = plan[0]?.id || '';
     if (schedulePlanInput) schedulePlanInput.value = JSON.stringify({
       rotation: this.isRotationEnabled(calendar),
+      practicalMode: document.getElementById('selected-practical-mode')?.value || 'classes',
       selections: plan,
     });
     this.syncLatePickupNotice(plan);
     const count = calendar?.querySelector('.schedule-selection-count');
     if (count) {
-      const requiredClasses = Number(calendar.dataset.requiredClasses || calendar.dataset.dayCount || 8);
+      const requiredClasses = document.getElementById('selected-practical-mode')?.value === 'exam_only'
+        ? 1
+        : Number(calendar.dataset.requiredClasses || calendar.dataset.dayCount || 8);
       count.textContent = `${plan.length}/${requiredClasses} seleccionadas`;
     }
     this.updateReferredInstructorBlockPreview(calendar);
     this.updateInstructorAssignmentPreview(calendar, plan);
+    this.updateScheduleSelectionSummary(plan);
+  }
+
+  updateScheduleSelectionSummary(plan = []) {
+    const summary = document.getElementById('schedule-selection-summary');
+    if (!summary) return;
+    const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';
+    const instructor = document.getElementById('preferred-instructor-select');
+    const instructorName = instructor?.value
+      ? instructor.options[instructor.selectedIndex]?.textContent?.trim()
+      : '';
+    let title = 'Aún no has elegido un horario';
+    if (plan.length) {
+      title = examOnly
+        ? `Examen seleccionado · ${plan[0]?.date || ''} · ${plan[0]?.time || ''}`
+        : `${plan.length} ${plan.length === 1 ? 'clase seleccionada' : 'clases seleccionadas'}${plan[0]?.time ? ` · ${plan[0].time}` : ''}`;
+    }
+    summary.classList.toggle('is-empty', plan.length === 0);
+    summary.querySelector('strong').textContent = title;
+    let detail = summary.querySelector('.schedule-selection-instructor');
+    if (instructorName && !detail) {
+      detail = document.createElement('span');
+      detail.className = 'schedule-selection-instructor';
+      summary.querySelector('div').append(detail);
+    }
+    if (detail) {
+      detail.textContent = instructorName;
+      detail.hidden = !instructorName;
+    }
   }
 
   async updateInstructorAssignmentPreview(calendar, plan = []) {
@@ -2653,6 +2785,10 @@ class StudentsView extends Component {
         delete capacityLabel.dataset.originalText;
       }
     });
+    // Un examen es una cita aislada: no reserva visualmente la misma fila en
+    // los demás días ni descuenta cupos de las clases prácticas.
+    const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';
+    if (examOnly) return;
     const hasReferredInstructor = Boolean(document.getElementById('preferred-instructor-select')?.value);
     if (!hasReferredInstructor) return;
     const rotationEnabled = this.isRotationEnabled(calendar);
@@ -2825,10 +2961,13 @@ class StudentsView extends Component {
     }
     const activeCalendar = [...document.querySelectorAll('.enrollment-calendar')]
       .find(calendar => calendar.style.display !== 'none');
-    const requiredClasses = Number(activeCalendar?.dataset.requiredClasses || activeCalendar?.dataset.dayCount || 8);
+    const examOnly = formData.get('practicalMode') === 'exam_only';
+    const requiredClasses = examOnly ? 1 : Number(activeCalendar?.dataset.requiredClasses || activeCalendar?.dataset.dayCount || 8);
     if (schedulePlan.selections.length !== requiredClasses) {
       const scheduleError = document.getElementById('schedule-error');
-      if (scheduleError) scheduleError.textContent = `Debes seleccionar exactamente ${requiredClasses} clases prácticas en total.`;
+      if (scheduleError) scheduleError.textContent = examOnly
+        ? 'Para solo examen debes seleccionar una única fecha y horario.'
+        : `Debes seleccionar exactamente ${requiredClasses} clases prácticas en total.`;
       this.goToModalStep(3);
       return;
     }
@@ -2841,7 +2980,13 @@ class StudentsView extends Component {
     }
     const selectedBranchId = form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || null;
     const availableSchedules = await this.getSchedulesForModal(selectedBranchId, preferredInstructorId, practicalStartDate || null);
-    const selectedCellsAreAvailable = this.activatingReservation
+    if (examOnly && !preferredInstructorId) {
+      const scheduleError = document.getElementById('schedule-error');
+      if (scheduleError) scheduleError.textContent = 'Selecciona el instructor que tomará el examen.';
+      this.goToModalStep(3);
+      return;
+    }
+    const selectedCellsAreAvailable = examOnly ? schedulePlan.selections.length === 1 : this.activatingReservation
       ? schedulePlan.selections.length > 0 && schedulePlan.selections.every(selection => String(selection.cycleId) === String(this.activatingReservation.cycle_id))
       : schedulePlan.selections.length > 0
       && schedulePlan.selections.every(selection => {
@@ -2864,6 +3009,7 @@ class StudentsView extends Component {
       return;
     }
     schedulePlan.theorySchedule = theorySchedule;
+    schedulePlan.practicalMode = examOnly ? 'exam_only' : 'classes';
     schedulePlan.preferredInstructorId = preferredInstructorId;
     schedulePlan.practicalStartDate = practicalStartDate || null;
     schedulePlan.practicalStartReason = practicalStartDate ? String(formData.get('practicalStartReason') || '').trim() : null;

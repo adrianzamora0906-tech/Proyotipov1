@@ -354,6 +354,49 @@
   gap: 1rem;
 }
 
+.student-exam-badge {
+  margin-left: .4rem;
+}
+
+.student-exam-inline {
+  display: inline-flex;
+  margin-left: .35rem;
+  padding: .14rem .4rem;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #047857;
+  font-size: .62rem;
+  font-weight: 800;
+  vertical-align: middle;
+}
+
+.student-exam-schedule-heading {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  margin-bottom: 1rem;
+  padding: .8rem;
+  border: 1px solid #a7e2cf;
+  border-radius: 10px;
+  background: #effcf7;
+  color: #086c54;
+}
+
+.student-exam-schedule-heading strong {
+  font-size: .82rem;
+}
+
+@media (max-width: 600px) {
+  .student-exam-badge {
+    margin: .35rem 0 0;
+  }
+
+  .student-exam-schedule-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .profile-schedule-modal {
   width: min(92vw, 1120px);
   max-width: 1120px;

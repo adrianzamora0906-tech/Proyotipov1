@@ -24,6 +24,7 @@ import CashDashboardView from "./views/cash/CashDashboardView.js?v=caja-cobro-di
 import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";
 import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=caja-cobro-modal-20260825";
 import CashHistoryView from "./views/cash/CashHistoryView.js";
+import CashOperationsView from "./views/cash/CashOperationsView.js";
 import InstructorDashboardView from "./views/instructor/InstructorDashboardView.js?v=privacidad-telefono-20260903";
 import InstructorAgendaView from "./views/instructor/InstructorAgendaView.js?v=privacidad-telefono-20260903";
 import InstructorTheoryView from "./views/instructor/InstructorTheoryView.js?v=dashboard-profesor-teoria-20260907";
@@ -108,7 +109,8 @@ class App {
       "cash-register",
     );
     this.router.register("/cash/pending", PendingPaymentsView, "cash-pending");
-    this.router.register("/cash/history", HistoryView, "cash-history");
+    this.router.register("/cash/history", CashHistoryView, "cash-history");
+    this.router.register("/cash/operations", CashOperationsView, "cash-operations");
     this.router.register("/history", HistoryView, "history");
 
     // Instructor module
@@ -259,6 +261,7 @@ class App {
         "cash-register": "PAYMENT_CREATE",
         "cash-pending": "PAYMENT_VIEW",
         "cash-history": "PAYMENT_VIEW",
+        "cash-operations": "PAYMENT_VIEW",
         "course-reports": "REPORT_VIEW",
         "branch-access": "GESTION_PERSONAL",
         "atm-authorizations": "ATM_DOCUMENT_GENERATE",

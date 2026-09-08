@@ -69,6 +69,7 @@ class StudentProfileView extends Component {
     const canProcessPayments = authService.can('PAYMENT_CREATE');
     const canVoidPayments = authService.can('PAYMENT_VOID');
     const activeEnrollment = (student.enrollments || []).find(enrollment => enrollment.status === 'activo') || (student.enrollments || [])[0] || null;
+    const isExamOnly = schedule?.type === 'exam_only' || schedule?.appointmentType === 'EXAM_ONLY';
     const isAdditionalPracticeOnly = student.registrationType === 'ADDITIONAL_PRACTICE'
       || ((student.additionalPractices || []).length > 0 && !(student.enrollments || []).length);
     const accessAccount = student.accessAccount;
@@ -84,6 +85,7 @@ class StudentProfileView extends Component {
               <h1>${student.firstName} ${student.lastName}</h1>
               <p>Cédula: <strong>${StringHelper.normalizeCedula(student.cedula)}</strong></p>
               <span class="badge ${isAdditionalPracticeOnly ? 'badge-info' : this.getStatusBadgeClass(student.status)}">${isAdditionalPracticeOnly ? 'Prácticas adicionales' : this.getStatusLabel(student.status)}</span>
+              ${isExamOnly ? '<span class="badge badge-info student-exam-badge">Examen pr&aacute;ctico</span>' : ''}
             </div>
           </div>
           <button class="btn btn-secondary" id="edit-student-btn">Editar</button>
@@ -195,7 +197,7 @@ class StudentProfileView extends Component {
                     </div>
                   ` : `
                     <div class="info-item"><span class="info-label">Curso</span><span class="info-value">${student.course || 'Sin curso asignado'}</span></div>
-                    <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${student.instructorName || schedule?.instructor || 'Sin instructor asignado'}</span></div>
+                    <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${student.instructorName || schedule?.instructor || 'Sin instructor asignado'}${isExamOnly ? ' <span class="student-exam-inline">Examen</span>' : ''}</span></div>
                   `}
                   <div class="info-item">
                     <span class="info-label">Estado</span>
@@ -381,9 +383,10 @@ class StudentProfileView extends Component {
                   </div>
                 ` : schedule ? `
                   <div class="schedule-info">
+                    ${isExamOnly ? '<div class="student-exam-schedule-heading"><span class="badge badge-info">Examen pr&aacute;ctico</span><strong>Cita programada para evaluaci&oacute;n</strong></div>' : ''}
                     <div class="info-grid">
                       <div class="info-item">
-                        <span class="info-label">Día</span>
+                        <span class="info-label">${isExamOnly ? 'Fecha del examen' : 'Día'}</span>
                         <span class="info-value">${schedule.day}</span>
                       </div>
                       <div class="info-item">
@@ -399,7 +402,7 @@ class StudentProfileView extends Component {
                         <span class="info-value">${schedule.course}</span>
                       </div>
                     </div>
-                  <button class="btn btn-secondary mt-4" id="change-schedule-btn">Cambiar Horario</button>
+                  ${isExamOnly ? '' : '<button class="btn btn-secondary mt-4" id="change-schedule-btn">Cambiar Horario</button>'}
                   </div>
                 ` : `
                   <p style="color: var(--gray-500); margin-bottom: 1rem;">No tiene horario asignado</p>

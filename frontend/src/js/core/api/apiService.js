@@ -159,6 +159,26 @@ class ApiService {
     return apiClient.get('/payments/history');
   }
 
+  static async getCashWorkspace() {
+    return apiClient.get('/payments/cash-workspace');
+  }
+
+  static async createTransferVerification(data) {
+    return apiClient.post('/payments/transfer-verifications', data);
+  }
+
+  static async reviewTransferVerification(id, decision, note = '') {
+    return apiClient.put(`/payments/transfer-verifications/${id}/review`, { decision, note });
+  }
+
+  static async exportTransferVerifications(date = '') {
+    return apiClient.downloadGet(`/payments/transfer-verifications/export${date ? `?date=${encodeURIComponent(date)}` : ''}`);
+  }
+
+  static async correctPaymentDetail(id, data) {
+    return apiClient.put(`/payments/details/${id}/correct`, data);
+  }
+
   static async cancelPayment(id, reason) {
     return apiClient.put(`/payments/${id}/cancel`, { reason });
   }

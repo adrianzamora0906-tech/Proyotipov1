@@ -684,11 +684,10 @@
   font-size: 0.72rem;
 }
 
-/* En rotativo se muestran únicamente los días realmente elegidos. La fila
-   completa queda reservada internamente para el instructor, sin confundir la
-   vista de la secretaria con un horario fijo. */
+/* En rotativo, las celdas seleccionadas representan las clases reales y el
+   resto de la fila muestra la reserva de disponibilidad del instructor. */
 .schedule-option.referred-block-preview.rotation-block-preview .schedule-option-status::after {
-  content: 'Reservado';
+  content: 'Fila reservada';
 }
 
 .student-modal-steps {

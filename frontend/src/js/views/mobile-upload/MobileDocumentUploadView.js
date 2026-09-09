@@ -66,8 +66,8 @@ class MobileDocumentUploadView extends Component {
                   <div class="mobile-file-preview" data-preview-for="mobile-cedula-back-file" hidden></div>
                 </label>
                 <label>
-                  <span>Carnet de la Cruz Roja</span>
-                  <input type="file" id="mobile-blood-card-front-file" accept="image/*" capture="environment" required>
+                  <span>Carnet de la Cruz Roja <small>(opcional)</small></span>
+                  <input type="file" id="mobile-blood-card-front-file" accept="image/*" capture="environment">
                   <div class="mobile-file-preview" data-preview-for="mobile-blood-card-front-file" hidden></div>
                 </label>
                 <label>
@@ -144,8 +144,8 @@ class MobileDocumentUploadView extends Component {
         ? [
             { file: document.getElementById('mobile-cedula-front-file')?.files?.[0], label: 'Cedula frontal' },
             { file: document.getElementById('mobile-cedula-back-file')?.files?.[0], label: 'Cedula reverso' },
-            { file: document.getElementById('mobile-blood-card-front-file')?.files?.[0], label: 'Carnet de la Cruz Roja' },
-            { file: document.getElementById('mobile-study-certificate-file')?.files?.[0], label: 'Certificado de estudio', optional: true },
+            { file: document.getElementById('mobile-blood-card-front-file')?.files?.[0], label: 'Carnet de la Cruz Roja', optional: true, kind: 'blood-card' },
+            { file: document.getElementById('mobile-study-certificate-file')?.files?.[0], label: 'Certificado de estudio', optional: true, kind: 'certificate' },
           ]
         : [
             { file: document.getElementById('mobile-front-file')?.files?.[0], label: 'Anverso' },
@@ -155,7 +155,7 @@ class MobileDocumentUploadView extends Component {
       if (files.some(item => !item.optional && !item.file)) {
         status.textContent = isBloodCardCompletion
           ? 'Toma la foto del carnet de tipo sanguineo.'
-          : (isPackage ? 'Toma las fotos de la cedula y del carnet de la Cruz Roja.' : 'Toma la foto del anverso y reverso.');
+          : (isPackage ? 'Toma las fotos frontal y reverso de la cedula.' : 'Toma la foto del anverso y reverso.');
         return;
       }
 
@@ -169,9 +169,10 @@ class MobileDocumentUploadView extends Component {
           try { const { rawText, ...extracted } = await CedulaOcrHelper.recognize([files[0].file, files[1].file]);const found=Object.values(extracted).filter(Boolean).length;ocrData=found?extracted:null;if(!found)console.warn('OCR sin datos. Texto detectado:',rawText); } catch (ocrError) { console.warn('OCR piloto no disponible:', ocrError.message); }
         }
         status.textContent = 'Generando PDF desde el telefono.';
-        const certificateIncluded = isPackage && Boolean(files.find(item => item.optional)?.file);
-        const certificateFile = files.find(item => item.optional)?.file || null;
-        const capturedFiles = files.filter(item => item.file && !item.optional);
+        const bloodCardIncluded = isPackage && Boolean(files.find(item => item.kind === 'blood-card')?.file);
+        const certificateFile = files.find(item => item.kind === 'certificate')?.file || null;
+        const certificateIncluded = Boolean(certificateFile);
+        const capturedFiles = files.filter(item => item.file && item.kind !== 'certificate');
         const fileUrl = isBloodCardCompletion
           ? await this.readFileAsDataUrl(new Blob(
             [(await this.prepareImageForPdf(files[0].file)).bytes],
@@ -194,7 +195,7 @@ class MobileDocumentUploadView extends Component {
           observations: ocrData ? `OCR_DATA:${JSON.stringify(ocrData)}` : isBloodCardCompletion
             ? 'Carnet de tipo sanguineo capturado desde telefono'
             : (isPackage
-              ? `Cedula y carnet de la Cruz Roja capturados desde telefono; CERTIFICATE_INCLUDED:${certificateIncluded}`
+              ? `Cedula capturada desde telefono; BLOOD_CARD_INCLUDED:${bloodCardIncluded}; CERTIFICATE_INCLUDED:${certificateIncluded}`
               : `${this.upload?.documentName || 'Documento'} capturado desde telefono`),
         });
         if (!response.success) throw new Error(response.error || 'No se pudo guardar el documento.');

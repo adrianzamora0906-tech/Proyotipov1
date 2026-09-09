@@ -651,6 +651,7 @@ class StudentsView extends Component {
                     Capturar documentos desde telefono
                   </button>
                   <input type="hidden" name="registrationDocumentsMobileFileUrl">
+                  <input type="hidden" name="registrationDocumentsMobileIncludesBloodCard">
                   <input type="hidden" name="certificadoBachillerMobileFileUrl">
                 </div>
                 <small class="registration-document-saved-status" id="registration-documents-status"></small>
@@ -1403,7 +1404,7 @@ class StudentsView extends Component {
         data-day-index="${schedule.dayIndex ?? ''}"
         data-normal-disabled="${disabled}"
         ${disabled ? 'disabled' : ''}>
-        <span class="schedule-option-status ${reserved ? 'reserved' : (disabled ? 'full' : 'available')}">${reserved ? 'Reservado' : (disabled ? 'Completo' : 'Disponible')}</span>
+        <span class="schedule-option-status ${reserved ? 'reserved' : (disabled ? 'full' : 'available')}">${reserved ? 'Fila reservada' : (disabled ? 'Completo' : 'Disponible')}</span>
         ${examCount ? `<span class="schedule-option-exams">Intensivo ${examCount}/2</span>` : ''}
         <span class="schedule-option-capacity">${available}/${capacity} cupos</span>
       </button>
@@ -1715,6 +1716,8 @@ class StudentsView extends Component {
               }
               const documentsInput = document.querySelector('#student-modal-form [name="registrationDocumentsMobileFileUrl"]');
               if (documentsInput) documentsInput.value = receivedFileUrl;
+              const includesBloodCardInput = document.querySelector('#student-modal-form [name="registrationDocumentsMobileIncludesBloodCard"]');
+              if (includesBloodCardInput) includesBloodCardInput.value = result.data.includesBloodCard ? 'true' : 'false';
               const certificateInput = document.querySelector('#student-modal-form [name="certificadoBachillerMobileFileUrl"]');
               if (certificateInput) certificateInput.value = result.data.certificateFileUrl || '';
               const pdfInput = document.querySelector('#student-modal-form [name="registrationDocumentsPdfFile"]');
@@ -1764,19 +1767,23 @@ class StudentsView extends Component {
         ...(instructorId ? { instructor_id: instructorId } : {}),
         ...(practicalStartDate ? { practical_start_date: practicalStartDate } : {}),
       };
-      const results = await Promise.all([
+      const results = await Promise.allSettled([
         ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'carro', modality: 'normal' }),
         ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'carro', modality: 'intensivo' }),
         ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'moto', modality: 'normal' }),
         ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'moto', modality: 'intensivo' }),
         ApiService.getTheoryEnrollmentOptions({ ...(branchId ? { branch_id: branchId } : {}) }),
       ]);
-      if (results.every(result => result.success)) {
-        const cycles=results.slice(0,4).flatMap(result => result.data || []);
-        this.modalTheoryOptions=cycles[0]?.theoryOptions||{regular:true,saturday:true,virtual:true};
-        this.modalTheoryGroups=results[4]?.data||[];
-        return this.flattenEnrollmentOptions(cycles);
-      }
+      const responses = results.map((result, index) => {
+        if (result.status === 'fulfilled' && result.value?.success) return result.value;
+        const reason = result.status === 'rejected' ? result.reason?.message : result.value?.error;
+        console.warn(`No se pudo cargar la opción de inscripción ${index + 1}:`, reason || 'Respuesta inválida');
+        return null;
+      });
+      const cycles=responses.slice(0,4).flatMap(result => result?.data || []);
+      this.modalTheoryOptions=cycles[0]?.theoryOptions||{regular:true,saturday:true,virtual:true};
+      this.modalTheoryGroups=responses[4]?.data||[];
+      if (cycles.length) return this.flattenEnrollmentOptions(cycles);
     } catch (error) {
       console.warn('No se pudieron cargar opciones de cursos desde API:', error.message);
     }
@@ -2810,20 +2817,15 @@ class StudentsView extends Component {
     // los demás días ni descuenta cupos de las clases prácticas.
     const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';
     if (examOnly) return;
-    const hasReferredInstructor = Boolean(document.getElementById('preferred-instructor-select')?.value);
-    if (!hasReferredInstructor) return;
     const rotationEnabled = this.isRotationEnabled(calendar);
-    const selectedCells = new Set(
-      [...calendar.querySelectorAll('.schedule-option.selected')]
-        .map(option => `${option.dataset.date}:${option.dataset.time}`)
-    );
     const selectedTimes = new Set(
       [...calendar.querySelectorAll('.schedule-option.selected')].map(option => option.dataset.time)
     );
     calendar.querySelectorAll('.schedule-option').forEach(option => {
-      const isReserved = rotationEnabled
-        ? selectedCells.has(`${option.dataset.date}:${option.dataset.time}`)
-        : selectedTimes.has(option.dataset.time);
+      // En horario normal y rotativo, cada franja utilizada queda reservada
+      // durante todo el ciclo para el instructor seleccionado. Las celdas
+      // elegidas indican las clases reales; la fila completa refleja cupos.
+      const isReserved = selectedTimes.has(option.dataset.time);
       if (isReserved) {
         option.classList.add('referred-block-preview');
         if (rotationEnabled) option.classList.add('rotation-block-preview');
@@ -3123,7 +3125,13 @@ class StudentsView extends Component {
     try {
       if (submitBtn) submitBtn.textContent = 'Guardando documentos...';
       if (registrationDocumentsUrl || hasRegistrationPdf) {
-        await this.uploadRegistrationDocumentPackage(student.id, registrationDocumentsUrl || registrationDocumentsPdf);
+        await this.uploadRegistrationDocumentPackage(
+          student.id,
+          registrationDocumentsUrl || registrationDocumentsPdf,
+          registrationDocumentsUrl
+            ? formData.get('registrationDocumentsMobileIncludesBloodCard') === 'true'
+            : true
+        );
       } else {
         await this.saveTwoSideDocument(student.id, 'cedula', cedulaDoc, `cedula-${student.id}.pdf`, 'Cédula de Identidad');
         await this.saveTwoSideDocument(student.id, 'carnet_tipo_sangre', bloodTypeCardDoc, `carnet-tipo-sangre-${student.id}.pdf`, 'Carnet de Tipo de Sangre');
@@ -3365,15 +3373,16 @@ class StudentsView extends Component {
     if (!response.success) throw new Error(response.error || `No se pudo guardar ${name}`);
   }
 
-  async uploadRegistrationDocumentPackage(studentId, source) {
+  async uploadRegistrationDocumentPackage(studentId, source, includesBloodCard = true) {
     const fileUrl = typeof source === 'string' ? source : await this.readFileAsDataUrl(source);
     if (fileUrl.length > 12 * 1024 * 1024) {
       throw new Error('El PDF combinado es demasiado grande. El máximo permitido es 9 MB.');
     }
     const response = await ApiService.createDocument(studentId, {
       type: 'registro_documentos',
-      name: 'Cédula y carnet de tipo sanguíneo',
+      name: includesBloodCard ? 'Cédula y carnet de tipo sanguíneo' : 'Cédula de identidad',
       fileUrl,
+      includesBloodCard,
     });
     if (!response.success) throw new Error(response.error || 'No se pudo guardar el PDF combinado');
   }

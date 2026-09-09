@@ -66,10 +66,40 @@ export default class StudentPortalView extends Component{
     document.querySelectorAll('[data-open-scanner]').forEach(button=>button.onclick=()=>this.openScanner());
     document.getElementById('student-change-password')?.addEventListener('click',()=>this.openPassword());
     document.getElementById('student-logout')?.addEventListener('click',async()=>{await authService.logout();window.history.pushState(null,null,'/login');window.dispatchEvent(new PopStateEvent('popstate'));});
+    if(authService.getCurrentUser()?.mustChangePassword)this.openPassword(true);
   }
   selectTab(tab){document.querySelectorAll('[data-student-panel]').forEach(panel=>panel.hidden=panel.dataset.studentPanel!==tab);document.querySelectorAll('[data-student-tab]').forEach(button=>button.classList.toggle('active',button.dataset.studentTab===tab));window.scrollTo(0,0);}
-  modal(content){const host=document.getElementById('student-portal-modal');host.innerHTML=`<div class="student-modal-backdrop"><div class="student-modal">${content}</div></div>`;host.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>{this.stopCamera();host.innerHTML='';});return host;}
-  openPassword(){const host=this.modal(`<button class="student-modal__close" data-close>×</button><h2>Cambiar contraseña</h2><p>La nueva contraseña debe tener al menos 8 caracteres.</p><form id="student-password-form"><label>Contraseña actual<input type="password" name="currentPassword" required></label><label>Nueva contraseña<input type="password" name="newPassword" minlength="8" required></label><label>Confirmar contraseña<input type="password" name="confirmation" minlength="8" required></label><div id="student-password-status"></div><button class="student-primary">Guardar contraseña</button></form>`);host.querySelector('form').onsubmit=async event=>{event.preventDefault();const fd=new FormData(event.currentTarget),status=host.querySelector('#student-password-status');if(fd.get('newPassword')!==fd.get('confirmation')){status.textContent='Las contraseñas no coinciden.';return;}try{await ProfileService.updatePassword({currentPassword:fd.get('currentPassword'),newPassword:fd.get('newPassword')});status.className='success';status.textContent='Contraseña actualizada correctamente.';event.currentTarget.reset();}catch(error){status.className='error';status.textContent=error.message;}};}
+  modal(content,closable=true){const host=document.getElementById('student-portal-modal');host.innerHTML=`<div class="student-modal-backdrop"><div class="student-modal">${content}</div></div>`;if(closable)host.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>{this.stopCamera();host.innerHTML='';});return host;}
+  openPassword(required=false){
+    const closeButton=required?'':'<button class="student-modal__close" data-close aria-label="Cerrar">×</button>';
+    const title=required?'Crea tu nueva contraseña':'Cambiar contraseña';
+    const message=required
+      ? 'Por seguridad, debes reemplazar la contraseña temporal antes de continuar. Usa al menos 8 caracteres.'
+      : 'La nueva contraseña debe tener al menos 8 caracteres.';
+    const currentPasswordLabel=required?'Contraseña temporal actual':'Contraseña actual';
+    const host=this.modal(`${closeButton}<h2>${title}</h2><p>${message}</p><form id="student-password-form"><label>${currentPasswordLabel}<input type="password" name="currentPassword" autocomplete="current-password" required autofocus></label><label>Nueva contraseña<input type="password" name="newPassword" minlength="8" autocomplete="new-password" required></label><label>Confirmar nueva contraseña<input type="password" name="confirmation" minlength="8" autocomplete="new-password" required></label><div id="student-password-status" aria-live="polite"></div><button class="student-primary">Guardar nueva contraseña</button></form>`,!required);
+    host.querySelector('form').onsubmit=async event=>{
+      event.preventDefault();
+      const form=event.currentTarget,fd=new FormData(form),status=host.querySelector('#student-password-status'),button=form.querySelector('button');
+      status.className='';
+      if(fd.get('newPassword')!==fd.get('confirmation')){status.className='error';status.textContent='Las contraseñas no coinciden.';return;}
+      try{
+        button.disabled=true;
+        button.textContent='Guardando...';
+        await ProfileService.updatePassword({currentPassword:fd.get('currentPassword'),newPassword:fd.get('newPassword')});
+        const session=authService.getCurrentUser();
+        if(session)sessionStorage.setItem(authService.sessionKey,JSON.stringify({...session,mustChangePassword:false}));
+        status.className='success';
+        status.textContent='Contraseña actualizada correctamente.';
+        window.setTimeout(()=>{host.innerHTML='';},700);
+      }catch(error){
+        status.className='error';
+        status.textContent=error.message||'No se pudo actualizar la contraseña.';
+        button.disabled=false;
+        button.textContent='Guardar nueva contraseña';
+      }
+    };
+  }
   openScanner(){const supported='BarcodeDetector' in window;const host=this.modal(`<button class="student-modal__close" data-close>×</button><h2>Registrar asistencia</h2><p>Escanea el QR generado por tu instructor.</p>${supported?'<video id="student-qr-video" autoplay playsinline></video><div id="student-qr-status">Activando cámara…</div>':'<div class="student-qr-help">Tu navegador no permite lectura directa. Puedes pegar aquí el enlace del QR.</div>'}<form id="student-qr-manual"><label>Enlace o código QR<input name="qrValue" placeholder="Pega el enlace aquí"></label><button class="student-primary">Continuar</button></form>`);host.querySelector('form').onsubmit=event=>{event.preventDefault();this.openAttendance(new FormData(event.currentTarget).get('qrValue'));};if(supported)this.startCamera();}
   async startCamera(){const video=document.getElementById('student-qr-video'),status=document.getElementById('student-qr-status');try{this.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});video.srcObject=this.stream;const detector=new BarcodeDetector({formats:['qr_code']});const scan=async()=>{if(!this.stream)return;const codes=await detector.detect(video).catch(()=>[]);if(codes[0]?.rawValue){this.openAttendance(codes[0].rawValue);return;}this.scanFrame=requestAnimationFrame(scan);};scan();}catch(error){status.textContent='No se pudo abrir la cámara. Pega el enlace del QR manualmente.';}}
   stopCamera(){if(this.scanFrame)cancelAnimationFrame(this.scanFrame);this.stream?.getTracks().forEach(track=>track.stop());this.stream=null;}

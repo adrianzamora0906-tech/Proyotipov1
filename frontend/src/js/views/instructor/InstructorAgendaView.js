@@ -217,6 +217,12 @@ class InstructorAgendaView extends Component {
     if (item.isExpired) buttons.push(`<span class="badge badge-warning">Horario vencido</span>`);
     else if (item.canStart) buttons.push(`<button class="btn btn-primary btn-small js-start-session" data-id="${item.id}">Iniciar</button>`);
     if (item.status === 'EN_CURSO') buttons.push(`<button class="btn btn-success btn-small js-complete-session" data-id="${item.id}">Registrar salida</button>`);
+    const sessionDay = String(item.scheduledStart || '').slice(0, 10);
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (sessionDay <= today && !['CANCELADA', 'REPROGRAMADA'].includes(item.status)) {
+      buttons.push(`<a class="btn btn-secondary btn-small" href="/instructor/evaluations?mode=exoneration&session=${encodeURIComponent(item.id)}&enrollment=${encodeURIComponent(item.enrollmentId)}">Exonerar</a>`);
+    }
     if (item.isQrTest) buttons.push(`<button class="btn btn-secondary btn-small js-reset-qr-test" data-id="${item.id}">Restablecer prueba</button>`);
     return `<div class="instructor-actions">${buttons.join('')}</div>`;
   }

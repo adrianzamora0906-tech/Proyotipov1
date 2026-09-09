@@ -11,6 +11,7 @@ class InstructorEvaluationsView extends Component {
       const params = new URLSearchParams(window.location.search);
       this.selectedEnrollmentId = params.get('enrollment') || '';
       this.practicalSessionId = params.get('session') || '';
+      this.isExoneration = params.get('mode') === 'exoneration';
       const [evaluations, students] = await Promise.all([
         EvaluationService.getEvaluations(),
         InstructorStudentService.getStudents({ limit: 100 }),
@@ -29,11 +30,11 @@ class InstructorEvaluationsView extends Component {
       const content = `
         <div class="instructor-page">
           <div class="page-header">
-            <div><h1>Evaluaciones</h1><p>Registro de evaluaciones practicas e intentos</p></div>
+            <div><h1>${this.isExoneration ? 'Exonerar estudiante' : 'Evaluaciones'}</h1><p>${this.isExoneration ? 'Completa la evaluación final para cerrar sus clases prácticas.' : 'Registro de evaluaciones practicas e intentos'}</p></div>
           </div>
           <div class="dashboard-grid">
             <div class="card">
-              <div class="card-header"><h3 class="card-title">Examen práctico final</h3></div>
+              <div class="card-header"><h3 class="card-title">${this.isExoneration ? 'Evaluación para exoneración' : 'Examen práctico final'}</h3></div>
               <div class="card-body">${this.renderForm(evaluationStudents, this.criteria)}</div>
             </div>
             <div class="card">
@@ -59,14 +60,15 @@ class InstructorEvaluationsView extends Component {
       <form id="evaluation-form">
         <div class="form-group">
           <label class="form-label required">Estudiante</label>
-          <select class="form-select" name="enrollmentId" required>
+          <select class="form-select" name="enrollmentId" required ${this.isExoneration ? 'disabled' : ''}>
             <option value="">Seleccionar...</option>
             ${students.map(item => `<option value="${item.enrollmentId}" ${String(item.enrollmentId) === String(this.selectedEnrollmentId) ? 'selected' : ''}>${escapeHtml(item.name)} - ${escapeHtml(item.course)}</option>`).join('')}
           </select>
+          ${this.isExoneration ? `<input type="hidden" name="enrollmentId" value="${escapeHtml(this.selectedEnrollmentId)}">` : ''}
         </div>
         <input type="hidden" name="practicalSessionId" value="${escapeHtml(this.practicalSessionId || '')}">
-        <input type="hidden" name="evaluationType" value="PRACTICA">
-        <div class="evaluation-scale-help"><strong>Examen práctico final</strong><span>Marca un porcentaje en cada criterio.</span></div>
+        <input type="hidden" name="evaluationType" value="${this.isExoneration ? 'EXONERACION' : 'PRACTICA'}">
+        <div class="evaluation-scale-help"><strong>${this.isExoneration ? 'Evaluación obligatoria para exonerar' : 'Examen práctico final'}</strong><span>Marca un porcentaje en cada criterio.${this.isExoneration ? ' Se requiere un resultado aprobado.' : ''}</span></div>
         <div class="evaluation-criteria-list">
           ${criteria.map(item => `
             <div class="evaluation-criterion" data-criterion-id="${item.id}" data-maximum="${item.maximum_score}">
@@ -92,7 +94,7 @@ class InstructorEvaluationsView extends Component {
           `).join('')}
         </div>
         <div class="alert alert-info" id="evaluation-total">Total: 0%</div>
-        <button class="btn btn-primary evaluation-submit" type="submit">Registrar evaluación</button>
+        <button class="btn btn-primary evaluation-submit" type="submit">${this.isExoneration ? 'Registrar exoneración' : 'Registrar evaluación'}</button>
       </form>
     `;
   }

@@ -516,7 +516,7 @@ class StudentsView extends Component {
                   <legend>¿Qué desea registrar?</legend>
                   <label class="student-registration-type is-selected"><input type="radio" name="registrationMode" value="regular" checked><span class="student-registration-type__check"></span><span><strong>Curso de conducción</strong><small>Matrícula normal con documentos y horarios.</small></span></label>
                   <label class="student-registration-type"><input type="radio" name="registrationMode" value="additional-practice"><span class="student-registration-type__check"></span><span><strong>Horas prácticas</strong><small>Para personas que ya tienen licencia.</small></span></label>
-                  <label class="student-registration-type"><input type="radio" name="registrationMode" value="license-renewal"><span class="student-registration-type__check"></span><span><strong>Renovación de licencia</strong><small>Solo datos, sin documentos ni horario.</small></span></label>
+                  <label class="student-registration-type"><input type="radio" name="registrationMode" value="license-renewal"><span class="student-registration-type__check"></span><span><strong>Examen para renovación</strong><small>Solo datos, sin documentos ni horario.</small></span></label>
                   <input type="checkbox" name="additionalPractice" id="additional-practice-toggle" hidden>
                 </fieldset>
                 <div class="student-modal-section-title">

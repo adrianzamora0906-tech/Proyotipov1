@@ -161,6 +161,7 @@ class StudentFormView extends Component {
                 <option value="">Seleccionar...</option>
                 <option value="clase-b">Clase B - Automóvil</option>
                 <option value="clase-a">Clase A - Moto</option>
+                <option value="tipo-f" disabled>Tipo F</option>
               </select>
               <div class="form-error"></div>
             </div>

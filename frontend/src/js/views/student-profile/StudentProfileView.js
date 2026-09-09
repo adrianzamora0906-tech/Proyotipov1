@@ -85,7 +85,7 @@ class StudentProfileView extends Component {
               <h1>${student.firstName} ${student.lastName}</h1>
               <p>Cédula: <strong>${StringHelper.normalizeCedula(student.cedula)}</strong></p>
               <span class="badge ${isAdditionalPracticeOnly ? 'badge-info' : this.getStatusBadgeClass(student.status)}">${isAdditionalPracticeOnly ? 'Prácticas adicionales' : this.getStatusLabel(student.status)}</span>
-              ${isExamOnly ? '<span class="badge badge-info student-exam-badge">Examen pr&aacute;ctico</span>' : ''}
+              ${isExamOnly ? '<span class="badge badge-info student-exam-badge">Formaci&oacute;n intensiva</span>' : ''}
             </div>
           </div>
           <button class="btn btn-secondary" id="edit-student-btn">Editar</button>
@@ -197,7 +197,7 @@ class StudentProfileView extends Component {
                     </div>
                   ` : `
                     <div class="info-item"><span class="info-label">Curso</span><span class="info-value">${student.course || 'Sin curso asignado'}</span></div>
-                    <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${student.instructorName || schedule?.instructor || 'Sin instructor asignado'}${isExamOnly ? ' <span class="student-exam-inline">Examen</span>' : ''}</span></div>
+                    <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${student.instructorName || schedule?.instructor || 'Sin instructor asignado'}${isExamOnly ? ' <span class="student-exam-inline">Intensivo</span>' : ''}</span></div>
                   `}
                   <div class="info-item">
                     <span class="info-label">Estado</span>
@@ -383,10 +383,10 @@ class StudentProfileView extends Component {
                   </div>
                 ` : schedule ? `
                   <div class="schedule-info">
-                    ${isExamOnly ? '<div class="student-exam-schedule-heading"><span class="badge badge-info">Examen pr&aacute;ctico</span><strong>Cita programada para evaluaci&oacute;n</strong></div>' : ''}
+                    ${isExamOnly ? '<div class="student-exam-schedule-heading"><span class="badge badge-info">Formaci&oacute;n intensiva</span><strong>Jornada intensiva programada</strong></div>' : ''}
                     <div class="info-grid">
                       <div class="info-item">
-                        <span class="info-label">${isExamOnly ? 'Fecha del examen' : 'Día'}</span>
+                        <span class="info-label">${isExamOnly ? 'Fecha de formación intensiva' : 'Día'}</span>
                         <span class="info-value">${schedule.day}</span>
                       </div>
                       <div class="info-item">
@@ -1218,7 +1218,7 @@ class StudentProfileView extends Component {
           ${days.map((day, dayIndex) => `
             <div class="enrollment-calendar-heading ${day.isExamDay ? 'exam-day' : ''}" data-day-index="${dayIndex}">
               <strong>${day.name}</strong>
-              <span>${day.isExamDay ? `${day.label} · Examen` : day.label}</span>
+              <span>${day.isExamDay ? `${day.label} · Intensivo` : day.label}</span>
             </div>
           `).join('')}
           ${slots.map(slot => {

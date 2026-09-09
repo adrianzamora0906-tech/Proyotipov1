@@ -693,22 +693,11 @@ class StudentsView extends Component {
                 </div>
 
                 <div class="regular-enrollment-only schedule-workflow">
+                <input type="hidden" name="practicalMode" id="selected-practical-mode" value="classes">
                 <div class="schedule-setup-grid">
-                <section class="schedule-workflow-card" aria-labelledby="practice-type-title">
-                <div class="schedule-workflow-heading">
-                  <span class="schedule-workflow-step">1</span>
-                  <div><h4 id="practice-type-title">Tipo de pr&aacute;ctica</h4><p>Indica si realizar&aacute; el curso completo o solamente el examen.</p></div>
-                </div>
-                <div class="practical-mode-selector" role="group" aria-label="Modalidad práctica">
-                  <button type="button" class="practical-mode-option active" data-practical-mode="classes">Clases prácticas</button>
-                  <button type="button" class="practical-mode-option" data-practical-mode="exam_only">Solo examen</button>
-                  <input type="hidden" name="practicalMode" id="selected-practical-mode" value="classes">
-                </div>
-                <p class="exam-only-help" id="exam-only-help" hidden>Elige un instructor y una sola fecha. El examen no ocupa el cupo de clases del bloque.</p>
-                </section>
                 <section class="schedule-workflow-card" id="advanced-start-card" aria-labelledby="advanced-start-title">
                 <div class="schedule-workflow-heading">
-                  <span class="schedule-workflow-step">2</span>
+                  <span class="schedule-workflow-step">1</span>
                   <div><h4 id="advanced-start-title">Inicio anticipado</h4><p>Permite iniciar las pr&aacute;cticas antes de la fecha oficial del curso.</p></div>
                 </div>
                 <div class="schedule-preferences-grid">
@@ -736,8 +725,8 @@ class StudentsView extends Component {
                 </div>
                 <section class="schedule-workflow-card schedule-workflow-card--calendar" aria-labelledby="practice-schedule-title">
                 <div class="schedule-workflow-heading schedule-workflow-heading--calendar">
-                  <span class="schedule-workflow-step">3</span>
-                  <div><h4 id="practice-schedule-title">Fecha y horario</h4><p id="practice-schedule-help">Selecciona una hora disponible en el curso correspondiente.</p></div>
+                  <span class="schedule-workflow-step">2</span>
+                  <div><h4 id="practice-schedule-title">Fecha y horario</h4><p id="practice-schedule-help">Selecciona una hora disponible. Para el Curso de formación intensiva, pulsa dos veces sobre una celda.</p></div>
                 </div>
                 <div class="practical-schedule-panel">
                 <div id="student-schedule-calendar">
@@ -930,12 +919,7 @@ class StudentsView extends Component {
         tab.dataset.listenerAttached = 'true';
       }
     });
-    document.querySelectorAll('.schedule-option').forEach(option => {
-      if (!option.dataset.listenerAttached) {
-        option.addEventListener('click', () => this.handleScheduleCellClick(option));
-        option.dataset.listenerAttached = 'true';
-      }
-    });
+    document.querySelectorAll('.schedule-option').forEach(option => this.bindScheduleOptionInteraction(option));
     document.getElementById('student-schedule-calendar')?.addEventListener('click', async event => {
       const availabilityToggle = event.target.closest('[data-instructor-availability-toggle]');
       if (availabilityToggle) {
@@ -1420,7 +1404,7 @@ class StudentsView extends Component {
         data-normal-disabled="${disabled}"
         ${disabled ? 'disabled' : ''}>
         <span class="schedule-option-status ${reserved ? 'reserved' : (disabled ? 'full' : 'available')}">${reserved ? 'Reservado' : (disabled ? 'Completo' : 'Disponible')}</span>
-        ${examCount ? `<span class="schedule-option-exams">Examen ${examCount}/2</span>` : ''}
+        ${examCount ? `<span class="schedule-option-exams">Intensivo ${examCount}/2</span>` : ''}
         <span class="schedule-option-capacity">${available}/${capacity} cupos</span>
       </button>
     `;
@@ -1554,7 +1538,7 @@ class StudentsView extends Component {
           </div>
         ` : ''}
         <div class="schedule-instructor-preview" aria-live="polite" hidden></div>
-        <div class="schedule-rotation-message" hidden>Puedes variar el horario por día y tomar dos bloques consecutivos. Debes completar <strong>${Number(cycle.durationBusinessDays) || days.length} clases en total</strong>, con un máximo de cuatro días con dos bloques cada uno. <span class="schedule-selection-count">0/${Number(cycle.durationBusinessDays) || days.length} seleccionadas</span></div>
+        <div class="schedule-rotation-message" hidden>Puedes variar el horario por día y tomar dos bloques consecutivos. Para guardar ahora selecciona mínimo <strong>${Math.ceil((Number(cycle.durationBusinessDays) || days.length) / 2)} clases</strong>; podrás completar hasta ${Number(cycle.durationBusinessDays) || days.length}. Se permiten máximo cuatro días con horario doble. <span class="schedule-selection-count">0/${Number(cycle.durationBusinessDays) || days.length} seleccionadas</span></div>
         <nav class="calendar-window-controls" aria-label="Navegar entre los días del curso">
           <button type="button" class="calendar-window-btn" data-direction="-1" aria-label="Mostrar días anteriores">
             <span aria-hidden="true">&#8592;</span><span>D&iacute;as anteriores</span>
@@ -1574,7 +1558,7 @@ class StudentsView extends Component {
               <div class="enrollment-calendar-heading ${hasAssignedExam ? 'exam-day' : ''}" data-day-index="${dayIndex}">
                 <strong>${day.name}</strong>
                 <span>${day.label}</span>
-                ${hasAssignedExam ? '<small class="calendar-exam-badge">Examen</small>' : ''}
+                ${hasAssignedExam ? '<small class="calendar-exam-badge">Intensivo</small>' : ''}
               </div>
             `}).join('')}
             ${times.map(time => `
@@ -1869,7 +1853,7 @@ class StudentsView extends Component {
     const form = document.getElementById('student-modal-form');
     if (form?.elements.scheduleId) form.elements.scheduleId.value = '';
     if (form?.elements.schedulePlan) form.elements.schedulePlan.value = '';
-    host.querySelectorAll('.schedule-option').forEach(option => option.addEventListener('click', () => this.handleScheduleCellClick(option)));
+    host.querySelectorAll('.schedule-option').forEach(option => this.bindScheduleOptionInteraction(option));
     // Si se actualizó únicamente la tabla, estos controles siguen enlazados.
     // Solo se vuelven a enlazar si la estructura del calendario cambió.
     if (!canUpdateOnlyGrids) host.querySelectorAll('.enrollment-modality-button[data-modality]').forEach(button => button.addEventListener('click', () => {
@@ -2036,8 +2020,12 @@ class StudentsView extends Component {
     try {
       const response = await ApiService.getBranchCourses(branchId);
       const courses = response.data || [];
-      courseSelect.innerHTML = courses.length ? '<option value="">Seleccionar curso...</option>' + courses.map(course => `<option value="${course.id}" data-price="${Number(course.price || 0)}" data-course-type="${/moto|motocicleta|clase a/i.test(course.name) ? 'moto' : /auto|automóvil|clase b/i.test(course.name) ? 'carro' : ''}">${course.name}</option>`).join('') : '<option value="">Esta sucursal no tiene cursos habilitados</option>';
-      courseSelect.disabled = !courses.length;
+      const courseOptions = courses.map(course => `<option value="${course.id}" data-price="${Number(course.price || 0)}" data-course-type="${/moto|motocicleta|clase a/i.test(course.name) ? 'moto' : /auto|automóvil|clase b/i.test(course.name) ? 'carro' : /tipo f/i.test(course.name) ? 'tipo-f' : ''}">${course.name}</option>`).join('');
+      const typeFOption = courses.some(course => /tipo f/i.test(course.name))
+        ? ''
+        : '<option value="tipo-f" data-price="0" data-course-type="tipo-f" disabled>Tipo F</option>';
+      courseSelect.innerHTML = '<option value="">Seleccionar curso...</option>' + courseOptions + typeFOption;
+      courseSelect.disabled = false;
       this.updateRegistrationPaymentSummary();
     } catch (error) { courseSelect.innerHTML='<option value="">No se pudieron cargar los cursos</option>'; courseSelect.disabled=true; }
   }
@@ -2490,6 +2478,38 @@ class StudentsView extends Component {
     if (error) error.textContent = '';
   }
 
+  bindScheduleOptionInteraction(option) {
+    if (!option || option.dataset.listenerAttached) return;
+    option.addEventListener('click', () => this.handleScheduleCellClick(option));
+    option.addEventListener('dblclick', event => {
+      event.preventDefault();
+      this.toggleExamOnlyCell(option);
+    });
+    option.addEventListener('touchend', event => {
+      const key = `${option.dataset.date}:${option.dataset.time}`;
+      const now = Date.now();
+      if (this.lastScheduleTap?.key === key && now - this.lastScheduleTap.time < 450) {
+        event.preventDefault();
+        this.lastScheduleTap = null;
+        this.toggleExamOnlyCell(option);
+        return;
+      }
+      this.lastScheduleTap = { key, time: now };
+    }, { passive: false });
+    option.dataset.listenerAttached = 'true';
+  }
+
+  toggleExamOnlyCell(option) {
+    const isSelectedExam = document.getElementById('selected-practical-mode')?.value === 'exam_only'
+      && option.classList.contains('selected');
+    if (isSelectedExam) {
+      this.setPracticalMode('classes');
+      return;
+    }
+    this.setPracticalMode('exam_only');
+    this.handleScheduleCellClick(option);
+  }
+
   setPracticalMode(mode) {
     const examOnly = mode === 'exam_only';
     const input = document.getElementById('selected-practical-mode');
@@ -2501,15 +2521,15 @@ class StudentsView extends Component {
     if (instructor) instructor.required = examOnly;
     const instructorLabel = document.getElementById('preferred-instructor-label');
     if (instructorLabel) instructorLabel.innerHTML = examOnly
-      ? 'Instructor del examen <span aria-hidden="true">*</span>'
+      ? 'Instructor de formación intensiva <span aria-hidden="true">*</span>'
       : 'Instructor solicitado <small>(opcional)</small>';
     const instructorHelp = document.getElementById('practice-instructor-help');
     if (instructorHelp) instructorHelp.textContent = examOnly
-      ? 'Para el examen es obligatorio seleccionar quién lo evaluará.'
+      ? 'Para la formación intensiva es obligatorio seleccionar el instructor.'
       : 'Puedes elegirlo o dejar que el sistema lo asigne.';
     const scheduleHelp = document.getElementById('practice-schedule-help');
     if (scheduleHelp) scheduleHelp.textContent = examOnly
-      ? 'Selecciona una sola celda, incluso si el bloque ya tiene una clase.'
+      ? 'Selecciona una sola celda para la formación intensiva, incluso si el bloque ya tiene una clase.'
       : 'Selecciona una hora disponible en el curso correspondiente.';
     document.querySelectorAll('.schedule-option').forEach(option => {
       option.disabled = !examOnly && option.dataset.normalDisabled === 'true';
@@ -2679,7 +2699,8 @@ class StudentsView extends Component {
       const requiredClasses = document.getElementById('selected-practical-mode')?.value === 'exam_only'
         ? 1
         : Number(calendar.dataset.requiredClasses || calendar.dataset.dayCount || 8);
-      count.textContent = `${plan.length}/${requiredClasses} seleccionadas`;
+      const minimumClasses = this.isRotationEnabled(calendar) ? Math.ceil(requiredClasses / 2) : requiredClasses;
+      count.textContent = `${plan.length}/${requiredClasses} seleccionadas · mínimo ${minimumClasses}`;
     }
     this.updateReferredInstructorBlockPreview(calendar);
     this.updateInstructorAssignmentPreview(calendar, plan);
@@ -2697,7 +2718,7 @@ class StudentsView extends Component {
     let title = 'Aún no has elegido un horario';
     if (plan.length) {
       title = examOnly
-        ? `Examen seleccionado · ${plan[0]?.date || ''} · ${plan[0]?.time || ''}`
+        ? `Curso de formación intensiva · ${plan[0]?.date || ''} · ${plan[0]?.time || ''}`
         : `${plan.length} ${plan.length === 1 ? 'clase seleccionada' : 'clases seleccionadas'}${plan[0]?.time ? ` · ${plan[0].time}` : ''}`;
     }
     summary.classList.toggle('is-empty', plan.length === 0);
@@ -2963,11 +2984,18 @@ class StudentsView extends Component {
       .find(calendar => calendar.style.display !== 'none');
     const examOnly = formData.get('practicalMode') === 'exam_only';
     const requiredClasses = examOnly ? 1 : Number(activeCalendar?.dataset.requiredClasses || activeCalendar?.dataset.dayCount || 8);
-    if (schedulePlan.selections.length !== requiredClasses) {
+    const rotationEnabled = Boolean(schedulePlan.rotation) && !examOnly;
+    const minimumClasses = rotationEnabled ? Math.ceil(requiredClasses / 2) : requiredClasses;
+    const invalidSelectionCount = examOnly
+      ? schedulePlan.selections.length !== 1
+      : schedulePlan.selections.length < minimumClasses || schedulePlan.selections.length > requiredClasses;
+    if (invalidSelectionCount) {
       const scheduleError = document.getElementById('schedule-error');
       if (scheduleError) scheduleError.textContent = examOnly
-        ? 'Para solo examen debes seleccionar una única fecha y horario.'
-        : `Debes seleccionar exactamente ${requiredClasses} clases prácticas en total.`;
+        ? 'Para formación intensiva debes seleccionar una única fecha y horario.'
+        : rotationEnabled
+          ? `En horario rotativo debes seleccionar entre ${minimumClasses} y ${requiredClasses} clases prácticas.`
+          : `Debes seleccionar exactamente ${requiredClasses} clases prácticas en total.`;
       this.goToModalStep(3);
       return;
     }
@@ -2982,7 +3010,7 @@ class StudentsView extends Component {
     const availableSchedules = await this.getSchedulesForModal(selectedBranchId, preferredInstructorId, practicalStartDate || null);
     if (examOnly && !preferredInstructorId) {
       const scheduleError = document.getElementById('schedule-error');
-      if (scheduleError) scheduleError.textContent = 'Selecciona el instructor que tomará el examen.';
+      if (scheduleError) scheduleError.textContent = 'Selecciona el instructor de la formación intensiva.';
       this.goToModalStep(3);
       return;
     }

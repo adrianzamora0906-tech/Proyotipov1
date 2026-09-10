@@ -647,9 +647,15 @@ class StudentsView extends Component {
                 </div>
 
                 <div class="registration-document-options regular-enrollment-only">
-                  <label class="registration-document-field">
+                  <label class="registration-document-field registration-file-dropzone" data-file-dropzone>
                     <span class="form-label">Cédula y carnet de la Cruz Roja en una sola hoja <small>(opcional)</small></span>
-                    <input type="file" class="form-input" name="registrationDocumentsPdfFile" accept=".pdf,application/pdf">
+                    <span class="registration-dropzone-content">
+                      <span class="registration-dropzone-icon" aria-hidden="true">⇧</span>
+                      <strong>Arrastra y suelta el PDF aquí</strong>
+                      <small>o haz clic para seleccionar el archivo</small>
+                      <span class="registration-dropzone-file" data-file-name>Ningún archivo seleccionado</span>
+                    </span>
+                    <input type="file" name="registrationDocumentsPdfFile" accept=".pdf,application/pdf">
                   </label>
                   <span class="registration-document-divider">o</span>
                   <button type="button" class="btn btn-primary" id="mobile-registration-package-capture">
@@ -661,9 +667,15 @@ class StudentsView extends Component {
                 </div>
                 <small class="registration-document-saved-status" id="registration-documents-status"></small>
 
-                <label class="registration-document-field registration-certificate-field regular-enrollment-only">
+                <label class="registration-document-field registration-certificate-field registration-file-dropzone regular-enrollment-only" data-file-dropzone>
                   <span class="form-label">Certificado de estudio <small>(opcional)</small></span>
-                  <input type="file" class="form-input" name="certificadoBachillerFile" accept=".pdf,.jpg,.jpeg,.png">
+                  <span class="registration-dropzone-content">
+                    <span class="registration-dropzone-icon" aria-hidden="true">⇧</span>
+                    <strong>Arrastra y suelta el certificado aquí</strong>
+                    <small>PDF, JPG o PNG · también puedes hacer clic</small>
+                    <span class="registration-dropzone-file" data-file-name>Ningún archivo seleccionado</span>
+                  </span>
+                  <input type="file" name="certificadoBachillerFile" accept=".pdf,.jpg,.jpeg,.png">
                   <small class="registration-certificate-help">
                     Si es titulo de bachiller, puede generarlo
                     <a href="https://servicios.educacion.gob.ec/titulacion25-web/faces/paginas/consulta-titulos-refrendados.xhtml" target="_blank" rel="noopener noreferrer">aqui</a>.
@@ -845,12 +857,61 @@ class StudentsView extends Component {
     `;
   }
 
+  bindRegistrationFileDropzones(form) {
+    form?.querySelectorAll('[data-file-dropzone]').forEach(dropzone => {
+      const input = dropzone.querySelector('input[type="file"]');
+      const fileName = dropzone.querySelector('[data-file-name]');
+      if (!input || dropzone.dataset.dropzoneReady === 'true') return;
+
+      const updateFileName = () => {
+        const file = input.files?.[0];
+        if (fileName) fileName.textContent = file?.name || 'Ningún archivo seleccionado';
+        dropzone.classList.toggle('has-file', Boolean(file));
+      };
+      const acceptsFile = file => {
+        const accepted = String(input.accept || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+        if (!accepted.length) return true;
+        const name = file.name.toLowerCase();
+        const type = String(file.type || '').toLowerCase();
+        return accepted.some(value => value.startsWith('.') ? name.endsWith(value) : type === value);
+      };
+
+      ['dragenter', 'dragover'].forEach(type => dropzone.addEventListener(type, event => {
+        event.preventDefault();
+        event.stopPropagation();
+        dropzone.classList.add('is-dragging');
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      }));
+      ['dragleave', 'drop'].forEach(type => dropzone.addEventListener(type, event => {
+        event.preventDefault();
+        event.stopPropagation();
+        dropzone.classList.remove('is-dragging');
+      }));
+      dropzone.addEventListener('drop', event => {
+        const file = event.dataTransfer?.files?.[0];
+        if (!file) return;
+        if (!acceptsFile(file)) {
+          this.showModalAlert('error', 'El tipo de archivo arrastrado no es válido para este documento.');
+          return;
+        }
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        input.files = transfer.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      input.addEventListener('change', updateFileName);
+      updateFileName();
+      dropzone.dataset.dropzoneReady = 'true';
+    });
+  }
+
   async mountStudentModalEvents() {
     const form = document.getElementById('student-modal-form');
     const provinceSelect = document.getElementById('modal-province-select');
     const citySelect = document.getElementById('modal-city-select');
     const branchSelect = document.getElementById('modal-branch-select');
     this.prepareScheduleFirstLayout();
+    this.bindRegistrationFileDropzones(form);
 
     // Se conecta antes de cualquier await para impedir que el navegador haga
     // un envío HTML tradicional y cierre el modal si una carga inicial tarda.

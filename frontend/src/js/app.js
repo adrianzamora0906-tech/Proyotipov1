@@ -12,7 +12,7 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=perfil-profesor-teoria-20260907";
 import DashboardView from "./views/dashboard/DashboardView.js?v=consultas-optimizadas-20260811";
-import StudentsView from "./views/students/StudentsView.js?v=ocultar-cursos-llenos-20260910";
+import StudentsView from "./views/students/StudentsView.js?v=arrastrar-documentos-20260910";
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=inicio-clases-expediente-20260910";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=proximo-curso-disponible-20260825";
@@ -50,7 +50,7 @@ import ManagerFinanceView from "./views/manager/ManagerFinanceView.js";
 import ManagerAcademicView from "./views/manager/ManagerAcademicView.js";
 import ManagerAuditView from "./views/manager/ManagerAuditView.js?v=auditoria-responsables-20260812";
 import ManagerEnrollmentMonitorView from "./views/manager/ManagerEnrollmentMonitorView.js?v=monitor-inscripciones-20260824";
-import StudentPortalView from "./views/student-portal/StudentPortalView.js?v=cambio-clave-obligatorio-20260909";
+import StudentPortalView from "./views/student-portal/StudentPortalView.js?v=inicio-teoria-20260910";
 
 class App {
   constructor() {

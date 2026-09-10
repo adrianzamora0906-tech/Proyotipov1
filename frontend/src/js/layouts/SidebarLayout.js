@@ -4,6 +4,7 @@
  */
 
 import { authService } from '../core/auth/AuthService.js';
+import ApiService from '../core/api/apiService.js';
 import InstructorTheoryService from '../services/instructorTheoryService.js';
 
 class SidebarLayout {
@@ -419,6 +420,78 @@ class SidebarLayout {
       this.initializeEventListeners();
     }
     this.updateNotificationBadge();
+    this.startInstructorScheduleChangePolling();
+  }
+
+  static startInstructorScheduleChangePolling() {
+    const user = authService.getCurrentUser();
+    const isInstructor = String(user?.role || '').trim().toLowerCase() === 'instructor';
+    if (!isInstructor) {
+      if (this._scheduleChangePollId) clearInterval(this._scheduleChangePollId);
+      this._scheduleChangePollId = null;
+      return;
+    }
+    this.pollInstructorScheduleChanges();
+    if (!this._scheduleChangePollId) {
+      this._scheduleChangePollId = setInterval(() => this.pollInstructorScheduleChanges(), 5000);
+    }
+  }
+
+  static async pollInstructorScheduleChanges() {
+    if (this._scheduleChangePolling || document.querySelector('.instructor-schedule-change-overlay')) return;
+    this._scheduleChangePolling = true;
+    try {
+      const response = await ApiService.getInstructorScheduleChangeNotifications();
+      const notifications = response?.success && Array.isArray(response.data) ? response.data : [];
+      if (notifications.length) this.showInstructorScheduleChangeModal(notifications[0]);
+    } catch (error) {
+      console.warn('No se pudieron consultar los cambios de horario del instructor:', error.message);
+    } finally {
+      this._scheduleChangePolling = false;
+    }
+  }
+
+  static showInstructorScheduleChangeModal(notification) {
+    if (!notification?.id || document.querySelector('.instructor-schedule-change-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay active instructor-schedule-change-overlay';
+    overlay.innerHTML = `
+      <div class="modal instructor-schedule-change-modal" role="dialog" aria-modal="true" aria-labelledby="instructor-schedule-change-title">
+        <div class="instructor-schedule-change-icon" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line><path d="m9 16 2 2 4-4"></path></svg>
+        </div>
+        <div class="instructor-schedule-change-content">
+          <span class="instructor-schedule-change-eyebrow">Actualización de agenda</span>
+          <h3 id="instructor-schedule-change-title"></h3>
+          <p class="instructor-schedule-change-message"></p>
+        </div>
+        <div class="modal-footer instructor-schedule-change-actions">
+          <button type="button" class="btn btn-primary" data-acknowledge-schedule-change>Entendido</button>
+        </div>
+      </div>`;
+    overlay.querySelector('#instructor-schedule-change-title').textContent = notification.title || 'Cambio de horario';
+    overlay.querySelector('.instructor-schedule-change-message').textContent = notification.message || 'Se realizó un cambio en tu agenda.';
+    const acknowledge = async () => {
+      const button = overlay.querySelector('[data-acknowledge-schedule-change]');
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Confirmando...';
+      }
+      try {
+        const response = await ApiService.markNotificationAsRead(notification.id);
+        if (!response?.success) throw new Error(response?.error || 'No se pudo confirmar la notificación.');
+        overlay.remove();
+        this.pollInstructorScheduleChanges();
+      } catch (_error) {
+        if (button) {
+          button.disabled = false;
+          button.textContent = 'Entendido';
+        }
+      }
+    };
+    overlay.querySelector('[data-acknowledge-schedule-change]').addEventListener('click', acknowledge);
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-acknowledge-schedule-change]').focus();
   }
 
   static updateTime() {

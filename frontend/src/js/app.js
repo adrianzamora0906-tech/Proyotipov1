@@ -12,8 +12,8 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=perfil-profesor-teoria-20260907";
 import DashboardView from "./views/dashboard/DashboardView.js?v=consultas-optimizadas-20260811";
-import StudentsView from "./views/students/StudentsView.js?v=horario-solo-disponibles-20260910";
-import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=voucher-pago-20260824";
+import StudentsView from "./views/students/StudentsView.js?v=credenciales-copiar-cerrar-20260910";
+import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=regresar-fuera-tarjeta-20260910";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=proximo-curso-disponible-20260825";
 import NotificationsView from "./views/notifications/NotificationsView.js";
@@ -34,7 +34,7 @@ import InstructorEvaluationsView from "./views/instructor/InstructorEvaluationsV
 import InstructorIncidentsView from "./views/instructor/InstructorIncidentsView.js";
 import InstructorProfileView from "./views/instructor/InstructorProfileView.js";
 import MobileDocumentUploadView from "./views/mobile-upload/MobileDocumentUploadView.js?v=certificado-orientacion-20260824";
-import SidebarLayout from "./layouts/SidebarLayout.js?v=menu-perfil-unico-20260907";
+import SidebarLayout from "./layouts/SidebarLayout.js?v=aviso-cambio-horario-20260910";
 import AdminDashboardView from "./views/admin/AdminDashboardView.js";
 import AdminSecurityView from "./views/admin/AdminSecurityView.js?v=tipo-instructor-20260819";
 import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js";

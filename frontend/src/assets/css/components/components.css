@@ -390,6 +390,59 @@
   animation: fadeIn 0.3s ease;
 }
 
+.profile-schedule-observation {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 1rem;
+  color: #344054;
+  font-weight: 600;
+}
+
+.profile-schedule-observation strong { color: #ef4444; }
+.profile-schedule-observation textarea { min-height: 86px; resize: vertical; }
+.profile-schedule-observation small { color: #667085; font-weight: 400; }
+
+.instructor-schedule-change-modal {
+  width: min(520px, calc(100vw - 2rem));
+  padding: 1.75rem;
+  text-align: center;
+}
+
+.instructor-schedule-change-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 1rem;
+  border-radius: 18px;
+  color: #4f46e5;
+  background: #eef2ff;
+}
+
+.instructor-schedule-change-eyebrow {
+  color: #4f46e5;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.instructor-schedule-change-content h3 { margin: 0.45rem 0 0.75rem; }
+.instructor-schedule-change-message {
+  margin: 0;
+  color: #475467;
+  line-height: 1.65;
+  white-space: pre-line;
+}
+
+.instructor-schedule-change-actions {
+  justify-content: center;
+  margin: 1.5rem -1.75rem -1.75rem;
+}
+
+.instructor-schedule-change-actions .btn { min-width: 150px; }
+
 /* Un modal abierto desde otro modal debe vivir en una capa superior. */
 .modal-overlay.modal-overlay-secondary {
   z-index: 13000;

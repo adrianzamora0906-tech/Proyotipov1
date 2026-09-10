@@ -6,6 +6,11 @@
   gap: 2rem;
 }
 
+.profile-back-row {
+  display: flex;
+  margin-bottom: -1rem;
+}
+
 .profile-header {
   background-color: #fff;
   border: 1px solid var(--gray-200);
@@ -21,6 +26,17 @@
   display: flex;
   align-items: center;
   gap: 1.5rem;
+}
+
+.profile-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.profile-back-btn span {
+  margin-right: 0.25rem;
+  font-size: 1.05rem;
 }
 
 .profile-avatar {
@@ -527,6 +543,18 @@
 
   .profile-header-content {
     flex-direction: column;
+  }
+
+  .profile-header-actions {
+    width: auto;
+  }
+
+  .profile-header-actions .btn {
+    min-width: 120px;
+  }
+
+  .profile-back-row .btn {
+    width: 100%;
   }
 
   .tabs {

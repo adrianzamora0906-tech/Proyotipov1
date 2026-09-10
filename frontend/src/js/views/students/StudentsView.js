@@ -3594,21 +3594,41 @@ class StudentsView extends Component {
     const instructorSummary = student.assignedInstructor?.name
       ? `<div class="student-registration-success__notice"><strong>Instructor asignado</strong><small>${escapeHtml(student.assignedInstructor.name)}</small></div>`
       : '';
-    layer.innerHTML = `<section class="branch-modal student-registration-success" role="dialog" aria-modal="true" aria-labelledby="student-access-title"><div class="student-registration-success__icon">✓</div><div class="student-registration-success__title"><span>Registro completado</span><h2 id="student-access-title">Estudiante y acceso creados</h2><p>El estudiante, su horario, instructor y cuenta fueron registrados correctamente.</p></div>${instructorSummary}<div class="student-registration-success__notice"><strong>Credenciales de ingreso</strong><small>Entrégalas al estudiante. La contraseña deberá cambiarse al ingresar por primera vez.</small></div><div class="student-access-credentials"><label>Usuario<strong>${escapeHtml(student.access.username)}</strong></label><label>Contraseña temporal<strong>${escapeHtml(student.access.temporaryPassword)}</strong></label></div><p class="student-copy-status" id="student-copy-status" aria-live="polite"></p><div class="student-registration-success__actions"><button type="button" class="btn btn-light" id="copy-student-access">Copiar credenciales</button><button type="button" class="btn btn-primary" id="accept-student-access">Abrir expediente</button></div></section>`;
+    layer.innerHTML = `<section class="branch-modal student-registration-success" role="dialog" aria-modal="true" aria-labelledby="student-access-title"><button type="button" class="student-registration-success__close" id="close-student-access" aria-label="Cerrar modal">×</button><div class="student-registration-success__icon">✓</div><div class="student-registration-success__title"><span>Registro completado</span><h2 id="student-access-title">Estudiante y acceso creados</h2><p>El estudiante, su horario, instructor y cuenta fueron registrados correctamente.</p></div>${instructorSummary}<div class="student-registration-success__notice"><strong>Credenciales de ingreso</strong><small>Entrégalas al estudiante. La contraseña deberá cambiarse al ingresar por primera vez.</small></div><div class="student-access-credentials"><label>Usuario<strong>${escapeHtml(student.access.username)}</strong></label><label>Contraseña temporal<strong>${escapeHtml(student.access.temporaryPassword)}</strong></label></div><p class="student-copy-status" id="student-copy-status" aria-live="polite"></p><div class="student-registration-success__actions"><button type="button" class="btn btn-light" id="copy-student-access">Copiar credenciales</button><button type="button" class="btn btn-primary" id="accept-student-access">Abrir expediente</button></div></section>`;
     document.body.appendChild(layer);
     document.body.style.overflow = 'hidden';
+    const closeAccessModal = () => {
+      layer.remove();
+      document.body.style.overflow = '';
+    };
+    layer.querySelector('#close-student-access').onclick = closeAccessModal;
     layer.querySelector('#copy-student-access').onclick = async event => {
       const text = `Usuario: ${student.access.username}\nContraseña temporal: ${student.access.temporaryPassword}`;
       const status = layer.querySelector('#student-copy-status');
       try {
-        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
-        else {
-          const helper=document.createElement('textarea');helper.value=text;helper.style.position='fixed';helper.style.opacity='0';document.body.appendChild(helper);helper.select();document.execCommand('copy');helper.remove();
+        let copied = false;
+        if (navigator.clipboard?.writeText && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          copied = true;
+        } else {
+          const helper = document.createElement('textarea');
+          helper.value = text;
+          helper.setAttribute('readonly', '');
+          helper.style.position = 'fixed';
+          helper.style.left = '-9999px';
+          helper.style.top = '0';
+          document.body.appendChild(helper);
+          helper.focus();
+          helper.select();
+          helper.setSelectionRange(0, helper.value.length);
+          copied = document.execCommand('copy');
+          helper.remove();
         }
+        if (!copied) throw new Error('El navegador no permitió copiar las credenciales.');
         event.currentTarget.textContent = '✓ Credenciales copiadas';
         status.textContent = 'Listas para enviarlas al estudiante.';
       } catch {
-        status.textContent = 'No se pudieron copiar automáticamente. Puedes seleccionar el usuario y la contraseña.';
+        status.textContent = 'No se pudieron copiar automáticamente. Mantén presionadas las credenciales para copiarlas manualmente.';
       }
     };
     layer.querySelector('#accept-student-access').onclick = () => {

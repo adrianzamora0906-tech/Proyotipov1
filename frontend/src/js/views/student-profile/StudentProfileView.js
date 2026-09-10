@@ -77,6 +77,11 @@ class StudentProfileView extends Component {
 
     const profileContent = `
       <div class="student-profile">
+        <div class="profile-back-row">
+          <button type="button" class="btn btn-secondary profile-back-btn" data-route="/students">
+            <span aria-hidden="true">←</span> Regresar a estudiantes
+          </button>
+        </div>
         <!-- Header -->
         <div class="profile-header">
           <div class="profile-header-content">
@@ -88,7 +93,9 @@ class StudentProfileView extends Component {
               ${isExamOnly ? '<span class="badge badge-info student-exam-badge">Formaci&oacute;n intensiva</span>' : ''}
             </div>
           </div>
-          <button class="btn btn-secondary" id="edit-student-btn">Editar</button>
+          <div class="profile-header-actions">
+            <button class="btn btn-secondary" id="edit-student-btn">Editar</button>
+          </div>
         </div>
 
         <!-- Tabs -->
@@ -1177,16 +1184,22 @@ class StudentProfileView extends Component {
     modal.innerHTML = `
       <div class="modal profile-schedule-modal">
         <div class="modal-header">
-          <h3 class="modal-title">Cambiar horario de un día</h3>
+          <h3 class="modal-title">Cambiar horarios</h3>
           <button class="modal-close" data-close-modal>×</button>
         </div>
         <div class="modal-body">
-          ${cycle ? this.renderProfileScheduleCalendar(cycle) : `<p>${result.error || 'El estudiante no tiene un curso vigente con horario asignado.'}</p>`}
+          ${cycle ? `${this.renderProfileScheduleCalendar(cycle)}
+            <label class="profile-schedule-observation" for="profile-schedule-observation">
+              <span>Observación del cambio <strong>*</strong></span>
+              <textarea id="profile-schedule-observation" class="form-textarea" maxlength="1000" rows="3"
+                placeholder="Escribe el motivo del cambio de horario..."></textarea>
+              <small>Esta observación se guardará en el historial y se mostrará al instructor.</small>
+            </label>` : `<p>${result.error || 'El estudiante no tiene un curso vigente con horario asignado.'}</p>`}
           <div class="form-error" id="profile-schedule-error"></div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" data-close-modal>Cerrar</button>
-          <button class="btn btn-primary" id="confirm-profile-schedule" ${cycle ? '' : 'disabled'}>Guardar cambio</button>
+          <button class="btn btn-primary" id="confirm-profile-schedule" ${cycle ? '' : 'disabled'}>Guardar cambios</button>
         </div>
       </div>
     `;
@@ -1195,8 +1208,13 @@ class StudentProfileView extends Component {
   }
 
   renderProfileScheduleCalendar(cycle) {
-    const days = this.getProfileBusinessDays(cycle.startDate, cycle.endDate);
-    const slots = cycle.slots || [];
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const days = this.getProfileBusinessDays(cycle.startDate, cycle.endDate)
+      .filter(day => day.date >= today);
+    const slots = [...(cycle.slots || [])]
+      .sort((first, second) => String(first.startTime || '').localeCompare(String(second.startTime || '')));
+    const instructorName = (cycle.currentAssignments || []).find(item => item.instructorName)?.instructorName || '';
     return `
       <div class="enrollment-calendar" data-course="${cycle.vehicleType}" data-cycle-id="${cycle.id}" data-day-window-start="0" data-day-count="${days.length}">
         <div class="enrollment-calendar-head">
@@ -1212,7 +1230,7 @@ class StudentProfileView extends Component {
             </div>
           </div>
         </div>
-        <div class="schedule-rotation-message">Selecciona un nuevo horario en un solo día. Los demás días no cambiarán.</div>
+        <div class="schedule-rotation-message">Puedes cambiar uno, varios o todos los d&iacute;as siguientes. El instructor se mantendr&aacute;${instructorName ? `: <strong>${instructorName}</strong>` : ''}.</div>
         <div class="enrollment-calendar-grid" style="--cycle-count: ${Math.min(days.length, 5)};">
           <div class="enrollment-calendar-heading">Hora</div>
           ${days.map((day, dayIndex) => `
@@ -1280,27 +1298,36 @@ class StudentProfileView extends Component {
       const button = event.currentTarget;
       const calendar = modal.querySelector('.enrollment-calendar');
       const selections = this.getProfileScheduleSelections(calendar);
+      const observationField = modal.querySelector('#profile-schedule-observation');
+      const observation = observationField?.value.trim() || '';
       const error = modal.querySelector('#profile-schedule-error');
       if (error) error.textContent = '';
       if (!selections.length) {
         if (error) error.textContent = 'Debes seleccionar un horario disponible.';
         return;
       }
+      if (!observation) {
+        if (error) error.textContent = 'Debes escribir una observación para informar al instructor.';
+        observationField?.focus();
+        return;
+      }
       try {
         button.disabled = true;
         button.textContent = 'Guardando...';
-        const selection = selections[0];
         const response = await ApiService.changeStudentScheduleDay({
           studentId,
-          cycleId: selection.cycleId,
-          date: selection.date,
-          time: selection.time,
+          cycleId: selections[0].cycleId,
+          changes: selections.map(selection => ({
+            date: selection.date,
+            time: selection.time,
+          })),
+          observation,
         });
         if (!response.success) throw new Error(response.error || 'No se pudo cambiar el horario.');
         this.closeProfileModal(true);
       } catch (error) {
         button.disabled = false;
-        button.textContent = 'Guardar cambio';
+        button.textContent = 'Guardar cambios';
         if (error) modal.querySelector('#profile-schedule-error').textContent = error.message || 'No se pudo cambiar el horario.';
       }
     });
@@ -1311,7 +1338,12 @@ class StudentProfileView extends Component {
     const calendar = option.closest('.enrollment-calendar');
     const error = modal.querySelector('#profile-schedule-error');
     if (error) error.textContent = '';
-    calendar.querySelectorAll('.schedule-option.selected').forEach(cell => cell.classList.remove('selected'));
+    if (option.classList.contains('selected')) {
+      option.classList.remove('selected');
+      return;
+    }
+    calendar.querySelectorAll(`.schedule-option.selected[data-date="${option.dataset.date}"]`)
+      .forEach(cell => cell.classList.remove('selected'));
     option.classList.add('selected');
   }
 

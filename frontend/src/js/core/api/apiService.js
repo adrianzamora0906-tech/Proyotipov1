@@ -296,6 +296,10 @@ class ApiService {
     return apiClient.get('/notifications/unread');
   }
 
+  static async getInstructorScheduleChangeNotifications() {
+    return apiClient.get('/notifications/schedule-changes/unread');
+  }
+
   static async markNotificationAsRead(id) {
     return apiClient.put(`/notifications/${id}/read`);
   }

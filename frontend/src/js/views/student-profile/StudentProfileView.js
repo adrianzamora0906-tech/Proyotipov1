@@ -69,6 +69,15 @@ class StudentProfileView extends Component {
     const canProcessPayments = authService.can('PAYMENT_CREATE');
     const canVoidPayments = authService.can('PAYMENT_VOID');
     const activeEnrollment = (student.enrollments || []).find(enrollment => enrollment.status === 'activo') || (student.enrollments || [])[0] || null;
+    const classStartDate = activeEnrollment?.practical_start_date
+      || activeEnrollment?.practicalStartDate
+      || student.assignment_start_date
+      || student.assignmentStartDate
+      || schedule?.startDate
+      || null;
+    const classStartDateLabel = classStartDate
+      ? DateHelper.format(`${String(classStartDate).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY')
+      : 'Sin fecha asignada';
     const isExamOnly = schedule?.type === 'exam_only' || schedule?.appointmentType === 'EXAM_ONLY';
     const isAdditionalPracticeOnly = student.registrationType === 'ADDITIONAL_PRACTICE'
       || ((student.additionalPractices || []).length > 0 && !(student.enrollments || []).length);
@@ -205,6 +214,7 @@ class StudentProfileView extends Component {
                   ` : `
                     <div class="info-item"><span class="info-label">Curso</span><span class="info-value">${student.course || 'Sin curso asignado'}</span></div>
                     <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${student.instructorName || schedule?.instructor || 'Sin instructor asignado'}${isExamOnly ? ' <span class="student-exam-inline">Intensivo</span>' : ''}</span></div>
+                    <div class="info-item"><span class="info-label">Inicio de clases</span><span class="info-value">${classStartDateLabel}</span></div>
                   `}
                   <div class="info-item">
                     <span class="info-label">Estado</span>

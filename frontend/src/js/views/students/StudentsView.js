@@ -1485,10 +1485,15 @@ class StudentsView extends Component {
   renderCourseCalendar(courseKey, schedules, modality = 'normal') {
     const title = courseKey === 'moto' ? 'Moto' : 'Automovil';
     schedules = schedules.filter(schedule => (schedule.modality || 'normal') === modality);
+    const availableCycleKeys = new Set(schedules
+      .filter(schedule => Object.values(schedule.availabilityByDate || {})
+        .some(availability => Number(availability?.available || 0) > 0))
+      .map(schedule => schedule.cycleId || schedule.day));
+    schedules = schedules.filter(schedule => availableCycleKeys.has(schedule.cycleId || schedule.day));
     if (!schedules.length) {
       return `
         <div class="enrollment-calendar" data-course="${courseKey}" data-modality="${modality}" style="display: none;">
-          <div class="schedule-empty">No hay un curso ${modality} próximo de ${title.toLowerCase()} para inscripción.</div>
+          <div class="schedule-empty">No hay un curso ${modality} de ${title.toLowerCase()} con cupos disponibles.</div>
         </div>
       `;
     }
@@ -1506,6 +1511,8 @@ class StudentsView extends Component {
           endDate: schedule.endDate,
           officialStartDate: schedule.officialStartDate,
           officialEndDate: schedule.officialEndDate,
+          enrollmentDeadline: schedule.enrollmentDeadline,
+          enrollmentStarted: schedule.enrollmentStarted,
           practicalStartAdvanced: schedule.practicalStartAdvanced,
           durationBusinessDays: schedule.durationBusinessDays,
           instructors: schedule.instructors || [],
@@ -1560,6 +1567,7 @@ class StudentsView extends Component {
             <strong>${title} · ${modality === 'intensivo' ? 'Intensivo' : 'Normal'} · ${cycle.detail || ''}</strong>
             <span>${cycle.practicalStartAdvanced ? 'Pr&aacute;cticas anticipadas' : 'Inicio'} ${cycle.startDate || cycle.label} · hasta ${cycle.endDate || 'fin del curso'}</span>
             ${cycle.practicalStartAdvanced ? `<span class="advanced-practical-start-official">Curso oficial: ${cycle.officialStartDate}</span>` : ''}
+            ${cycle.enrollmentStarted ? `<span class="started-course-enrollment-window">Curso iniciado · matr&iacute;cula disponible hasta ${this.formatPracticeDate(cycle.enrollmentDeadline)}</span>` : ''}
           </div>
           <div class="calendar-toolbar">
             <div class="course-cycle-controls" aria-label="Cambiar curso próximo">
@@ -1962,6 +1970,8 @@ class StudentsView extends Component {
         endDate: cycle.practicalEndDate || cycle.endDate,
         officialStartDate: cycle.startDate,
         officialEndDate: cycle.endDate,
+        enrollmentDeadline: cycle.enrollmentDeadline,
+        enrollmentStarted: Boolean(cycle.enrollmentStarted),
         practicalStartAdvanced: Boolean(cycle.practicalStartAdvanced),
         durationBusinessDays: cycle.durationBusinessDays,
         time: `${slot.startTime} - ${slot.endTime}`,

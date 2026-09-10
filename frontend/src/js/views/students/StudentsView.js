@@ -505,13 +505,13 @@ class StudentsView extends Component {
           <form id="student-modal-form" class="form" novalidate onsubmit="return false;">
             <div class="modal-body student-modal-body">
               <div class="student-modal-steps" role="tablist" aria-label="Pasos del registro" style="--student-modal-step-count: ${canRegisterPayment ? 4 : 3}">
-                <button type="button" class="student-modal-step-tab active" data-step="1">1. Datos</button>
-                <button type="button" class="student-modal-step-tab" data-step="2">2. Documentos</button>
-                <button type="button" class="student-modal-step-tab" data-step="3">3. Horario</button>
+                <button type="button" class="student-modal-step-tab active" data-step="1">1. Horario</button>
+                <button type="button" class="student-modal-step-tab" data-step="2">2. Datos</button>
+                <button type="button" class="student-modal-step-tab" data-step="3">3. Documentos</button>
                 ${canRegisterPayment ? '<button type="button" class="student-modal-step-tab" data-step="4">4. Pago</button>' : ''}
               </div>
 
-              <section class="student-modal-step active" data-step="1">
+              <section class="student-modal-step" data-step="2">
                 <fieldset class="student-registration-types">
                   <legend>¿Qué desea registrar?</legend>
                   <label class="student-registration-type is-selected"><input type="radio" name="registrationMode" value="regular" checked><span class="student-registration-type__check"></span><span><strong>Curso de conducción</strong><small>Matrícula normal con documentos y horarios.</small></span></label>
@@ -571,7 +571,12 @@ class StudentsView extends Component {
                   <div class="form-error"></div>
                 </div>
 
-                <div class="form-row">
+                <div class="registration-session-branch" id="registration-session-branch" hidden>
+                  <div><small>Sucursal seleccionada</small><strong id="registration-session-branch-name"></strong></div>
+                  <button type="button" class="btn btn-light" id="change-registration-branch">Cambiar</button>
+                </div>
+
+                <div class="form-row" id="registration-location-row">
                   <div class="form-group">
                     <label class="form-label required">Provincia</label>
                     <select class="form-select" name="province" id="modal-province-select" required>
@@ -588,7 +593,7 @@ class StudentsView extends Component {
                   </div>
                 </div>
 
-                <div class="form-row">
+                <div class="form-row" id="registration-branch-row">
                   <div class="form-group" id="modal-branch-field">
                     <label class="form-label required">Sucursal</label>
                     <select class="form-select" name="branch" id="modal-branch-select" required disabled>
@@ -636,7 +641,7 @@ class StudentsView extends Component {
                 ${observationsField('renewal-observations-field')}
               </section>
 
-              <section class="student-modal-step" data-step="2">
+              <section class="student-modal-step" data-step="3">
                 <div class="student-modal-section-title regular-enrollment-only">
                   <h3>Documentos del estudiante</h3>
                 </div>
@@ -688,7 +693,7 @@ class StudentsView extends Component {
                 </div>
               </section>
 
-              <section class="student-modal-step" data-step="3">
+              <section class="student-modal-step active" data-step="1">
                 <div class="student-modal-section-title regular-enrollment-only">
                   <h3>Horario de pr&aacute;cticas</h3>
                 </div>
@@ -699,7 +704,7 @@ class StudentsView extends Component {
                 <section class="schedule-workflow-card" id="advanced-start-card" aria-labelledby="advanced-start-title">
                 <div class="schedule-workflow-heading">
                   <span class="schedule-workflow-step">1</span>
-                  <div><h4 id="advanced-start-title">Inicio anticipado</h4><p>Permite iniciar las pr&aacute;cticas antes de la fecha oficial del curso.</p></div>
+                  <div><h4 id="advanced-start-title">Inicio anticipado</h4></div>
                 </div>
                 <div class="schedule-preferences-grid">
                 <div class="form-group referred-instructor-field" hidden>
@@ -712,7 +717,7 @@ class StudentsView extends Component {
                 <div class="advanced-practical-start">
                   <label class="advanced-practical-start-toggle" for="advanced-practical-start-enabled">
                     <input type="checkbox" name="advancedPracticalStartEnabled" id="advanced-practical-start-enabled">
-                    <span><strong>Activar inicio anticipado</strong><small>Utiliza una fecha anterior al inicio oficial cuando exista disponibilidad.</small></span>
+                    <span><strong>Activar inicio anticipado</strong></span>
                   </label>
                   <div class="advanced-practical-start-fields" id="advanced-practical-start-fields" hidden>
                     <label class="form-label" for="practical-start-date">Fecha deseada</label>
@@ -723,12 +728,15 @@ class StudentsView extends Component {
                 </div>
                 </div>
                 </section>
-                </div>
                 <section class="schedule-workflow-card schedule-workflow-card--calendar" aria-labelledby="practice-schedule-title">
                 <div class="schedule-workflow-heading schedule-workflow-heading--calendar">
                   <span class="schedule-workflow-step">2</span>
                   <div><h4 id="practice-schedule-title">Fecha y horario</h4><p id="practice-schedule-help">Selecciona una hora disponible. Para el Curso de formación intensiva, pulsa dos veces sobre una celda.</p></div>
                 </div>
+                ${this.renderScheduleModalitySelector()}
+                </section>
+                </div>
+                <div class="schedule-calendar-fullwidth">
                 <div class="practical-schedule-panel">
                 <div id="student-schedule-calendar">
                   ${this.renderScheduleCalendar(schedules)}
@@ -745,7 +753,7 @@ class StudentsView extends Component {
                   <span><strong>Punto de encuentro: Flavio Reyes</strong>El horario de las 20:00 s&iacute; est&aacute; disponible. Confirma que informaste al estudiante que el instructor lo recoger&aacute; en la sucursal Flavio Reyes.</span>
                 </label>
                 <div class="form-error" id="schedule-error"></div>
-                </section>
+                </div>
                 <section class="schedule-workflow-card schedule-workflow-card--theory" aria-labelledby="theory-schedule-title">
                 <div class="schedule-workflow-heading">
                   <span class="schedule-workflow-step">4</span>
@@ -842,6 +850,7 @@ class StudentsView extends Component {
     const provinceSelect = document.getElementById('modal-province-select');
     const citySelect = document.getElementById('modal-city-select');
     const branchSelect = document.getElementById('modal-branch-select');
+    this.prepareScheduleFirstLayout();
 
     // Se conecta antes de cualquier await para impedir que el navegador haga
     // un envío HTML tradicional y cierre el modal si una carga inicial tarda.
@@ -1047,6 +1056,28 @@ class StudentsView extends Component {
     });
   }
 
+  prepareScheduleFirstLayout() {
+    const scheduleStep = document.querySelector('.student-modal-step[data-step="1"]');
+    const scheduleWorkflow = scheduleStep?.querySelector('.schedule-workflow');
+    if (!scheduleStep || !scheduleWorkflow) return;
+    const firstStepFields = [
+      document.querySelector('.student-registration-types'),
+      document.getElementById('registration-session-branch'),
+      document.getElementById('registration-location-row'),
+      document.getElementById('registration-branch-row'),
+    ].filter(Boolean);
+    firstStepFields.forEach(element => scheduleStep.insertBefore(element, scheduleWorkflow));
+    const courseSelect = document.getElementById('modal-course-select');
+    const courseGroup = courseSelect?.closest('.form-group');
+    if (courseGroup && !document.getElementById('schedule-course-row')) {
+      const courseRow = document.createElement('div');
+      courseRow.id = 'schedule-course-row';
+      courseRow.className = 'form-row regular-enrollment-only renewal-hidden';
+      courseRow.appendChild(courseGroup);
+      scheduleStep.insertBefore(courseRow, scheduleWorkflow);
+    }
+  }
+
   async prepareInstructorAvailabilityWindow(instructorId) {
     const toggle = document.getElementById('advanced-practical-start-enabled');
     const fields = document.getElementById('advanced-practical-start-fields');
@@ -1161,12 +1192,12 @@ class StudentsView extends Component {
     document.querySelectorAll('.renewal-hidden').forEach(element => { element.hidden = isRenewal || isAdditionalPractice; });
     document.querySelectorAll('.renewal-observations-field').forEach(element => { element.hidden = !isRenewal; });
     document.querySelectorAll('.registration-observations-field:not(.renewal-observations-field)').forEach(element => { element.hidden = isRenewal; });
-    document.querySelectorAll('.student-modal-step-tab').forEach(tab => { tab.hidden = isRenewal && Number(tab.dataset.step) > 1; });
+    document.querySelectorAll('.student-modal-step-tab').forEach(tab => { tab.hidden = isRenewal && Number(tab.dataset.step) !== 2; });
     form?.querySelectorAll('.renewal-hidden input, .renewal-hidden select, .renewal-hidden textarea').forEach(field => { field.disabled = isRenewal || isAdditionalPractice; });
     const title = document.getElementById('student-modal-title');
     if (title) title.textContent = isRenewal ? 'Registrar renovación de licencia' : (isAdditionalPractice ? 'Registrar prácticas adicionales' : 'Nuevo Estudiante');
     document.querySelector('.student-modal-steps')?.classList.toggle('renewal-mode', isRenewal);
-    this.goToModalStep(1);
+    this.goToModalStep(isRenewal ? 2 : 1);
   }
 
   scheduleAdditionalPracticeResolution(value) {
@@ -1375,14 +1406,20 @@ class StudentsView extends Component {
     if (!schedule) {
       return '<div class="enrollment-calendar-empty-cell"></div>';
     }
+    if (schedule.empty) {
+      return `<div class="enrollment-calendar-empty-cell" data-day-index="${schedule.dayIndex ?? ''}"></div>`;
+    }
 
     const dateCapacity = schedule.availabilityByDate?.[schedule.date] || {};
     const available = Number(dateCapacity.available ?? schedule.available);
+    const normalAvailable = Number(schedule.available ?? available);
     const capacity = Number(dateCapacity.capacity ?? schedule.capacity);
-    const occupied = Number(dateCapacity.occupied ?? schedule.occupied ?? 0);
-    const reserved = dateCapacity.status === 'reserved';
     const examCount = Number(dateCapacity.examCount || 0);
     const disabled = available <= 0;
+    // En el registro solo se presentan opciones utilizables. Las horas sin
+    // cupo permanecen fuera de la vista para reducir ruido y errores.
+    if (disabled) return `<div class="enrollment-calendar-empty-cell" data-day-index="${schedule.dayIndex ?? ''}" aria-label="Horario no disponible"></div>`;
+    const normalDisabled = normalAvailable <= 0;
     const courseKey = this.getScheduleCourseKey(schedule.course);
     const schedulePayload = JSON.stringify({
       id: schedule.id,
@@ -1395,19 +1432,35 @@ class StudentsView extends Component {
     }).replace(/"/g, '&quot;');
     return `
       <button type="button"
-        class="schedule-option ${examCount ? 'has-exam' : ''} ${reserved ? 'reserved' : ''} ${disabled ? 'disabled' : ''}"
+        class="schedule-option ${examCount ? 'has-exam' : ''} ${normalDisabled ? 'normal-slot-unavailable' : ''}"
         data-course="${courseKey}"
         data-schedule="${schedulePayload}"
         data-schedule-id="${schedule.id}"
         data-time="${schedule.time}"
         data-date="${schedule.date || ''}"
         data-day-index="${schedule.dayIndex ?? ''}"
-        data-normal-disabled="${disabled}"
-        ${disabled ? 'disabled' : ''}>
-        <span class="schedule-option-status ${reserved ? 'reserved' : (disabled ? 'full' : 'available')}">${reserved ? 'Fila reservada' : (disabled ? 'Completo' : 'Disponible')}</span>
+        data-normal-available="${normalAvailable}"
+        data-daily-available="${available}"
+        data-normal-disabled="${normalDisabled}"
+        ${normalDisabled ? 'disabled aria-hidden="true"' : ''}>
+        <span class="schedule-option-status available">Disponible</span>
         ${examCount ? `<span class="schedule-option-exams">Intensivo ${examCount}/2</span>` : ''}
-        <span class="schedule-option-capacity">${available}/${capacity} cupos</span>
+        <span class="schedule-option-capacity">${normalAvailable} ${normalAvailable === 1 ? 'cupo disponible' : 'cupos disponibles'}</span>
       </button>
+    `;
+  }
+
+  renderScheduleModalitySelector() {
+    return `
+      <div class="enrollment-modality-selector" role="group" aria-label="Tipo de horario">
+        <button type="button" class="enrollment-modality-button active" data-modality="normal" aria-pressed="true">
+          <strong>Horario normal</strong>
+        </button>
+        <button type="button" class="enrollment-modality-button" data-modality="intensivo" aria-pressed="false">
+          <strong>Horario intensivo</strong>
+        </button>
+      </div>
+      <input type="hidden" id="selected-enrollment-modality" value="normal">
     `;
   }
 
@@ -1421,15 +1474,6 @@ class StudentsView extends Component {
 
     const order = ['carro', 'moto'];
     return `
-      <div class="enrollment-modality-selector" role="group" aria-label="Tipo de horario">
-        <button type="button" class="enrollment-modality-button active" data-modality="normal" aria-pressed="true">
-          <strong>Horario normal</strong>
-        </button>
-        <button type="button" class="enrollment-modality-button" data-modality="intensivo" aria-pressed="false">
-          <strong>Horario intensivo</strong>
-        </button>
-      </div>
-      <input type="hidden" id="selected-enrollment-modality" value="normal">
       <div class="enrollment-calendar-stack">
         ${order.flatMap(courseKey => ['normal', 'intensivo'].map(modality =>
           this.renderCourseCalendar(courseKey, groupedByCourse[courseKey] || [], modality)
@@ -1502,6 +1546,10 @@ class StudentsView extends Component {
       (item.cycleId || item.day) === cycle.key
     );
     const times = [...new Set(cycleSchedules.map(schedule => schedule.time))]
+      .filter(time => cycleSchedules
+        .filter(schedule => schedule.time === time)
+        .some(schedule => Object.values(schedule.availabilityByDate || {})
+          .some(availability => Number(availability?.available || 0) > 0)))
       .sort((first, second) => first.localeCompare(second));
     const days = this.getCourseBusinessDays(cycle.startDate, cycle.endDate, courseKey, modality);
 
@@ -1562,14 +1610,21 @@ class StudentsView extends Component {
                 ${hasAssignedExam ? '<small class="calendar-exam-badge">Intensivo</small>' : ''}
               </div>
             `}).join('')}
-            ${times.map(time => `
+            ${times.map(time => {
+              const rowSchedule = cycleSchedules.find(item => item.time === time);
+              const normalRowUnavailable = !rowSchedule || Number(rowSchedule.available) <= 0;
+              return `
+              <div class="enrollment-calendar-row ${normalRowUnavailable ? 'normal-row-unavailable' : ''}">
               <div class="enrollment-calendar-time">${time}</div>
               ${days.map((day, dayIndex) => {
-                const schedule = cycleSchedules.find(item => item.time === time);
+                const schedule = rowSchedule;
                 const isAvailableThatDay = schedule && Object.prototype.hasOwnProperty.call(schedule.availabilityByDate || {}, day.date);
-                return this.renderScheduleOption(isAvailableThatDay ? { ...schedule, date: day.date, dayLabel: day.name, dayIndex, examDay: day.isExamDay } : null);
+                return this.renderScheduleOption(isAvailableThatDay
+                  ? { ...schedule, date: day.date, dayLabel: day.name, dayIndex, examDay: day.isExamDay }
+                  : { empty: true, dayIndex });
               }).join('')}
-            `).join('')}
+              </div>
+            `}).join('')}
         </div>
       </div>
     `;
@@ -1711,7 +1766,7 @@ class StudentsView extends Component {
                 const documentError = document.getElementById('additional-practice-document-error');
                 if (documentError) documentError.textContent = '';
                 close();
-                this.goToModalStep(2);
+                this.goToModalStep(3);
                 return;
               }
               const documentsInput = document.querySelector('#student-modal-form [name="registrationDocumentsMobileFileUrl"]');
@@ -1729,7 +1784,7 @@ class StudentsView extends Component {
               const documentError = document.getElementById('cedula-scan-error');
               if (documentError) documentError.textContent = '';
               close();
-              this.goToModalStep(2);
+              this.goToModalStep(3);
             });
           }
         } catch (error) {
@@ -2010,12 +2065,57 @@ class StudentsView extends Component {
         await this.loadModalReferredInstructors(branchId);
         if (branchId) await this.reloadModalSchedules(branchId);
       });
-      await renderCities();
+
+      const sessionBranchId = String(authService.getCurrentUser()?.branch_id || '');
+      const sessionBranch = branches.find(branch => String(branch.id) === sessionBranchId);
+      const sessionCity = sessionBranch
+        ? cities.find(city => String(city.id) === String(sessionBranch.city_id))
+        : null;
+      if (sessionBranch && sessionCity && provinces.includes(sessionCity.province)) {
+        provinceSelect.value = sessionCity.province;
+        await renderCities();
+        citySelect.value = String(sessionCity.id);
+        await renderBranches();
+
+        const sessionBranchOption = [...branchSelect.options]
+          .find(option => String(option.dataset.branchId || '') === sessionBranchId);
+        if (sessionBranchOption && branchSelect.selectedOptions?.[0] !== sessionBranchOption) {
+          sessionBranchOption.selected = true;
+          await this.loadModalBranchCourses(branchSelect);
+          await this.loadModalReferredInstructors(sessionBranchId);
+          await this.reloadModalSchedules(sessionBranchId);
+        }
+        this.showSessionBranchSummary(sessionBranch);
+      } else {
+        await renderCities();
+      }
     } catch (error) {
       provinceSelect.innerHTML = '<option value="">No se pudieron cargar las provincias</option>';
       citySelect.innerHTML = '<option value="">No se pudieron cargar las ciudades</option>';
       branchSelect.innerHTML = '<option value="">No se pudieron cargar las sucursales</option>';
       console.error('Error al cargar ubicaciones:', error);
+    }
+  }
+
+  showSessionBranchSummary(branch) {
+    const summary = document.getElementById('registration-session-branch');
+    const name = document.getElementById('registration-session-branch-name');
+    const locationRow = document.getElementById('registration-location-row');
+    const branchRow = document.getElementById('registration-branch-row');
+    const changeButton = document.getElementById('change-registration-branch');
+    if (!summary || !branch) return;
+    if (name) name.textContent = branch.name || authService.getCurrentUser()?.branch || 'Sucursal actual';
+    summary.hidden = false;
+    if (locationRow) locationRow.hidden = true;
+    if (branchRow) branchRow.hidden = true;
+    if (changeButton && !changeButton.dataset.listenerAttached) {
+      changeButton.addEventListener('click', () => {
+        summary.hidden = true;
+        if (locationRow) locationRow.hidden = false;
+        if (branchRow) branchRow.hidden = false;
+        document.getElementById('modal-province-select')?.focus();
+      });
+      changeButton.dataset.listenerAttached = 'true';
     }
   }
 
@@ -2108,7 +2208,7 @@ class StudentsView extends Component {
     document.body.style.overflow = 'hidden';
     this.goToModalStep(1);
     this.syncScheduleOptions();
-    modal.querySelector('[name="firstName"]')?.focus();
+    modal.querySelector('[name="province"]')?.focus();
   }
 
   async openReservationActivation(reservation) {
@@ -2316,8 +2416,39 @@ class StudentsView extends Component {
 
   goToNextModalStep() {
     const currentStep = this.getCurrentModalStep();
-    if (currentStep === 1 && !this.validateStudentFields()) return;
+    if (currentStep === 1 && !this.validateScheduleFirstStep()) return;
+    if (currentStep === 2 && !this.validateStudentFields()) return;
     if (currentStep < this.getStudentModalLastStep()) this.goToModalStep(currentStep + 1);
+  }
+
+  validateScheduleFirstStep() {
+    const form = document.getElementById('student-modal-form');
+    const mode = form?.querySelector('[name="registrationMode"]:checked')?.value || 'regular';
+    if (mode === 'license-renewal') {
+      this.goToModalStep(2);
+      return false;
+    }
+    if (mode === 'additional-practice') return true;
+    const required = [
+      ['province', 'Selecciona una provincia.'],
+      ['city_id', 'Selecciona un cantón.'],
+      ['branch', 'Selecciona una sucursal.'],
+      ['course_id', 'Selecciona un curso.'],
+    ];
+    for (const [name, message] of required) {
+      const field = form?.querySelector(`[name="${name}"]`);
+      if (!field?.value) {
+        field?.parentElement?.querySelector('.form-error')?.replaceChildren(document.createTextNode(message));
+        field?.focus();
+        return false;
+      }
+    }
+    if (!form?.elements.scheduleId?.value) {
+      const error = document.getElementById('schedule-error');
+      if (error) error.textContent = 'Selecciona uno de los horarios disponibles.';
+      return false;
+    }
+    return true;
   }
 
   /* OCR pilot removed */
@@ -2368,13 +2499,14 @@ class StudentsView extends Component {
     const backBtn = document.getElementById('student-modal-back');
     const nextBtn = document.getElementById('student-modal-next');
     const submitBtn = document.getElementById('student-modal-submit');
-    if (backBtn) backBtn.style.display = targetStep === 1 ? 'none' : 'inline-flex';
+    const renewal = document.querySelector('#student-modal-form [name="registrationMode"]:checked')?.value === 'license-renewal';
+    if (backBtn) backBtn.style.display = targetStep === 1 || renewal ? 'none' : 'inline-flex';
     if (nextBtn) nextBtn.style.display = targetStep === lastStep ? 'none' : 'inline-flex';
     if (submitBtn) submitBtn.style.display = targetStep === lastStep ? 'inline-flex' : 'none';
   }
 
   getStudentModalLastStep() {
-    if (document.querySelector('#student-modal-form [name="registrationMode"]:checked')?.value === 'license-renewal') return 1;
+    if (document.querySelector('#student-modal-form [name="registrationMode"]:checked')?.value === 'license-renewal') return 2;
     return authService.can('PAYMENT_CREATE') ? 4 : 3;
   }
 
@@ -2679,6 +2811,15 @@ class StudentsView extends Component {
     calendar.classList.toggle('rotation-enabled', enabled);
     const message = calendar.querySelector('.schedule-rotation-message');
     if (message) message.hidden = !enabled;
+    calendar.querySelectorAll('.schedule-option').forEach(option => {
+      const normalDisabled = option.dataset.normalDisabled === 'true';
+      const available = Number(enabled ? option.dataset.dailyAvailable : option.dataset.normalAvailable);
+      option.disabled = !enabled && normalDisabled;
+      option.classList.toggle('normal-slot-unavailable', !enabled && normalDisabled);
+      option.setAttribute('aria-hidden', String(!enabled && normalDisabled));
+      const capacity = option.querySelector('.schedule-option-capacity');
+      if (capacity) capacity.textContent = `${available} ${available === 1 ? 'cupo disponible' : 'cupos disponibles'}`;
+    });
   }
 
   storeSchedulePlan(calendar) {
@@ -2931,7 +3072,7 @@ class StudentsView extends Component {
     if (alert) alert.style.display = 'none';
 
     if (!this.validateStudentFields()) {
-      this.goToModalStep(1);
+      this.goToModalStep(2);
       return;
     }
 
@@ -2951,13 +3092,13 @@ class StudentsView extends Component {
     if (hasRegistrationPdf && !this.isPdfFile(registrationDocumentsPdf)) {
       const documentError = document.getElementById('cedula-scan-error');
       if (documentError) documentError.textContent = 'El documento de cedula y carnet debe ser un archivo PDF.';
-      this.goToModalStep(2);
+      this.goToModalStep(3);
       return;
     }
     if (hasRegistrationPdf && registrationDocumentsPdf.size > 9 * 1024 * 1024) {
       const documentError = document.getElementById('cedula-scan-error');
       if (documentError) documentError.textContent = 'El PDF no puede superar 9 MB. Comprímelo o captura los documentos desde el teléfono.';
-      this.goToModalStep(2);
+      this.goToModalStep(3);
       return;
     }
     let cedulaDoc, bloodTypeCardDoc;
@@ -2979,7 +3120,7 @@ class StudentsView extends Component {
     if (advancedPracticalStartEnabled && !practicalStartDate) {
       const scheduleError = document.getElementById('schedule-error');
       if (scheduleError) scheduleError.textContent = 'Selecciona la fecha real en que comenzarán las prácticas.';
-      this.goToModalStep(3);
+      this.goToModalStep(1);
       return;
     }
     const activeCalendar = [...document.querySelectorAll('.enrollment-calendar')]
@@ -2998,14 +3139,14 @@ class StudentsView extends Component {
         : rotationEnabled
           ? `En horario rotativo debes seleccionar entre ${minimumClasses} y ${requiredClasses} clases prácticas.`
           : `Debes seleccionar exactamente ${requiredClasses} clases prácticas en total.`;
-      this.goToModalStep(3);
+      this.goToModalStep(1);
       return;
     }
     const latePickupNotice = document.getElementById('late-pickup-notice');
     if (latePickupNotice && !latePickupNotice.hidden && !formData.get('latePickupConfirmed')) {
       const scheduleError = document.getElementById('schedule-error');
       if (scheduleError) scheduleError.textContent = 'Confirma que informaste al estudiante que a las 20:00 debe acudir a la sucursal Flavio Reyes.';
-      this.goToModalStep(3);
+      this.goToModalStep(1);
       return;
     }
     const selectedBranchId = form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || null;
@@ -3013,7 +3154,7 @@ class StudentsView extends Component {
     if (examOnly && !preferredInstructorId) {
       const scheduleError = document.getElementById('schedule-error');
       if (scheduleError) scheduleError.textContent = 'Selecciona el instructor de la formación intensiva.';
-      this.goToModalStep(3);
+      this.goToModalStep(1);
       return;
     }
     const selectedCellsAreAvailable = examOnly ? schedulePlan.selections.length === 1 : this.activatingReservation
@@ -3029,13 +3170,13 @@ class StudentsView extends Component {
     if (!scheduleId || !selectedCellsAreAvailable) {
       const scheduleError = document.getElementById('schedule-error');
       if (scheduleError) scheduleError.textContent = 'Uno de los días y horas seleccionados ya no está disponible';
-      this.goToModalStep(3);
+      this.goToModalStep(1);
       return;
     }
     if (!theorySchedule) {
       const theoryError = document.getElementById('theory-schedule-error');
       if (theoryError) theoryError.textContent = 'Debes seleccionar la modalidad de teoría';
-      this.goToModalStep(3);
+      this.goToModalStep(1);
       return;
     }
     schedulePlan.theorySchedule = theorySchedule;
@@ -3200,7 +3341,7 @@ class StudentsView extends Component {
   async handleAdditionalPracticeSubmit(form, formData, submitBtn) {
     if (!this.additionalPracticeResolved) {
       this.showModalAlert('error', 'Primero busca la cédula para comprobar si la persona ya existe.');
-      this.goToModalStep(1);
+      this.goToModalStep(2);
       return;
     }
     const documentFile = formData.get('additionalPracticeDocumentsFile');
@@ -3213,7 +3354,7 @@ class StudentsView extends Component {
     if (!hasMobileDocument && !this.isPdfFile(documentFile) && !this.isImageFile(documentFile)) {
       const error = document.getElementById('additional-practice-document-error');
       if (error) error.textContent = 'Selecciona un PDF o toma una foto del documento.';
-      this.goToModalStep(2);
+      this.goToModalStep(3);
       return;
     }
     if (!instructorId || !startDate || !dailyTime || !Number.isInteger(days) || days < 3 || days > 8) {
@@ -3221,7 +3362,7 @@ class StudentsView extends Component {
       if (!startDate) document.getElementById('additional-practice-date-error').textContent = 'Selecciona la fecha de inicio.';
       if (!dailyTime) document.getElementById('additional-practice-time-error').textContent = 'Selecciona un horario.';
       this.showModalAlert('error', 'Completa la programación de las prácticas.');
-      this.goToModalStep(3);
+      this.goToModalStep(1);
       return;
     }
     const availability = await StudentService.checkAdditionalPracticeAvailability({
@@ -3233,7 +3374,7 @@ class StudentsView extends Component {
     });
     if (!availability.success || !availability.data?.available) {
       this.showModalAlert('error', availability.error || 'El instructor no está disponible. Acepta una sugerencia de instructor o cambia la fecha antes de continuar.');
-      this.goToModalStep(3);
+      this.goToModalStep(1);
       await this.checkAdditionalPracticeAvailability();
       return;
     }
@@ -3340,13 +3481,13 @@ class StudentsView extends Component {
 
     if (required && !hasMobile && !hasPdf && !hasImages) {
       if (error) error.textContent = 'Sube el PDF o las imágenes frontal y reverso.';
-      this.goToModalStep(2);
+      this.goToModalStep(3);
       return { valid: false };
     }
 
     if (!hasPdf && hasPartialImages && !hasImages) {
       if (error) error.textContent = 'Para generar el PDF debes subir frontal y reverso.';
-      this.goToModalStep(2);
+      this.goToModalStep(3);
       return { valid: false };
     }
 

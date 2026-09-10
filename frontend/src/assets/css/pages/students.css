@@ -1894,7 +1894,8 @@
 
 .schedule-setup-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(280px, .7fr) minmax(0, 1.3fr);
+  align-items: start;
   gap: 1rem;
 }
 
@@ -1910,6 +1911,29 @@
   padding: 1rem;
   border-color: #cbdcff;
   background: #fbfdff;
+}
+
+.schedule-workflow-card--calendar .enrollment-modality-selector {
+  width: 100%;
+  margin: 0;
+}
+
+.schedule-calendar-fullwidth {
+  min-width: 0;
+  width: 100%;
+}
+
+.schedule-option.normal-slot-unavailable {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.enrollment-calendar-row {
+  display: contents;
+}
+
+.enrollment-calendar:not(.rotation-enabled) .enrollment-calendar-row.normal-row-unavailable {
+  display: none;
 }
 
 .schedule-workflow-heading {
@@ -2055,10 +2079,13 @@
   font-size: .72rem;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 980px) {
   .schedule-setup-grid {
     grid-template-columns: 1fr;
   }
+}
+
+@media (max-width: 768px) {
 
   .schedule-workflow-card,
   .schedule-workflow-card--calendar {
@@ -2128,4 +2155,26 @@
   .student-registration-page { padding: 0 .75rem 1rem; }
   .student-registration-page-header { align-items: flex-start; gap: .75rem; }
   .student-registration-page-header .btn { white-space: nowrap; }
+}
+
+.registration-session-branch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: .8rem 1rem;
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.registration-session-branch[hidden] { display: none; }
+.registration-session-branch > div { display: grid; gap: .15rem; }
+.registration-session-branch small { color: var(--gray-500); font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; }
+.registration-session-branch strong { color: var(--gray-900); font-size: .92rem; }
+.registration-session-branch .btn { flex: none; padding: .5rem .8rem; }
+
+@media (max-width: 560px) {
+  .registration-session-branch { align-items: flex-start; }
 }

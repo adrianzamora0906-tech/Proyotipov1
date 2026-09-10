@@ -12,7 +12,7 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=perfil-profesor-teoria-20260907";
 import DashboardView from "./views/dashboard/DashboardView.js?v=consultas-optimizadas-20260811";
-import StudentsView from "./views/students/StudentsView.js?v=cierre-registro-20260827";
+import StudentsView from "./views/students/StudentsView.js?v=horario-solo-disponibles-20260910";
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=voucher-pago-20260824";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=proximo-curso-disponible-20260825";

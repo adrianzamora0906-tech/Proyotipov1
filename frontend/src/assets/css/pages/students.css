@@ -684,10 +684,9 @@
   font-size: 0.72rem;
 }
 
-/* En rotativo, las celdas seleccionadas representan las clases reales y el
-   resto de la fila muestra la reserva de disponibilidad del instructor. */
+/* En rotativo solo se identifican las celdas realmente elegidas. */
 .schedule-option.referred-block-preview.rotation-block-preview .schedule-option-status::after {
-  content: 'Fila reservada';
+  content: 'Clase elegida';
 }
 
 .student-modal-steps {

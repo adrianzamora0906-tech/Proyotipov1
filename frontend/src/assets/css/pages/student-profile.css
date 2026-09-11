@@ -418,6 +418,80 @@
   max-width: 1120px;
 }
 
+.profile-edit-student-modal {
+  width: min(94vw, 640px);
+  max-width: 640px;
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.profile-edit-student-modal .modal-body {
+  overflow-y: auto;
+}
+
+.profile-reschedule-modal {
+  width: min(94vw, 920px);
+  max-width: 920px;
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.profile-reschedule-modal .modal-body {
+  overflow-y: auto;
+}
+
+.profile-reschedule-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.profile-reschedule-availability {
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 680px) {
+  .profile-edit-student-modal,
+  .profile-reschedule-modal {
+    width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+  }
+
+  .profile-edit-student-modal .modal-header,
+  .profile-edit-student-modal .modal-body,
+  .profile-edit-student-modal .modal-footer,
+  .profile-reschedule-modal .modal-header,
+  .profile-reschedule-modal .modal-body,
+  .profile-reschedule-modal .modal-footer {
+    padding-left: .85rem;
+    padding-right: .85rem;
+  }
+
+  .profile-edit-student-modal .form-row,
+  .profile-reschedule-fields {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .profile-edit-student-modal .form-group {
+    width: 100%;
+    min-width: 0 !important;
+  }
+
+  .profile-edit-student-modal .modal-footer,
+  .profile-reschedule-modal .modal-footer {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .profile-edit-student-modal .modal-footer .btn,
+  .profile-reschedule-modal .modal-footer .btn {
+    width: 100%;
+  }
+}
+
 .profile-schedule-modal .modal-body {
   max-height: min(64vh, 600px);
   overflow-y: auto;

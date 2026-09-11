@@ -706,7 +706,7 @@ class StudentProfileView extends Component {
 
     const bloodTypes = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
     modal.innerHTML = `
-      <div class="modal" style="max-width: 640px;">
+      <div class="modal profile-edit-student-modal">
         <div class="modal-header">
           <h3 class="modal-title">Editar estudiante</h3>
           <button class="modal-close" data-close-modal>×</button>
@@ -766,12 +766,17 @@ class StudentProfileView extends Component {
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-close-modal>Cancelar</button>
+          <button type="button" class="btn btn-secondary" id="edit-student-reschedule-btn">Reagendar</button>
           <button type="button" class="btn btn-primary" id="edit-student-save-btn">Guardar cambios</button>
         </div>
       </div>
     `;
     modal.classList.add('active');
     this.bindProfileModalClose(modal);
+
+    modal.querySelector('#edit-student-reschedule-btn')?.addEventListener('click', () => {
+      this.openCourseRescheduleModal(studentId);
+    });
 
     modal.querySelector('#edit-student-save-btn')?.addEventListener('click', async () => {
       const form = modal.querySelector('#edit-student-form');
@@ -809,6 +814,87 @@ class StudentProfileView extends Component {
         alert(error.message || 'No se pudieron guardar los cambios.');
       }
     });
+  }
+
+  async openCourseRescheduleModal(studentId) {
+    const modal = document.getElementById('profile-action-modal');
+    if (!modal) return;
+    modal.innerHTML = '<div class="modal profile-reschedule-modal"><div class="modal-body">Consultando cursos e instructores disponibles…</div></div>';
+    try {
+      const currentResult = await ApiService.getStudentScheduleChangeOptions(studentId);
+      const current = currentResult.success ? currentResult.data : null;
+      if (!current) throw new Error(currentResult.error || 'No se encontró el curso actual.');
+      if (!current.canRescheduleCourse) throw new Error('Este curso ya inició y no puede reagendarse a otro curso.');
+      const optionsResult = await ApiService.getCourseEnrollmentOptions({
+        branch_id: current.branchId,
+        course_id: current.courseId,
+        modality: current.modality || 'normal',
+      });
+      const today = new Date().toISOString().slice(0, 10);
+      const cycles = (optionsResult.success ? optionsResult.data : [])
+        .filter(cycle => String(cycle.id) !== String(current.id) && cycle.startDate > current.startDate && cycle.startDate > today)
+        .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)));
+      modal.innerHTML = `
+        <div class="modal profile-reschedule-modal">
+          <div class="modal-header"><div><h3 class="modal-title">Reagendar curso</h3><p class="card-subtitle">Curso actual: ${current.code} · inicia ${current.startDate}</p></div><button class="modal-close" data-close-modal>×</button></div>
+          <div class="modal-body">
+            ${cycles.length ? `<div class="profile-reschedule-fields">
+              <label class="form-group"><span class="form-label">Nuevo curso *</span><select class="form-input" id="reschedule-cycle-select">${cycles.map(cycle => `<option value="${cycle.id}">${cycle.code} · ${cycle.startDate} al ${cycle.endDate}</option>`).join('')}</select></label>
+              <label class="form-group"><span class="form-label">Instructor *</span><select class="form-input" id="reschedule-instructor-select"></select></label>
+            </div><div id="reschedule-schedule-options"></div>
+            <label class="form-group"><span class="form-label">Motivo del reagendamiento *</span><textarea class="form-textarea" id="reschedule-reason" rows="3" maxlength="1000" placeholder="Ejemplo: emergencia familiar; no podrá iniciar en la fecha prevista."></textarea></label>` : '<div class="alert alert-warning">No existen cursos próximos con disponibilidad para reagendar.</div>'}
+            <div class="form-error" id="reschedule-error"></div>
+          </div>
+          <div class="modal-footer"><button class="btn btn-secondary" data-close-modal>Cancelar</button><button class="btn btn-primary" id="confirm-course-reschedule" ${cycles.length ? '' : 'disabled'}>Confirmar reagendamiento</button></div>
+        </div>`;
+      this.bindProfileModalClose(modal);
+      if (!cycles.length) return;
+      const cycleSelect = modal.querySelector('#reschedule-cycle-select');
+      const instructorSelect = modal.querySelector('#reschedule-instructor-select');
+      const optionsHost = modal.querySelector('#reschedule-schedule-options');
+      let selectedCycle = null;
+      const renderInstructors = async () => {
+        selectedCycle = cycles.find(cycle => String(cycle.id) === cycleSelect.value) || cycles[0];
+        instructorSelect.innerHTML = (selectedCycle.instructors || []).map(instructor => `<option value="${instructor.id}">${instructor.name}</option>`).join('');
+        instructorSelect.disabled = !instructorSelect.options.length;
+        await renderAvailability();
+      };
+      const renderAvailability = async () => {
+        optionsHost.innerHTML = '<div class="schedule-empty">Consultando disponibilidad…</div>';
+        const instructorId = instructorSelect.value;
+        if (!instructorId) { optionsHost.innerHTML = '<div class="schedule-empty">Este curso no tiene instructores disponibles.</div>'; return; }
+        const result = await ApiService.getCourseEnrollmentOptions({branch_id:current.branchId,course_id:current.courseId,modality:current.modality||'normal',instructor_id:instructorId});
+        const availableCycle = (result.success ? result.data : []).find(cycle => String(cycle.id) === String(selectedCycle.id));
+        const slots = (availableCycle?.slots || []).map(slot => {
+          const dates = Object.entries(slot.occupancyByDate || {});
+          const available = dates.length >= Number(availableCycle.durationBusinessDays || dates.length) && dates.every(([,day]) => Number(day.available || 0) > 0);
+          return {slot,dates,available};
+        });
+        optionsHost.innerHTML = `<section class="profile-reschedule-availability"><h4>Horarios disponibles</h4><p>Solo se habilitan filas libres durante todos los días del nuevo curso.</p><div class="profile-initial-slot-grid">${slots.map(({slot,dates,available}) => `<button type="button" class="schedule-option reschedule-slot ${available?'':'disabled'}" ${available?'':'disabled'} data-slot='${JSON.stringify({startTime:slot.startTime,endTime:slot.endTime,dates:dates.map(([date])=>date)}).replace(/'/g,'&#39;')}'><strong>${slot.startTime} - ${slot.endTime}</strong><span class="schedule-option-status ${available?'available':'full'}">${available?'Disponible':'Ocupado'}</span></button>`).join('') || '<div class="schedule-empty">No hay horarios configurados.</div>'}</div></section>`;
+        optionsHost.querySelectorAll('.reschedule-slot:not(.disabled)').forEach(button => button.addEventListener('click',()=>{optionsHost.querySelectorAll('.reschedule-slot').forEach(item=>item.classList.remove('selected'));button.classList.add('selected');}));
+      };
+      cycleSelect.addEventListener('change', renderInstructors);
+      instructorSelect.addEventListener('change', renderAvailability);
+      await renderInstructors();
+      modal.querySelector('#confirm-course-reschedule')?.addEventListener('click', async event => {
+        const selected = optionsHost.querySelector('.reschedule-slot.selected');
+        const reason = modal.querySelector('#reschedule-reason')?.value.trim() || '';
+        const errorHost = modal.querySelector('#reschedule-error');
+        if (!selected) { errorHost.textContent='Selecciona un horario disponible.'; return; }
+        if (!reason) { errorHost.textContent='Escribe el motivo del reagendamiento.'; return; }
+        const slot = JSON.parse(selected.dataset.slot);
+        const button = event.currentTarget;
+        try {
+          button.disabled=true;button.textContent='Reagendando…';errorHost.textContent='';
+          const response = await ApiService.reserveCourseCycleSchedule({studentId,preferredInstructorId:instructorSelect.value,rescheduleFromCycleId:current.id,rescheduleReason:reason,schedulePlan:{rotation:false,practicalMode:'classes',theorySchedule:current.theorySchedule,selections:slot.dates.map(date=>({cycleId:selectedCycle.id,date,time:`${slot.startTime} - ${slot.endTime}`}))}});
+          if(!response.success)throw new Error(response.error||'No se pudo reagendar el curso.');
+          this.closeProfileModal(true);
+        } catch(error) { button.disabled=false;button.textContent='Confirmar reagendamiento';errorHost.textContent=error.message||'No se pudo reagendar el curso.'; }
+      });
+    } catch (error) {
+      modal.innerHTML = `<div class="modal profile-reschedule-modal"><div class="modal-header"><h3 class="modal-title">Reagendar curso</h3><button class="modal-close" data-close-modal>×</button></div><div class="modal-body"><div class="form-error">${error.message}</div></div><div class="modal-footer"><button class="btn btn-secondary" data-close-modal>Cerrar</button></div></div>`;
+      this.bindProfileModalClose(modal);
+    }
   }
 
   openPaymentModal({ studentId, cedula, balance }) {

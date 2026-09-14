@@ -692,6 +692,9 @@ class StudentService {
       SELECT ip.id, TRIM(CONCAT(u.first_name, ' ', u.last_name)) AS name,
         CASE WHEN priority_rule.branch_id IS NOT NULL THEN priority_rule.branch_id=$1 ELSE u.branch_id=$1 END AS priority_branch,
         CASE WHEN priority_rule.branch_id=$1 THEN 'priority' WHEN priority_rule.branch_id IS NOT NULL THEN 'reserved_elsewhere' ELSE 'standard' END AS branch_assignment,
+        CASE WHEN priority_rule.branch_id IS NOT NULL AND priority_rule.branch_id<>$1
+          THEN jsonb_array_length(COALESCE(priority_rule.allowed_slots,'[]'::jsonb))=0
+          ELSE FALSE END AS shared_with_target,
         ib.name AS home_branch,
         COALESCE(json_agg(DISTINCT jsonb_build_object('id', capable_course.id, 'name', capable_course.name))
           FILTER (WHERE capable_course.id IS NOT NULL), '[]') AS courses,
@@ -700,7 +703,7 @@ class StudentService {
       JOIN users u ON u.id = ip.user_id
       JOIN branches ib ON ib.id = u.branch_id
       JOIN branches target ON target.id = $1
-      LEFT JOIN LATERAL (SELECT rule.branch_id FROM instructor_branch_priorities rule
+      LEFT JOIN LATERAL (SELECT rule.branch_id,rule.allowed_slots FROM instructor_branch_priorities rule
         WHERE rule.instructor_id=ip.id AND rule.assignment_type='priority' AND rule.active=TRUE
           AND rule.effective_from<=CURRENT_DATE AND (rule.effective_until IS NULL OR rule.effective_until>=CURRENT_DATE)
         ORDER BY (rule.branch_id=$1) DESC,rule.updated_at DESC LIMIT 1) priority_rule ON TRUE
@@ -710,7 +713,7 @@ class StudentService {
       LEFT JOIN enrollments e ON e.id = eia.enrollment_id AND e.branch_id = $1
       LEFT JOIN students assigned_student ON assigned_student.id = e.student_id AND assigned_student.branch_id = $1
       WHERE ib.city_id = target.city_id AND u.active = true AND ip.deleted_at IS NULL AND ip.status = 'activo'
-      GROUP BY ip.id, u.first_name, u.last_name, u.branch_id, ib.name, priority_rule.branch_id
+      GROUP BY ip.id, u.first_name, u.last_name, u.branch_id, ib.name, priority_rule.branch_id, priority_rule.allowed_slots
       ORDER BY (CASE WHEN priority_rule.branch_id IS NOT NULL THEN priority_rule.branch_id=$1 ELSE u.branch_id=$1 END) DESC,
         u.last_name, u.first_name
     `, [branchId]);

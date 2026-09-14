@@ -669,6 +669,19 @@ class CourseCycleService {
             AND selected_igm.instructor_id = $${params.length}
             AND selected_igm.active = true
         )
+        OR EXISTS (
+          SELECT 1
+          FROM instructor_profiles selected_ip
+          JOIN users selected_user ON selected_user.id=selected_ip.user_id AND selected_user.active=TRUE
+          JOIN branches selected_home ON selected_home.id=selected_user.branch_id
+          JOIN branches selected_target ON selected_target.id=cc.branch_id AND selected_target.city_id=selected_home.city_id
+          JOIN instructor_course_capabilities selected_capability
+            ON selected_capability.instructor_id=selected_ip.id
+            AND selected_capability.course_id=cc.course_id
+            AND selected_capability.active=TRUE
+          WHERE selected_ip.id=$${params.length}
+            AND selected_ip.status='activo' AND selected_ip.deleted_at IS NULL
+        )
       )`;
     }
 
@@ -747,6 +760,38 @@ class CourseCycleService {
     `,[cycleIds]) : {rows:[]};
     const instructorRules = new Map();
     instructorRulesResult.rows.forEach(rule=>{const values=instructorRules.get(rule.cycle_id)||[];values.push(rule);instructorRules.set(rule.cycle_id,values);});
+    // Un instructor referido no pertenece al grupo/ciclo de la sucursal destino.
+    // Cuando se lo selecciona expresamente, inclúyelo únicamente en el cálculo
+    // de disponibilidad de estos ciclos, conservando su regla de prioridad.
+    if (filters.instructor_id && cycleIds.length) {
+      const selectedInstructorRuleResult = await db.query(`
+        SELECT ip.id AS instructor_id, priority_rule.branch_id AS priority_branch_id,
+          COALESCE(priority_rule.allowed_slots,'[]'::jsonb) AS allowed_slots
+        FROM instructor_profiles ip
+        LEFT JOIN LATERAL (
+          SELECT rule.branch_id, rule.allowed_slots
+          FROM instructor_branch_priorities rule
+          WHERE rule.instructor_id=ip.id
+            AND rule.assignment_type='priority'
+            AND rule.active=TRUE
+            AND rule.effective_from<=CURRENT_DATE
+            AND (rule.effective_until IS NULL OR rule.effective_until>=CURRENT_DATE)
+          ORDER BY rule.updated_at DESC
+          LIMIT 1
+        ) priority_rule ON TRUE
+        WHERE ip.id=$1::uuid AND ip.status='activo' AND ip.deleted_at IS NULL
+        LIMIT 1
+      `, [filters.instructor_id]);
+      const selectedRule = selectedInstructorRuleResult.rows[0];
+      if (selectedRule) {
+        cycleIds.forEach(cycleId => {
+          const values = (instructorRules.get(cycleId) || [])
+            .filter(rule => String(rule.instructor_id) !== String(selectedRule.instructor_id));
+          values.push({ ...selectedRule, cycle_id: cycleId });
+          instructorRules.set(cycleId, values);
+        });
+      }
+    }
     // La ocupación debe cubrir las fechas prácticas que realmente se muestran.
     // Cuando Secretaría adelanta el inicio, esas fechas pueden ser anteriores
     // al inicio oficial del ciclo y no deben aparecer como libres.
@@ -772,8 +817,9 @@ class CourseCycleService {
         ON o.schedule_date BETWEEN cc.start_date AND cc.end_date AND o.active=TRUE
       WHERE cc.id=ANY($1::uuid[])
         AND (EXISTS (SELECT 1 FROM course_cycle_instructors cci WHERE cci.cycle_id=cc.id AND cci.instructor_id=o.instructor_id AND cci.active=TRUE)
-          OR EXISTS (SELECT 1 FROM instructor_group_members igm WHERE igm.group_id=cc.group_id AND igm.instructor_id=o.instructor_id AND igm.active=TRUE AND igm.ended_at IS NULL))
-    `, [cycleIds]) : { rows: [] };
+          OR EXISTS (SELECT 1 FROM instructor_group_members igm WHERE igm.group_id=cc.group_id AND igm.instructor_id=o.instructor_id AND igm.active=TRUE AND igm.ended_at IS NULL)
+          OR ($2::uuid IS NOT NULL AND o.instructor_id=$2::uuid))
+    `, [cycleIds, filters.instructor_id || null]) : { rows: [] };
     const availabilityOverrides = new Map(availabilityOverridesResult.rows.map(item => [
       `${item.cycle_id}:${item.instructor_id}:${toDateString(item.schedule_date)}:${normalizeTime(item.start_time)}:${normalizeTime(item.end_time)}`,
       item.status,
@@ -1732,18 +1778,20 @@ class CourseCycleService {
         const preferredResult = await client.query(`
           SELECT ip.id, u.first_name, u.last_name, priority_rule.branch_id AS priority_branch_id,
             COALESCE(priority_rule.allowed_slots,'[]'::jsonb) AS allowed_slots
-          FROM course_cycle_instructors cci
-          JOIN instructor_profiles ip ON ip.id = cci.instructor_id
+          FROM course_cycles selected_cycle
+          JOIN instructor_profiles ip ON ip.id = $2::uuid
           JOIN users u ON u.id = ip.user_id
           JOIN branches ib ON ib.id = u.branch_id
           JOIN branches target ON target.id = $3
+          JOIN instructor_course_capabilities capability
+            ON capability.instructor_id=ip.id
+            AND capability.course_id=selected_cycle.course_id
+            AND capability.active=TRUE
           LEFT JOIN LATERAL (SELECT rule.branch_id,rule.allowed_slots FROM instructor_branch_priorities rule
             WHERE rule.instructor_id=ip.id AND rule.assignment_type='priority' AND rule.active=TRUE
               AND rule.effective_from<=CURRENT_DATE AND (rule.effective_until IS NULL OR rule.effective_until>=CURRENT_DATE)
             ORDER BY (rule.branch_id=$3) DESC,rule.updated_at DESC LIMIT 1) priority_rule ON TRUE
-          WHERE cci.cycle_id = $1
-            AND cci.instructor_id = $2::uuid
-            AND cci.active = true
+          WHERE selected_cycle.id = $1
             AND ip.status = 'activo'
             AND ip.deleted_at IS NULL
             AND u.active = true

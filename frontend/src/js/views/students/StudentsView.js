@@ -534,9 +534,9 @@ class StudentsView extends Component {
               <section class="student-modal-step" data-step="2">
                 <fieldset class="student-registration-types">
                   <legend>¿Qué desea registrar?</legend>
-                  <label class="student-registration-type is-selected"><input type="radio" name="registrationMode" value="regular" checked><span class="student-registration-type__check"></span><span><strong>Curso de conducción</strong><small>Matrícula normal con documentos y horarios.</small></span></label>
-                  <label class="student-registration-type"><input type="radio" name="registrationMode" value="additional-practice"><span class="student-registration-type__check"></span><span><strong>Horas prácticas</strong><small>Para personas que ya tienen licencia.</small></span></label>
-                  <label class="student-registration-type"><input type="radio" name="registrationMode" value="license-renewal"><span class="student-registration-type__check"></span><span><strong>Examen para renovación</strong><small>Solo datos, sin documentos ni horario.</small></span></label>
+                  <label class="student-registration-type is-selected"><input type="radio" name="registrationMode" value="regular" checked><span class="student-registration-type__check"></span><span><strong>Curso de conducción</strong></span></label>
+                  <label class="student-registration-type"><input type="radio" name="registrationMode" value="additional-practice"><span class="student-registration-type__check"></span><span><strong>Horas prácticas</strong></span></label>
+                  <label class="student-registration-type"><input type="radio" name="registrationMode" value="license-renewal"><span class="student-registration-type__check"></span><span><strong>Examen para renovación</strong></span></label>
                   <input type="checkbox" name="additionalPractice" id="additional-practice-toggle" hidden>
                 </fieldset>
                 <div class="student-modal-section-title">
@@ -732,6 +732,7 @@ class StudentsView extends Component {
 
                 <div class="regular-enrollment-only schedule-workflow">
                 <input type="hidden" name="practicalMode" id="selected-practical-mode" value="classes">
+                <div class="external-instructor-selector" id="external-instructor-selector" hidden></div>
                 <div class="schedule-setup-grid">
                 <section class="schedule-workflow-card" id="advanced-start-card" aria-labelledby="advanced-start-title">
                 <div class="schedule-workflow-heading">
@@ -754,7 +755,6 @@ class StudentsView extends Component {
                   <div class="advanced-practical-start-fields" id="advanced-practical-start-fields" hidden>
                     <label class="form-label" for="practical-start-date">Fecha deseada</label>
                     <input class="form-input" type="date" name="practicalStartDate" id="practical-start-date">
-                    <small>El calendario se actualizar&aacute; con la disponibilidad real desde esta fecha.</small>
                     <input type="hidden" name="practicalStartReason" value="Inicio anticipado solicitado durante la matr&iacute;cula">
                   </div>
                 </div>
@@ -763,7 +763,7 @@ class StudentsView extends Component {
                 <section class="schedule-workflow-card schedule-workflow-card--calendar" aria-labelledby="practice-schedule-title">
                 <div class="schedule-workflow-heading schedule-workflow-heading--calendar">
                   <span class="schedule-workflow-step">2</span>
-                  <div><h4 id="practice-schedule-title">Fecha y horario</h4><p id="practice-schedule-help">Selecciona una hora disponible. Para el Curso de formación intensiva, pulsa dos veces sobre una celda.</p></div>
+                  <div><h4 id="practice-schedule-title">Fecha y horario</h4></div>
                 </div>
                 ${this.renderScheduleModalitySelector()}
                 </section>
@@ -790,7 +790,7 @@ class StudentsView extends Component {
                 <section class="schedule-workflow-card schedule-workflow-card--theory" aria-labelledby="theory-schedule-title">
                 <div class="schedule-workflow-heading">
                   <span class="schedule-workflow-step">4</span>
-                  <div><h4 id="theory-schedule-title">Horario de teor&iacute;a</h4><p>Escoge la modalidad te&oacute;rica del estudiante.</p></div>
+                  <div><h4 id="theory-schedule-title">Horario de teor&iacute;a</h4></div>
                 </div>
                 <div class="theory-schedule-panel">
                   <div class="enrollment-modality-selector theory-schedule-selector">${this.renderTheoryScheduleOptions()}</div>
@@ -1049,6 +1049,12 @@ class StudentsView extends Component {
       const preferredSelect = document.getElementById('preferred-instructor-select');
       if (preferredSelect && instructorId && [...preferredSelect.options].some(option => option.value === instructorId)) {
         preferredSelect.value = instructorId;
+      } else if (preferredSelect && instructorId) {
+        const option = document.createElement('option');
+        option.value = instructorId;
+        option.textContent = instructorButton.dataset.courseInstructorName || instructorButton.textContent.trim();
+        preferredSelect.appendChild(option);
+        preferredSelect.value = instructorId;
       } else if (preferredSelect && !instructorId) {
         preferredSelect.value = '';
       }
@@ -1113,9 +1119,13 @@ class StudentsView extends Component {
       this.scheduleInstructorFilterId = null;
       const preferredInstructor = document.getElementById('preferred-instructor-select');
       if (preferredInstructor) preferredInstructor.value = '';
-      this.renderModalReferredInstructorOptions();
       const branchId = branchSelect?.selectedOptions?.[0]?.dataset?.branchId;
-      if (branchId) await this.reloadModalSchedules(branchId);
+      if (branchId) {
+        await this.loadModalReferredInstructors(branchId);
+        await this.reloadModalSchedules(branchId);
+      } else {
+        this.renderModalReferredInstructorOptions();
+      }
       this.syncScheduleOptions();
     });
     form?.querySelector('[name="discountAmount"]')?.addEventListener('input', () => this.updateRegistrationPaymentSummary());
@@ -1133,6 +1143,22 @@ class StudentsView extends Component {
     document.getElementById('toggle-canton-instructors')?.addEventListener('click', () => {
       this.showCantonReferralInstructors = !this.showCantonReferralInstructors;
       this.renderModalReferredInstructorOptions();
+    });
+    document.getElementById('external-instructor-selector')?.addEventListener('click', event => {
+      const button = event.target.closest('[data-external-instructor-id]');
+      if (!button) return;
+      const select = document.getElementById('preferred-instructor-select');
+      const instructorId = button.dataset.externalInstructorId || '';
+      if (select && instructorId && ![...select.options].some(option => option.value === instructorId)) {
+        select.add(new Option(button.textContent.trim(), instructorId));
+      }
+      if (select) {
+        select.value = instructorId;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      document.querySelectorAll('#external-instructor-selector [data-external-instructor-id]').forEach(item => {
+        item.classList.toggle('active', item === button);
+      });
     });
     const advancedStartToggle = document.getElementById('advanced-practical-start-enabled');
     const advancedStartFields = document.getElementById('advanced-practical-start-fields');
@@ -1657,6 +1683,9 @@ class StudentsView extends Component {
           .some(availability => Number(availability?.available || 0) > 0)))
       .sort((first, second) => first.localeCompare(second));
     const days = this.getCourseBusinessDays(cycle.startDate, cycle.endDate, courseKey, modality);
+    const selectedExternalInstructor = (this.modalBranchInstructors || []).some(instructor =>
+      String(instructor.id) === String(this.scheduleInstructorFilterId || '')
+      && instructor.branch_assignment === 'reserved_elsewhere');
 
     return `
       <div class="enrollment-calendar" data-course="${courseKey}" data-modality="${modality}" data-cycle-id="${escapeHtml(cycle.key)}" data-cycle-index="${cycleIndex}" data-day-window-start="0" data-day-count="${days.length}" data-required-classes="${Number(cycle.durationBusinessDays) || days.length}" style="display: ${cycleIndex === activeCycleIndex ? 'block' : 'none'};">
@@ -1679,11 +1708,11 @@ class StudentsView extends Component {
             </button>
           </div>
         </div>
-        ${cycle.instructors.length ? `
+        ${cycle.instructors.length && !selectedExternalInstructor ? `
           <div class="enrollment-cycle-instructors">
             <strong>Instructores de este curso (${cycle.instructors.length})</strong>
             <div class="course-instructor-filters" role="group" aria-label="Filtrar disponibilidad por instructor">
-              ${cycle.instructors.map((instructor, index) => `<button type="button" class="course-instructor-chip ${(String(this.scheduleInstructorFilterId || '') === String(instructor.id) || (!cycle.instructors.some(item => String(item.id) === String(this.scheduleInstructorFilterId || '')) && index === 0)) ? 'active' : ''}" data-course-instructor-id="${escapeHtml(instructor.id)}">${escapeHtml(instructor.name)}</button>`).join('')}
+              ${cycle.instructors.map((instructor, index) => `<button type="button" class="course-instructor-chip ${(String(this.scheduleInstructorFilterId || '') === String(instructor.id) || (!cycle.instructors.some(item => String(item.id) === String(this.scheduleInstructorFilterId || '')) && index === 0)) ? 'active' : ''}" data-course-instructor-id="${escapeHtml(instructor.id)}"${instructor.home_branch ? ` title="${escapeHtml(instructor.home_branch.trim())}"` : ''}>${escapeHtml(instructor.name)}</button>`).join('')}
               <button type="button" class="instructor-availability-start-toggle ${this.useInstructorFirstAvailability ? 'active' : ''}" data-instructor-availability-toggle aria-pressed="${Boolean(this.useInstructorFirstAvailability)}">
                 <span class="instructor-availability-dot"></span>
                 ${this.useInstructorFirstAvailability ? `Desde disponibilidad${this.instructorFirstAvailabilityDate ? ` · ${DateHelper.format(this.instructorFirstAvailabilityDate, 'DD/MM/YYYY')}` : ''}` : 'Cuando inicia el curso'}
@@ -2324,6 +2353,17 @@ class StudentsView extends Component {
       ? (this.modalBranchInstructors || []).filter(instructor =>
           (instructor.courses || []).some(course => String(course.id) === String(selectedCourseId)))
       : [];
+    const externalSelector = document.getElementById('external-instructor-selector');
+    const external = compatible.filter(instructor => instructor.branch_assignment === 'reserved_elsewhere');
+    if (externalSelector) {
+      externalSelector.hidden = !selectedCourseId || external.length === 0;
+      externalSelector.innerHTML = external.length ? `
+        <strong>Instructor de otra sucursal</strong>
+        <div class="course-instructor-filters" role="group" aria-label="Escoger instructor de otra sucursal">
+          <button type="button" class="course-instructor-chip active" data-external-instructor-id="">Asignaci&oacute;n del grupo</button>
+          ${external.map(instructor => `<button type="button" class="course-instructor-chip" data-external-instructor-id="${escapeHtml(instructor.id)}">${escapeHtml(instructor.name)}</button>`).join('')}
+        </div>` : '';
+    }
     const priority = compatible.filter(instructor => instructor.priority_branch);
     const cantonSupport = compatible.filter(instructor => !instructor.priority_branch);
     const reservedInstructorId = this.activatingReservation?.instructor_id || null;
@@ -2518,7 +2558,7 @@ class StudentsView extends Component {
     const alert = document.getElementById('student-modal-alert');
     if (!modal) return;
     const shouldReturnToStudents = ['/students/new', '/student-form'].includes(window.location.pathname);
-    this.studentModalScheduleContext = this.captureStudentModalScheduleContext();
+    this.studentModalScheduleContext = null;
     modal.classList.remove('active');
     modal.setAttribute('aria-hidden', 'true');
     modal.style.display = 'none';
@@ -2528,8 +2568,27 @@ class StudentsView extends Component {
     scheduleHost?.removeAttribute('aria-busy');
     scheduleHost?.querySelectorAll('.enrollment-calendar-grid.is-refreshing').forEach(grid => grid.classList.remove('is-refreshing'));
     document.getElementById('student-registration-result-modal')?.remove();
+    document.querySelectorAll('.mobile-registration-capture-overlay').forEach(overlay => overlay.remove());
+    clearTimeout(this.additionalPracticeAvailabilityTimer);
+    clearTimeout(this.additionalPracticeLookupTimer);
+    clearTimeout(this.additionalPracticeResolutionTimer);
     form?.reset();
-    this.restoreStudentModalScheduleContext();
+    this.scheduleInstructorFilterId = null;
+    this.useInstructorFirstAvailability = false;
+    this.instructorFirstAvailabilityDate = null;
+    this.showCantonReferralInstructors = false;
+    this.modalAllSchedules = null;
+    this.modalAllSchedulesKey = null;
+    this.additionalPracticeStudent = null;
+    this.additionalPracticeResolved = false;
+    this.resolvedAdditionalPracticeIdentification = '';
+    const modality = document.getElementById('selected-enrollment-modality');
+    if (modality) modality.value = 'normal';
+    document.querySelectorAll('#student-schedule-calendar .enrollment-modality-button[data-modality]').forEach(item => {
+      const selected = item.dataset.modality === 'normal';
+      item.classList.toggle('active', selected);
+      item.setAttribute('aria-pressed', String(selected));
+    });
     
     // Limpiar estado de celdas de schedule
     document.querySelectorAll('.schedule-option.selected, .schedule-option.reservation-activation-slot').forEach(cell => {
@@ -2548,6 +2607,23 @@ class StudentsView extends Component {
     this.clearReferralStaff();
     form?.querySelectorAll('[name="firstName"],[name="lastName"],[name="cedula"],[name="birthDate"],[name="email"],[name="phone"],[name="address"]').forEach(input => { input.readOnly = false; });
     this.toggleAdditionalPracticeMode(false);
+    document.querySelectorAll('.student-registration-type').forEach(card => {
+      card.classList.toggle('is-selected', card.querySelector('input')?.value === 'regular');
+    });
+    document.querySelectorAll('.renewal-hidden').forEach(element => { element.hidden = false; });
+    document.querySelectorAll('.renewal-observations-field').forEach(element => { element.hidden = true; });
+    document.querySelector('.student-modal-steps')?.classList.remove('renewal-mode');
+    const advancedFields = document.getElementById('advanced-practical-start-fields');
+    if (advancedFields) advancedFields.hidden = true;
+    const paymentFields = document.getElementById('student-payment-fields');
+    if (paymentFields) paymentFields.style.display = 'none';
+    const mobileCaptureButton = document.getElementById('mobile-registration-package-capture');
+    if (mobileCaptureButton) mobileCaptureButton.textContent = 'Capturar documentos desde teléfono';
+    const additionalCaptureButton = document.getElementById('mobile-additional-practice-capture');
+    if (additionalCaptureButton) additionalCaptureButton.textContent = 'Capturar desde teléfono';
+    form?.querySelectorAll('.registration-document-saved-status').forEach(status => { status.textContent = ''; });
+    form?.querySelectorAll('[data-file-name]').forEach(label => { label.textContent = 'Ningún archivo seleccionado'; });
+    this.updateScheduleSelectionSummary([]);
     form?.querySelectorAll('.form-error').forEach(el => el.textContent = '');
     this.goToModalStep(1);
     if (alert) {

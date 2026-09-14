@@ -1215,6 +1215,29 @@
   gap: 0.35rem;
 }
 
+.external-instructor-selector {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--gray-200);
+  border-radius: 12px;
+  background: var(--gray-50);
+}
+
+.external-instructor-selector > strong {
+  color: var(--gray-800);
+  font-size: 0.8rem;
+}
+
+.external-instructor-selector .course-instructor-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .course-instructor-chip {
   padding: 0.28rem 0.58rem;
   border: 1px solid #cfe1f7;

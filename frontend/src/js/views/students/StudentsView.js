@@ -3671,6 +3671,8 @@ class StudentsView extends Component {
         method: formData.get('paymentMethod'),
         reference: formData.get('paymentReference'),
         cashier: authService.getCurrentUser()?.name || 'Secretaría de sucursal',
+        // Actualiza la lista solamente después de cerrar este modal.
+        notify: false,
       });
       if (!paymentResult.success) {
         this.showModalAlert(
@@ -3696,10 +3698,12 @@ class StudentsView extends Component {
 
     if (student.access?.created) {
       this.showStudentAccess(student);
+      if (shouldCollectPayment) PaymentService.notifyPaymentChanged();
     } else {
       this.showModalAlert('success', shouldCollectPayment
         ? 'Estudiante, horario y pago registrados exitosamente'
         : 'Estudiante registrado exitosamente');
+      if (shouldCollectPayment) PaymentService.notifyPaymentChanged();
       setTimeout(() => {
         const url = `/student-profile/${student.id}`;
         window.history.pushState(null, null, url);

@@ -716,7 +716,8 @@
   background: var(--gray-50);
 }
 
-.staff-referral-search { position: relative; }
+.staff-referral-search { position: relative; width: 100%; }
+.staff-referral-search .form-input { width: 100%; }
 
 .staff-referral-results {
   position: absolute;

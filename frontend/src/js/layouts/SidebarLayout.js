@@ -34,6 +34,7 @@ class SidebarLayout {
       '/admin-system': '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
       '/admin-system/branches': '<path d="M3 21h18"/><path d="M6 21V7l6-4 6 4v14"/><path d="M9 10h1M14 10h1M9 14h1M14 14h1"/>',
       '/admin-system/reports': '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
+      '/admin-system/resources': '<path d="M3 12h4l2-6 4 12 2-6h6"/><circle cx="12" cy="12" r="10"/>',
       '/admin-system/referrals': '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4"/><circle cx="9" cy="7" r="4"/><path d="m17 11 2 2 4-4"/>',
       '/admin-system/audit': '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
       '/admin-system/settings': '<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6.2L14.7 4h-4L10.4 6.2a8 8 0 0 0-1.5.9l-2.4-1-2 3.4L6.5 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.5.9l.3 2.2h4l.3-2.2a8 8 0 0 0 1.5-.9l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1z"/>',
@@ -67,7 +68,7 @@ class SidebarLayout {
             ${isAdminSystem ? `
               ${[
                 ['/admin-system','Inicio'],['/admin-system/branches','Sucursales'],
-                ['/admin-system/reports','Reportes'],['/admin-system/referrals','Referidos'],
+                ['/admin-system/reports','Reportes'],['/admin-system/resources','Recursos'],['/admin-system/referrals','Referidos'],
                 ['/admin-system/audit','Auditoría'],['/admin-system/settings','Configuración']
               ].map(([href, label]) => `
                 <a href="${href}" class="nav-item ${currentPath === href ? 'active' : ''}" title="${label}" ${currentPath === href ? 'aria-current="page"' : ''}>

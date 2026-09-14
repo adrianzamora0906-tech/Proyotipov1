@@ -760,6 +760,7 @@ class StudentsView extends Component {
                   <span class="schedule-selection-summary-icon">&#10003;</span>
                   <div><small>Selecci&oacute;n actual</small><strong>A&uacute;n no has elegido un horario</strong></div>
                 </div>
+                <button type="button" class="btn btn-secondary temporary-reservation-toggle" id="temporary-reservation-toggle">Reservar este cupo por 2 días</button>
                 <label class="late-pickup-notice" id="late-pickup-notice" hidden>
                   <input type="checkbox" name="latePickupConfirmed">
                   <span><strong>Punto de encuentro: Flavio Reyes</strong>El horario de las 20:00 s&iacute; est&aacute; disponible. Confirma que informaste al estudiante que el instructor lo recoger&aacute; en la sucursal Flavio Reyes.</span>
@@ -983,6 +984,7 @@ class StudentsView extends Component {
       backButton.addEventListener('click', () => this.goToPreviousModalStep());
       backButton.dataset.listenerAttached = 'true';
     }
+    document.getElementById('temporary-reservation-toggle')?.addEventListener('click', () => this.toggleTemporaryReservationMode());
     
     document.querySelectorAll('.student-modal-step-tab').forEach(tab => {
       if (!tab.dataset.listenerAttached) {
@@ -2292,6 +2294,7 @@ class StudentsView extends Component {
   openStudentModal() {
     const modal = document.getElementById('student-modal-overlay');
     if (!modal) return;
+    this.restoreSubmitButton(document.getElementById('student-modal-submit'));
     
     // Limpiar el estado anterior del overlay
     document.querySelectorAll('.modal-overlay.active, .branch-modal-backdrop').forEach(el => {
@@ -2311,6 +2314,7 @@ class StudentsView extends Component {
       };
       document.body.appendChild(modal);
     }
+    if (!this.activatingReservation) this.temporaryReservationMode = false;
     modal.classList.add('active');
     modal.setAttribute('aria-hidden', 'false');
     modal.style.display = '';
@@ -2326,13 +2330,14 @@ class StudentsView extends Component {
     form.reset();
     this.activatingReservation = reservation;
     await this.setRegistrationMode('regular');
+    const draft=reservation.draft_data||{};
     const parts = String(reservation.name || '').trim().split(/\s+/);
     const splitAt = Math.max(Math.ceil(parts.length / 2), 1);
     const values = {
       firstName: parts.slice(0, splitAt).join(' '),
       lastName: parts.slice(splitAt).join(' '),
       cedula: reservation.identification || '',
-      phone: reservation.phone || '',
+      phone: draft.phone||reservation.phone||'',birthDate:draft.birthDate||'',email:draft.email||'',address:draft.address||'',bloodType:draft.bloodType||'',
     };
     Object.entries(values).forEach(([name, value]) => {
       const input = form.elements[name];
@@ -2371,19 +2376,22 @@ class StudentsView extends Component {
       await this.reloadModalSchedules(reservation.branch_id, reservation.instructor_id);
     }
     this.selectReservedSchedule(reservation);
+    if(draft.theorySchedule){const theory=form.querySelector(`[name="theorySchedule"][value="${draft.theorySchedule}"]`);if(theory)theory.checked=true;}
     this.syncScheduleOptions();
   }
 
   selectReservedSchedule(reservation) {
     const expectedTime = `${reservation.start_time || ''} - ${reservation.end_time || ''}`.replace(/\s/g, '');
+    const reservedSelections=reservation.draft_data?.schedulePlan?.selections||[];
     document.querySelectorAll('.schedule-option.selected, .schedule-option.reservation-activation-slot').forEach(cell => {
       cell.classList.remove('selected', 'reservation-activation-slot');
     });
     const cells = [...document.querySelectorAll('.schedule-option')].filter(cell => {
       let payload = {};
       try { payload = JSON.parse(cell.dataset.schedule || '{}'); } catch (error) { /* dato inválido */ }
-      return String(payload.cycleId || '') === String(reservation.cycle_id)
-        && String(cell.dataset.time || '').replace(/\s/g, '') === expectedTime;
+      if(String(payload.cycleId||'')!==String(reservation.cycle_id))return false;
+      if(reservedSelections.length)return reservedSelections.some(selection=>String(selection.date)===String(payload.date)&&String(selection.time||'').replace(/\s/g,'')===String(cell.dataset.time||'').replace(/\s/g,''));
+      return String(cell.dataset.time || '').replace(/\s/g, '') === expectedTime;
     });
     if (!cells.length) return;
     const calendar = cells[0].closest('.enrollment-calendar');
@@ -2424,6 +2432,13 @@ class StudentsView extends Component {
     });
     
     this.activatingReservation = null;
+    this.temporaryReservationMode = false;
+    const reservationToggle = document.getElementById('temporary-reservation-toggle');
+    reservationToggle?.classList.remove('active');
+    if (reservationToggle) reservationToggle.textContent = 'Reservar este cupo por 2 días';
+    this.restoreSubmitButton(document.getElementById('student-modal-submit'));
+    const title = document.getElementById('student-modal-title');
+    if (title) title.textContent = 'Nuevo Estudiante';
     this.clearReferralStaff();
     form?.querySelectorAll('[name="firstName"],[name="lastName"],[name="cedula"],[name="birthDate"],[name="email"],[name="phone"],[name="address"]').forEach(input => { input.readOnly = false; });
     this.toggleAdditionalPracticeMode(false);
@@ -2612,6 +2627,20 @@ class StudentsView extends Component {
     if (backBtn) backBtn.style.display = targetStep === 1 || renewal ? 'none' : 'inline-flex';
     if (nextBtn) nextBtn.style.display = targetStep === lastStep ? 'none' : 'inline-flex';
     if (submitBtn) submitBtn.style.display = targetStep === lastStep ? 'inline-flex' : 'none';
+    if (submitBtn && this.temporaryReservationMode) submitBtn.textContent = 'Reservar cupo';
+  }
+
+  toggleTemporaryReservationMode() {
+    const form=document.getElementById('student-modal-form'),button=document.getElementById('temporary-reservation-toggle');
+    if(!form?.elements.preferredInstructorId?.value){this.showModalAlert('error','Selecciona primero al instructor que reservará el cupo.');return;}
+    if(!form?.elements.scheduleId?.value){this.showModalAlert('error','Selecciona primero un horario disponible.');return;}
+    this.temporaryReservationMode=!this.temporaryReservationMode;
+    button?.classList.toggle('active',this.temporaryReservationMode);
+    if(button)button.textContent=this.temporaryReservationMode?'Reserva temporal activada · 2 días':'Reservar este cupo por 2 días';
+    const submit=document.getElementById('student-modal-submit');
+    if(submit)submit.textContent=this.temporaryReservationMode?'Reservar cupo':(authService.can('PAYMENT_CREATE')?'Completar registro':'Registrar Estudiante');
+    const alert=document.getElementById('student-modal-alert');
+    if(alert){alert.className='alert alert-info';alert.innerHTML=`<div class="alert-content">${this.temporaryReservationMode?'Completa los datos. Al finalizar se reservará el cupo durante 2 días sin crear al estudiante.':'Se continuará con el registro normal del estudiante.'}</div>`;alert.style.display='flex';}
   }
 
   getStudentModalLastStep() {
@@ -3218,6 +3247,11 @@ class StudentsView extends Component {
       return;
     }
 
+    if (this.temporaryReservationMode) {
+      await this.handleTemporaryReservationSubmit(form, formData, submitBtn);
+      return;
+    }
+
     const registrationDocumentsUrl = formData.get('registrationDocumentsMobileFileUrl');
     const registrationDocumentsPdf = formData.get('registrationDocumentsPdfFile');
     const hasRegistrationPdf = Boolean(registrationDocumentsPdf?.name);
@@ -3468,6 +3502,28 @@ class StudentsView extends Component {
         window.dispatchEvent(new PopStateEvent('popstate'));
       }, 5000);
     }
+  }
+
+  async handleTemporaryReservationSubmit(form, formData, submitBtn) {
+    const schedulePlan=this.parseSchedulePlan(formData.get('schedulePlan'));
+    const instructorId=formData.get('preferredInstructorId');
+    const branchId=form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId||null;
+    const theorySchedule=formData.get('theorySchedule');
+    if(!instructorId){this.showModalAlert('error','Selecciona el instructor que reservará el cupo.');this.goToModalStep(1);return;}
+    if(!formData.get('scheduleId')||!schedulePlan.selections.length){this.showModalAlert('error','Selecciona un horario disponible.');this.goToModalStep(1);return;}
+    if(!theorySchedule){this.showModalAlert('error','Selecciona la modalidad de teoría.');this.goToModalStep(1);return;}
+    schedulePlan.preferredInstructorId=instructorId;schedulePlan.theorySchedule=theorySchedule;
+    if(submitBtn){submitBtn.disabled=true;submitBtn.textContent='Reservando cupo...';}
+    const result=await StudentService.createTemporaryReservation({
+      identification:formData.get('cedula'),firstName:formData.get('firstName'),lastName:formData.get('lastName'),
+      birthDate:formData.get('birthDate'),email:formData.get('email'),phone:formData.get('phone'),address:formData.get('address'),
+      bloodType:formData.get('bloodType'),cityId:formData.get('city_id'),branchId,courseId:formData.get('course_id'),
+      instructorId,referredByUserId:formData.get('referredByUserId')||null,notes:this.getVisibleRegistrationNotes(),schedulePlan,
+    });
+    if(!result.success){this.showModalAlert('error',result.error||'No se pudo reservar el cupo.');this.restoreSubmitButton(submitBtn);return;}
+    this.temporaryReservationMode=false;
+    this.showModalAlert('success','Cupo reservado correctamente por 2 días. No se creó el estudiante ni se registró un pago.');
+    setTimeout(()=>{window.history.pushState(null,null,'/students?status=reservado');window.dispatchEvent(new PopStateEvent('popstate'));},1800);
   }
 
   async handleAdditionalPracticeSubmit(form, formData, submitBtn) {
@@ -3795,7 +3851,7 @@ class StudentsView extends Component {
   restoreSubmitButton(submitBtn) {
     if (!submitBtn) return;
     submitBtn.disabled = false;
-    submitBtn.textContent = authService.can('PAYMENT_CREATE') ? 'Completar registro' : 'Registrar Estudiante';
+    submitBtn.textContent = this.temporaryReservationMode ? 'Reservar cupo' : (authService.can('PAYMENT_CREATE') ? 'Completar registro' : 'Registrar Estudiante');
   }
 
   isImageFile(file) {
@@ -4025,7 +4081,7 @@ class StudentsView extends Component {
         <div class="table-cell"><div><strong>${escapeHtml(reservation.course_name || 'Curso pendiente')}</strong><div class="text-sm text-gray-500">${escapeHtml(reservation.cycle_code || '')}</div></div></div>
         <div class="table-cell">${DateHelper.format(reservation.start_date, 'DD/MM/YYYY')}</div>
         <div class="table-cell">${reservation.start_time ? `${escapeHtml(reservation.start_time)}–${escapeHtml(reservation.end_time)}` : 'Pendiente'}</div>
-        <div class="table-cell"><span class="badge student-reservation-status">Reservado</span></div>
+        <div class="table-cell"><span class="badge student-reservation-status">Reservado</span>${reservation.expires_at?`<div class="text-sm text-gray-500">Vence ${DateHelper.format(reservation.expires_at,'DD/MM/YYYY')}</div>`:''}</div>
         <div class="table-cell"><button type="button" class="btn btn-primary btn-small" data-activate-reservation="${escapeHtml(reservation.id)}">Activar</button></div>
       </div>`).join('');
   }

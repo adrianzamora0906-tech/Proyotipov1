@@ -11,6 +11,11 @@ import StringHelper from '../helpers/StringHelper.js';
 class StudentService {
   static useApi = true;
 
+  static async createTemporaryReservation(data) {
+    try { return await ApiService.createTemporaryStudentReservation(data); }
+    catch (error) { return { success: false, error: error.data?.error?.message || error.message || 'No se pudo reservar el cupo' }; }
+  }
+
   // Convierte los nombres de campos de PostgreSQL/API al formato que usa la UI.
   static normalizeStudent(student) {
     if (!student) return student;

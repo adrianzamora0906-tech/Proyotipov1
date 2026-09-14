@@ -30,6 +30,10 @@ class ApiService {
     return apiClient.get(`/students/reservations${qs ? '?' + qs : ''}`);
   }
 
+  static async createTemporaryStudentReservation(data) {
+    return apiClient.post('/students/reservations', data);
+  }
+
   static async getStudent(id) {
     return apiClient.get(`/students/${id}`);
   }

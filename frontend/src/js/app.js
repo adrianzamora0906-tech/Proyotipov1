@@ -12,10 +12,10 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=perfil-profesor-teoria-20260907";
 import DashboardView from "./views/dashboard/DashboardView.js?v=consultas-optimizadas-20260811";
-import StudentsView from "./views/students/StudentsView.js?v=arrastrar-documentos-20260910";
+import StudentsView from "./views/students/StudentsView.js?v=reserva-concurrencia-modal-20260914";
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=inicio-clases-expediente-20260910";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
-import ScheduleView from "./views/schedule/ScheduleView.js?v=proximo-curso-disponible-20260825";
+import ScheduleView from "./views/schedule/ScheduleView.js?v=ocultar-cursos-sin-filas-20260911";
 import NotificationsView from "./views/notifications/NotificationsView.js";
 import HistoryView from "./views/history/HistoryView.js";
 import ProfileView from "./views/profile/ProfileView.js";
@@ -36,9 +36,10 @@ import InstructorProfileView from "./views/instructor/InstructorProfileView.js";
 import MobileDocumentUploadView from "./views/mobile-upload/MobileDocumentUploadView.js?v=certificado-orientacion-20260824";
 import SidebarLayout from "./layouts/SidebarLayout.js?v=aviso-cambio-horario-20260910";
 import AdminDashboardView from "./views/admin/AdminDashboardView.js";
+import AdminResourceMonitorView from "./views/admin/AdminResourceMonitorView.js?v=resource-actions-20260911";
 import AdminSecurityView from "./views/admin/AdminSecurityView.js?v=tipo-instructor-20260819";
 import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js";
-import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=clave-temporal-segura-20260907";
+import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=rotacion-fin-semana-20260911";
 import ManagerReportsView from "./views/manager/ManagerReportsView.js?v=modal-ciclo-ancho-completo-20260812";
 import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=permiso-sin-filtro-pago-20260820";
 import AdminSettingsView from "./views/admin/AdminSettingsView.js";
@@ -147,6 +148,7 @@ class App {
       "instructor-profile",
     );
     this.router.register("/admin-system", AdminDashboardView, "admin-system");
+    this.router.register("/admin-system/resources", AdminResourceMonitorView, "admin-resource-monitor");
     this.router.register(
       "/admin-system/security",
       AdminSecurityView,
@@ -427,6 +429,7 @@ class App {
       "course-reports": "Reportes",
       "manager-audit": "Auditoría gerencial",
       "manager-enrollment-monitor": "Monitoreo de inscripciones",
+      "admin-resource-monitor": "Recursos del sistema",
     };
     return titles[routeName] || "SportmancarERP";
   }

@@ -207,6 +207,12 @@ export default class AdminService {
   static enrollmentMonitor(params = {}) {
     return apiClient.get(`/admin/enrollment-monitor${query(params)}`);
   }
+  static resourceMonitor(params = {}) {
+    return apiClient.get(`/admin/resource-monitor${query(params)}`);
+  }
+  static exportResourceMonitor(params = {}) {
+    return apiClient.downloadGet(`/admin/resource-monitor/export${query(params)}`);
+  }
   static auditPaymentVoids(params = {}) {
     return apiClient.get(`/admin/audit/payment-voids${query(params)}`);
   }

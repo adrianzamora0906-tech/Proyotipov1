@@ -2242,3 +2242,5 @@
 @media (max-width: 560px) {
   .registration-session-branch { align-items: flex-start; }
 }
+
+.temporary-reservation-toggle{display:flex;margin:.75rem 0 0 auto}.temporary-reservation-toggle.active{border-color:#d97706;background:#fff7ed;color:#9a4d08;box-shadow:0 0 0 3px rgba(217,119,6,.12)}

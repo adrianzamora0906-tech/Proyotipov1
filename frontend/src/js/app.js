@@ -12,7 +12,7 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=perfil-profesor-teoria-20260907";
 import DashboardView from "./views/dashboard/DashboardView.js?v=consultas-optimizadas-20260811";
-import StudentsView from "./views/students/StudentsView.js?v=reserva-concurrencia-modal-20260914";
+import StudentsView from "./views/students/StudentsView.js?v=eliminar-reserva-20260914";
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=inicio-clases-expediente-20260910";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=ocultar-cursos-sin-filas-20260911";

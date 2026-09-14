@@ -16,6 +16,11 @@ class StudentService {
     catch (error) { return { success: false, error: error.data?.error?.message || error.message || 'No se pudo reservar el cupo' }; }
   }
 
+  static async cancelTemporaryReservation(id) {
+    try { return await ApiService.cancelStudentReservation(id); }
+    catch (error) { return { success: false, error: error.data?.error?.message || error.message || 'No se pudo eliminar la reserva' }; }
+  }
+
   // Convierte los nombres de campos de PostgreSQL/API al formato que usa la UI.
   static normalizeStudent(student) {
     if (!student) return student;

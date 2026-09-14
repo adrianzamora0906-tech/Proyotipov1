@@ -34,6 +34,10 @@ class ApiService {
     return apiClient.post('/students/reservations', data);
   }
 
+  static async cancelStudentReservation(id) {
+    return apiClient.delete(`/students/reservations/${id}`);
+  }
+
   static async getStudent(id) {
     return apiClient.get(`/students/${id}`);
   }

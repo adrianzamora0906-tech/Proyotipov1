@@ -426,6 +426,26 @@ class StudentsView extends Component {
         if (reservation) this.openReservationActivation(reservation);
       });
     });
+    document.querySelectorAll('[data-delete-reservation]').forEach(button => {
+      button.addEventListener('click', async () => {
+        const reservation = (this.visibleReservations || [])
+          .find(item => String(item.id) === String(button.dataset.deleteReservation));
+        if (!reservation) return;
+        const name = reservation.name || reservation.identification || 'esta persona';
+        if (!window.confirm(`¿Eliminar la reserva de ${name}? El cupo quedará disponible inmediatamente.`)) return;
+        const originalText = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Eliminando...';
+        const result = await StudentService.cancelTemporaryReservation(reservation.id);
+        if (!result.success) {
+          window.alert(result.error || 'No se pudo eliminar la reserva.');
+          button.disabled = false;
+          button.textContent = originalText;
+          return;
+        }
+        await applyStudentFilters();
+      });
+    });
   }
 
   bindSummaryCardEvents(studentFilterForm, applyStudentFilters = null) {
@@ -1011,9 +1031,21 @@ class StudentsView extends Component {
       }
       const instructorButton = event.target.closest('[data-course-instructor-id]');
       if (!instructorButton) return;
-      const branchId = document.getElementById('modal-branch-select')?.selectedOptions?.[0]?.dataset?.branchId;
-      if (!branchId || instructorButton.disabled) return;
+      const branchId = document.getElementById('modal-branch-select')?.selectedOptions?.[0]?.dataset?.branchId
+        || this.studentModalScheduleContext?.branchId
+        || authService.getCurrentUser()?.branch_id;
+      if (instructorButton.disabled) return;
+      if (!branchId) {
+        this.showModalAlert('error', 'Selecciona nuevamente la sucursal antes de cambiar de instructor.');
+        return;
+      }
       const instructorId = instructorButton.dataset.courseInstructorId || null;
+      document.querySelectorAll('#student-schedule-calendar [data-course-instructor-id]').forEach(button => {
+        const selected = String(button.dataset.courseInstructorId || '') === String(instructorId || '');
+        button.classList.toggle('active', selected);
+        button.setAttribute('aria-pressed', String(selected));
+      });
+      this.scheduleInstructorFilterId = instructorId;
       const preferredSelect = document.getElementById('preferred-instructor-select');
       if (preferredSelect && instructorId && [...preferredSelect.options].some(option => option.value === instructorId)) {
         preferredSelect.value = instructorId;
@@ -1919,13 +1951,17 @@ class StudentsView extends Component {
     return branchId ? [] : ScheduleService.getAvailableSchedules();
   }
 
-  async reloadModalSchedules(branchId, instructorId = null, practicalStartDate = null) {
+  async reloadModalSchedules(branchId, instructorId = null, practicalStartDate = null, options = {}) {
     const host = document.getElementById('student-schedule-calendar');
     if (!host || !branchId) return;
+    const requestId = (this.modalScheduleRequestId || 0) + 1;
+    this.modalScheduleRequestId = requestId;
     // Al cambiar de instructor se conserva toda la pantalla de inscripción.
     // Solo se refrescan las celdas de disponibilidad del calendario.
     host.setAttribute('aria-busy', 'true');
     host.querySelectorAll('.enrollment-calendar-grid').forEach(grid => grid.classList.add('is-refreshing'));
+    try {
+    const forceAllSchedulesRefresh = Boolean(options.forceAllSchedulesRefresh);
     let selectedInstructorId = instructorId ?? document.getElementById('preferred-instructor-select')?.value ?? null;
     let shouldFilterByInstructor = Boolean(selectedInstructorId);
     const advancedEnabled = document.getElementById('advanced-practical-start-enabled')?.checked;
@@ -1974,7 +2010,9 @@ class StudentsView extends Component {
     }
     this.scheduleInstructorFilterId = selectedInstructorId || null;
     if (selectedInstructorId && shouldFilterByInstructor) {
-      allSchedules ||= this.modalAllSchedulesKey === allSchedulesKey ? this.modalAllSchedules : null;
+      allSchedules ||= !forceAllSchedulesRefresh && this.modalAllSchedulesKey === allSchedulesKey
+        ? this.modalAllSchedules
+        : null;
       allSchedules ||= await this.getSchedulesForModal(branchId, null, selectedPracticalStart || null);
       this.modalAllSchedules = allSchedules;
       this.modalAllSchedulesKey = allSchedulesKey;
@@ -1990,6 +2028,9 @@ class StudentsView extends Component {
         return schedule;
       });
     }
+    // Si el modal se cerró o se hizo otra selección mientras esperaba la API,
+    // esta respuesta ya no puede modificar el calendario actual.
+    if (requestId !== this.modalScheduleRequestId || !host.isConnected) return;
     const nextCalendar = document.createElement('div');
     nextCalendar.innerHTML = this.renderScheduleCalendar(schedules);
     const currentGrids = [...host.querySelectorAll('.enrollment-calendar-grid')];
@@ -2054,8 +2095,17 @@ class StudentsView extends Component {
     host.querySelectorAll('.enrollment-calendar').forEach(calendar => this.updateCalendarWindow(calendar));
     this.syncScheduleOptions();
     this.setPracticalMode(document.getElementById('selected-practical-mode')?.value || 'classes');
-    host.removeAttribute('aria-busy');
-    host.querySelectorAll('.enrollment-calendar-grid.is-refreshing').forEach(grid => grid.classList.remove('is-refreshing'));
+    } catch (error) {
+      if (requestId === this.modalScheduleRequestId) {
+        console.error('No se pudo actualizar el instructor del modal:', error);
+        this.showModalAlert('error', error?.message || 'No se pudo actualizar la disponibilidad del instructor.');
+      }
+    } finally {
+      if (requestId === this.modalScheduleRequestId) {
+        host.removeAttribute('aria-busy');
+        host.querySelectorAll('.enrollment-calendar-grid.is-refreshing').forEach(grid => grid.classList.remove('is-refreshing'));
+      }
+    }
   }
 
   flattenEnrollmentOptions(cycles) {
@@ -2299,8 +2349,11 @@ class StudentsView extends Component {
     // Limpiar el estado anterior del overlay
     document.querySelectorAll('.modal-overlay.active, .branch-modal-backdrop').forEach(el => {
       if (el !== modal) {
-        el.classList.remove('active');
-        el.style.display = 'none';
+        if (el.classList.contains('branch-modal-backdrop')) el.remove();
+        else {
+          el.classList.remove('active');
+          el.style.display = 'none';
+        }
       }
     });
     
@@ -2315,6 +2368,7 @@ class StudentsView extends Component {
       document.body.appendChild(modal);
     }
     if (!this.activatingReservation) this.temporaryReservationMode = false;
+    this.restoreStudentModalScheduleContext();
     modal.classList.add('active');
     modal.setAttribute('aria-hidden', 'false');
     modal.style.display = '';
@@ -2322,6 +2376,51 @@ class StudentsView extends Component {
     this.goToModalStep(1);
     this.syncScheduleOptions();
     modal.querySelector('[name="province"]')?.focus();
+  }
+
+  captureStudentModalScheduleContext() {
+    const form = document.getElementById('student-modal-form');
+    const branch = form?.querySelector('[name="branch"]');
+    const course = form?.querySelector('[name="course_id"]');
+    const instructor = form?.querySelector('[name="preferredInstructorId"]');
+    return {
+      province: form?.querySelector('[name="province"]')?.value || '',
+      cityId: form?.querySelector('[name="city_id"]')?.value || '',
+      branchId: branch?.selectedOptions?.[0]?.dataset?.branchId || authService.getCurrentUser()?.branch_id || '',
+      branchValue: branch?.value || '',
+      courseId: course?.value || '',
+      instructorId: instructor?.value || this.scheduleInstructorFilterId || '',
+      modality: document.getElementById('selected-enrollment-modality')?.value || 'normal',
+    };
+  }
+
+  restoreStudentModalScheduleContext() {
+    const context = this.studentModalScheduleContext;
+    const form = document.getElementById('student-modal-form');
+    if (!context || !form) return;
+    const setValueWhenPresent = (control, value, matcher = option => option.value === String(value || '')) => {
+      if (!control || !value) return;
+      const option = [...control.options].find(matcher);
+      if (option) control.value = option.value;
+    };
+    setValueWhenPresent(form.querySelector('[name="province"]'), context.province);
+    setValueWhenPresent(form.querySelector('[name="city_id"]'), context.cityId);
+    setValueWhenPresent(
+      form.querySelector('[name="branch"]'),
+      context.branchValue,
+      option => String(option.dataset.branchId || '') === String(context.branchId || '')
+        || option.value === String(context.branchValue || ''),
+    );
+    setValueWhenPresent(form.querySelector('[name="course_id"]'), context.courseId);
+    setValueWhenPresent(form.querySelector('[name="preferredInstructorId"]'), context.instructorId);
+    const modality = document.getElementById('selected-enrollment-modality');
+    if (modality) modality.value = context.modality || 'normal';
+    document.querySelectorAll('#student-schedule-calendar .enrollment-modality-button[data-modality]').forEach(item => {
+      const selected = item.dataset.modality === (context.modality || 'normal');
+      item.classList.toggle('active', selected);
+      item.setAttribute('aria-pressed', String(selected));
+    });
+    this.scheduleInstructorFilterId = context.instructorId || null;
   }
 
   async openReservationActivation(reservation) {
@@ -2419,11 +2518,18 @@ class StudentsView extends Component {
     const alert = document.getElementById('student-modal-alert');
     if (!modal) return;
     const shouldReturnToStudents = ['/students/new', '/student-form'].includes(window.location.pathname);
+    this.studentModalScheduleContext = this.captureStudentModalScheduleContext();
     modal.classList.remove('active');
     modal.setAttribute('aria-hidden', 'true');
     modal.style.display = 'none';
     document.body.style.overflow = '';
+    this.modalScheduleRequestId = (this.modalScheduleRequestId || 0) + 1;
+    const scheduleHost = document.getElementById('student-schedule-calendar');
+    scheduleHost?.removeAttribute('aria-busy');
+    scheduleHost?.querySelectorAll('.enrollment-calendar-grid.is-refreshing').forEach(grid => grid.classList.remove('is-refreshing'));
+    document.getElementById('student-registration-result-modal')?.remove();
     form?.reset();
+    this.restoreStudentModalScheduleContext();
     
     // Limpiar estado de celdas de schedule
     document.querySelectorAll('.schedule-option.selected, .schedule-option.reservation-activation-slot').forEach(cell => {
@@ -2735,19 +2841,40 @@ class StudentsView extends Component {
   }
 
   async loadNextEnrollmentCycle(button, currentIndex) {
+    if (this.loadingNextEnrollmentCycle) return;
     const calendar = button.closest('.enrollment-calendar');
+    const currentCycleId = calendar?.dataset.cycleId;
     const courseKey = calendar?.dataset.course;
     const modality = calendar?.dataset.modality || 'normal';
     const form = document.getElementById('student-modal-form');
     const branchId = form?.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId;
     const instructorId = form?.querySelector('[name="preferredInstructorId"]')?.value || null;
-    const errorHost = document.getElementById('schedule-error');
     if (!branchId || !courseKey) return;
 
     const originalText = button.textContent;
+    const showNextLoadedCycle = () => {
+      const nextSet = document.querySelector(`.enrollment-cycle-set[data-course="${courseKey}"][data-modality="${modality}"]`);
+      const calendars = [...(nextSet?.querySelectorAll(':scope > .enrollment-calendar') || [])];
+      const refreshedCurrentIndex = calendars.findIndex(item => String(item.dataset.cycleId || '') === String(currentCycleId || ''));
+      const baseIndex = refreshedCurrentIndex >= 0 ? refreshedCurrentIndex : currentIndex;
+      const nextCalendar = calendars[baseIndex + 1];
+      if (!nextSet || !nextCalendar) return false;
+      calendars.forEach(item => this.resetCalendarSelection(item));
+      nextSet.dataset.activeCycleIndex = String(nextCalendar.dataset.cycleIndex || baseIndex + 1);
+      this.syncScheduleOptions();
+      return true;
+    };
     try {
+      this.loadingNextEnrollmentCycle = true;
       button.disabled = true;
       button.textContent = 'Cargando...';
+
+      // El calendario puede conservar una respuesta anterior mientras el servidor
+      // ya tiene cursos posteriores. Se actualiza primero y solo se publica otro
+      // ciclo cuando verdaderamente no existe uno para avanzar.
+      await this.reloadModalSchedules(branchId, instructorId, null, { forceAllSchedulesRefresh: true });
+      if (showNextLoadedCycle()) return;
+
       const result = await ApiService.getCourseEnrollmentOptions({
         branch_id: branchId,
         vehicle_type: courseKey,
@@ -2756,18 +2883,19 @@ class StudentsView extends Component {
         extend: true,
       });
       if (!result.success) throw new Error(result.error || 'No se pudo crear el siguiente curso.');
-      await this.reloadModalSchedules(branchId, instructorId);
-      const nextSet = document.querySelector(`.enrollment-cycle-set[data-course="${courseKey}"][data-modality="${modality}"]`);
-      const availableCalendars = [...(nextSet?.querySelectorAll(':scope > .enrollment-calendar') || [])];
-      if (availableCalendars.length <= currentIndex + 1) {
+      await this.reloadModalSchedules(branchId, instructorId, null, { forceAllSchedulesRefresh: true });
+      if (!showNextLoadedCycle()) {
         throw new Error('No fue posible publicar otro curso con los recursos disponibles.');
       }
-      nextSet.dataset.activeCycleIndex = String(currentIndex + 1);
-      this.syncScheduleOptions();
     } catch (error) {
-      if (errorHost) errorHost.textContent = error.message || 'No se pudo cargar el siguiente curso.';
-      button.disabled = false;
-      button.textContent = originalText;
+      const currentErrorHost = document.getElementById('schedule-error');
+      if (currentErrorHost) currentErrorHost.textContent = error.message || 'No se pudo cargar el siguiente curso.';
+    } finally {
+      this.loadingNextEnrollmentCycle = false;
+      if (button.isConnected) {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
     }
   }
 
@@ -4082,7 +4210,7 @@ class StudentsView extends Component {
         <div class="table-cell">${DateHelper.format(reservation.start_date, 'DD/MM/YYYY')}</div>
         <div class="table-cell">${reservation.start_time ? `${escapeHtml(reservation.start_time)}–${escapeHtml(reservation.end_time)}` : 'Pendiente'}</div>
         <div class="table-cell"><span class="badge student-reservation-status">Reservado</span>${reservation.expires_at?`<div class="text-sm text-gray-500">Vence ${DateHelper.format(reservation.expires_at,'DD/MM/YYYY')}</div>`:''}</div>
-        <div class="table-cell"><button type="button" class="btn btn-primary btn-small" data-activate-reservation="${escapeHtml(reservation.id)}">Activar</button></div>
+        <div class="table-cell"><div class="student-reservation-actions"><button type="button" class="btn btn-primary btn-small" data-activate-reservation="${escapeHtml(reservation.id)}">Activar</button><button type="button" class="btn btn-danger btn-small" data-delete-reservation="${escapeHtml(reservation.id)}">Eliminar</button></div></div>
       </div>`).join('');
   }
 

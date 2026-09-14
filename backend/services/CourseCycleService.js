@@ -204,6 +204,25 @@ class CourseCycleService {
       const slotCount = INTENSIVE_PRACTICAL_SLOTS[vehicleType].length;
       let startDate = nextSaturday(new Date());
       let previousInstructorId = null;
+      if (String(filters.extend || '').toLowerCase() === 'true') {
+        const latestPublished = (await client.query(`
+          SELECT rotation.start_date,rotation.instructor_id
+          FROM intensive_instructor_rotation_assignments rotation
+          JOIN course_cycles cc ON cc.id=rotation.cycle_id
+          WHERE rotation.branch_id=$1 AND rotation.vehicle_type=$2
+            AND rotation.active=TRUE AND rotation.cycle_id IS NOT NULL
+            AND cc.active=TRUE AND cc.deleted_at IS NULL
+            AND cc.status IN ('activo','proximo') AND cc.start_date>=CURRENT_DATE
+          ORDER BY rotation.start_date DESC,rotation.position_order DESC
+          LIMIT 1
+        `, [branchId, vehicleType])).rows[0];
+        if (latestPublished) {
+          const nextStart = new Date(`${toDateString(latestPublished.start_date)}T12:00:00`);
+          nextStart.setDate(nextStart.getDate() + 7);
+          startDate = toDateString(nextStart);
+          previousInstructorId = latestPublished.instructor_id;
+        }
+      }
       for (let weekendGuard = 0; weekendGuard < 12; weekendGuard += 1) {
         let assignments = (await client.query(`
           SELECT rotation.id,rotation.position_order,rotation.instructor_id,rotation.cycle_id,

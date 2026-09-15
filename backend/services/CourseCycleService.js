@@ -110,6 +110,16 @@ function practicalSlots(cycle) {
     : NORMAL_PRACTICAL_SLOTS;
 }
 
+function benitoWeeklyStartDate(officialStartDate) {
+  const base = new Date('2026-09-14T12:00:00');
+  const official = new Date(`${toDateString(officialStartDate)}T12:00:00`);
+  if (official <= base) return toDateString(official);
+  const elapsedDays = Math.floor((official - base) / 86400000);
+  const start = new Date(base);
+  start.setDate(start.getDate() + Math.floor(elapsedDays / 7) * 7);
+  return toDateString(start);
+}
+
 function addBusinessDays(startDate, daysToAdd) {
   const date = new Date(`${toDateString(startDate)}T00:00:00`);
   let remaining = Number(daysToAdd) || 0;
@@ -172,6 +182,22 @@ class CourseCycleService {
       if (!program) {
         await client.query('COMMIT');
         return null;
+      }
+
+      if (String(filters.extend || '').toLowerCase() === 'true') {
+        const published = await client.query(`
+          SELECT cc.id
+          FROM course_cycles cc
+          WHERE cc.branch_id=$1 AND cc.vehicle_type=$2 AND cc.modality='intensivo'
+            AND cc.active=TRUE AND cc.deleted_at IS NULL
+            AND cc.status IN ('activo','proximo') AND cc.end_date>=CURRENT_DATE
+          ORDER BY cc.start_date
+          LIMIT 6
+        `, [branchId, vehicleType]);
+        if (published.rows.length >= 6) {
+          await client.query('COMMIT');
+          return { cycleIds: published.rows.map(row => row.id) };
+        }
       }
 
       const pool = (await client.query(`
@@ -400,8 +426,10 @@ class CourseCycleService {
     const configured = await db.query(`SELECT p.assignment_mode,p.automatic_cycles FROM branch_course_programs p
       JOIN courses c ON c.id=p.course_id
       WHERE p.branch_id=$1 AND p.vehicle_type=$2 AND c.active=TRUE LIMIT 1`, [branchId, vehicleType]);
+    const extendRequested = String(filters.extend || '').toLowerCase() === 'true';
     if (configured.rows.length
-      && (configured.rows[0].assignment_mode === 'groups' || !configured.rows[0].automatic_cycles)) return;
+      && (configured.rows[0].assignment_mode === 'groups'
+        || (!configured.rows[0].automatic_cycles && !extendRequested))) return;
 
     const client = await db.getClient();
     try {
@@ -409,6 +437,20 @@ class CourseCycleService {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         `next-course-cycle:${branchId}:${vehicleType}:${modality}`,
       ]);
+
+      if (String(filters.extend || '').toLowerCase() === 'true') {
+        const published = await client.query(`
+          SELECT COUNT(*)::int total
+          FROM course_cycles
+          WHERE branch_id=$1 AND vehicle_type=$2 AND modality=$3
+            AND active=TRUE AND deleted_at IS NULL
+            AND status IN ('activo','proximo') AND end_date>=CURRENT_DATE
+        `, [branchId, vehicleType, modality]);
+        if (Number(published.rows[0]?.total || 0) >= 6) {
+          await client.query('COMMIT');
+          return;
+        }
+      }
 
       const upcoming = await client.query(`
         SELECT id FROM course_cycles
@@ -488,11 +530,14 @@ class CourseCycleService {
 
       await client.query(`
         INSERT INTO course_cycle_instructors (cycle_id, instructor_id, role, active)
-        SELECT $1, instructor_id, role, true
-        FROM course_cycle_instructors
-        WHERE cycle_id = $2 AND active = true
+        SELECT $1, source.instructor_id, source.role, true
+        FROM course_cycle_instructors source
+        JOIN instructor_profiles profile ON profile.id=source.instructor_id
+        WHERE source.cycle_id = $2 AND source.active = true
+          AND profile.status='activo' AND profile.deleted_at IS NULL
+          AND (profile.practice_area='mixto' OR profile.practice_area=$3)
         ON CONFLICT (cycle_id, instructor_id) DO UPDATE SET active = true, updated_at = NOW()
-      `, [inserted.rows[0].id, template.id]);
+      `, [inserted.rows[0].id, template.id, vehicleType]);
 
       await client.query('COMMIT');
     } catch (error) {
@@ -681,6 +726,15 @@ class CourseCycleService {
             AND selected_capability.active=TRUE
           WHERE selected_ip.id=$${params.length}
             AND selected_ip.status='activo' AND selected_ip.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM instructor_branch_priorities selected_priority
+              WHERE selected_priority.instructor_id=selected_ip.id
+                AND selected_priority.assignment_type='priority'
+                AND selected_priority.active=TRUE
+                AND selected_priority.effective_from<=CURRENT_DATE
+                AND (selected_priority.effective_until IS NULL OR selected_priority.effective_until>=CURRENT_DATE)
+                AND selected_priority.branch_id<>cc.branch_id
+            )
         )
       )`;
     }
@@ -765,9 +819,12 @@ class CourseCycleService {
     // de disponibilidad de estos ciclos, conservando su regla de prioridad.
     if (filters.instructor_id && cycleIds.length) {
       const selectedInstructorRuleResult = await db.query(`
-        SELECT ip.id AS instructor_id, priority_rule.branch_id AS priority_branch_id,
+        SELECT ip.id AS instructor_id,
+          TRIM(CONCAT(u.first_name, ' ', u.last_name)) AS instructor_name,
+          priority_rule.branch_id AS priority_branch_id,
           COALESCE(priority_rule.allowed_slots,'[]'::jsonb) AS allowed_slots
         FROM instructor_profiles ip
+        JOIN users u ON u.id=ip.user_id
         LEFT JOIN LATERAL (
           SELECT rule.branch_id, rule.allowed_slots
           FROM instructor_branch_priorities rule
@@ -792,11 +849,21 @@ class CourseCycleService {
         });
       }
     }
+    const selectedInstructorRule = filters.instructor_id && cycleIds.length
+      ? (instructorRules.get(cycleIds[0]) || []).find(rule =>
+        String(rule.instructor_id) === String(filters.instructor_id))
+      : null;
+    const selectedInstructorShowsFullSchedule = String(selectedInstructorRule?.instructor_name || '')
+      .trim().toLowerCase() === 'benito alonzo';
+    const practicalDatesForRow = row => practicalCycleDates(
+      row,
+      filters.practical_start_date
+        || (selectedInstructorShowsFullSchedule ? benitoWeeklyStartDate(row.start_date) : null),
+    );
     // La ocupación debe cubrir las fechas prácticas que realmente se muestran.
     // Cuando Secretaría adelanta el inicio, esas fechas pueden ser anteriores
     // al inicio oficial del ciclo y no deben aparecer como libres.
-    const displayedPracticalDates = result.rows.flatMap(row =>
-      practicalCycleDates(row, filters.practical_start_date));
+    const displayedPracticalDates = result.rows.flatMap(practicalDatesForRow);
     const availabilityRange = displayedPracticalDates.reduce((range, date) => ({
       start: !range.start || date < range.start ? date : range.start,
       end: !range.end || date > range.end ? date : range.end,
@@ -920,8 +987,13 @@ class CourseCycleService {
       `${toDateString(row.schedule_date)}:${normalizeTime(row.exam_time)}`,
       Number(row.total),
     ]));
-
     const options = result.rows.map(row => {
+      const cycleIncludesBenito = (Array.isArray(row.instructors) ? row.instructors : [])
+        .some(instructor => String(instructor.name || '').trim().toLowerCase() === 'benito alonzo');
+      const isManta2000Schedule = String(row.branch_name || '').trim().toLowerCase() === 'manta 2000';
+      const showFullNormalSchedule = (selectedInstructorShowsFullSchedule || cycleIncludesBenito || isManta2000Schedule)
+        && row.modality !== 'intensivo';
+      const rowPracticalSlots = showFullNormalSchedule ? NORMAL_PRACTICAL_SLOTS : practicalSlots(row);
       const configuredCapacity = Number(row.slot_capacity) || 1;
       const usedCycleSeats = cycleSeatUsage.get(String(row.id)) || 0;
       const configuredPublishedCapacity = Number(row.published_capacity) > 0
@@ -931,7 +1003,9 @@ class CourseCycleService {
         ? Number.MAX_SAFE_INTEGER
         : configuredPublishedCapacity * Math.max(practicalSlots(row).length, 1);
       const cycleHasSeats = usedCycleSeats < configuredCourseCapacity;
-      const practicalDates = practicalCycleDates(row, filters.practical_start_date);
+      const practicalDates = practicalDatesForRow(row);
+      const instructorBaseStart = selectedInstructorShowsFullSchedule
+        && practicalDates[0] < toDateString(row.start_date);
       const rowCycleRules = instructorRules.get(row.id) || [];
       const rowPriorityRules = rowCycleRules.filter(rule =>
         String(rule.priority_branch_id || '') === String(row.branch_id));
@@ -945,12 +1019,12 @@ class CourseCycleService {
           : practicalDates;
         const rule = rowCapacityRules.find(item => String(item.instructor_id) === String(instructor.id));
         if (!rule || !eligibleDates.length) return false;
-        const slotAllowed = !rule.priority_branch_id
+          const slotAllowed = !rule.priority_branch_id
           || (String(rule.priority_branch_id) === String(row.branch_id)
-            ? Array.isArray(rule.allowed_slots) && eligibleDates.every(date => rule.allowed_slots.some(slot =>
+            ? Array.isArray(rule.allowed_slots) && (!rule.allowed_slots.length || eligibleDates.every(date => rule.allowed_slots.some(slot =>
               Number(slot.weekday) === new Date(`${date}T12:00:00`).getDay()
               && normalizeTime(slot.startTime || slot.start_time) === startTime
-              && normalizeTime(slot.endTime || slot.end_time) === endTime))
+              && normalizeTime(slot.endTime || slot.end_time) === endTime)))
             : Array.isArray(rule.allowed_slots) && eligibleDates.every(date => !rule.allowed_slots.some(slot =>
               Number(slot.weekday) === new Date(`${date}T12:00:00`).getDay()
               && normalizeTime(slot.startTime || slot.start_time) === startTime
@@ -990,6 +1064,7 @@ class CourseCycleService {
         practicalStartDate: practicalDates[0] || toDateString(row.start_date),
         practicalEndDate: practicalDates[practicalDates.length - 1] || toDateString(row.end_date),
         practicalStartAdvanced: Boolean(filters.practical_start_date && practicalDates[0] < toDateString(row.start_date)),
+        instructorBaseStart,
         durationBusinessDays: Number(row.duration_business_days),
         status: row.status,
         group: row.group_code ? {
@@ -1000,9 +1075,10 @@ class CourseCycleService {
           .filter(instructor => filters.instructor_id || instructorHasAvailability(instructor)),
         theoryOptions: row.theory_options,
         slotCapacity: configuredCapacity,
-        slots: practicalSlots(row).map(([startTime, endTime]) => {
+        fullNormalSchedule: showFullNormalSchedule,
+        slots: rowPracticalSlots.map(([startTime, endTime]) => {
           const dates = practicalDates;
-          const eligibleDates = Array.isArray(row.schedule_templates) && row.schedule_templates.length
+          const eligibleDates = !showFullNormalSchedule && Array.isArray(row.schedule_templates) && row.schedule_templates.length
             ? dates.filter(date => row.schedule_templates.some(template =>
               Number(template.day_of_week) === new Date(`${date}T00:00:00`).getDay()
               && normalizeTime(template.start_time) === startTime
@@ -1015,10 +1091,10 @@ class CourseCycleService {
             if(filters.instructor_id&&String(rule.instructor_id)!==String(filters.instructor_id))return false;
             if(!rule.priority_branch_id)return true;
             if(String(rule.priority_branch_id)===String(row.branch_id)){
-              return Array.isArray(rule.allowed_slots)&&eligibleDates.every(date=>rule.allowed_slots.some(slot=>
+              return Array.isArray(rule.allowed_slots)&&(!rule.allowed_slots.length||eligibleDates.every(date=>rule.allowed_slots.some(slot=>
                 Number(slot.weekday)===new Date(`${date}T12:00:00`).getDay()
                 && normalizeTime(slot.startTime||slot.start_time)===startTime
-                && normalizeTime(slot.endTime||slot.end_time)===endTime));
+                && normalizeTime(slot.endTime||slot.end_time)===endTime)));
             }
             return Array.isArray(rule.allowed_slots)&&eligibleDates.every(date=>!rule.allowed_slots.some(slot=>
               Number(slot.weekday)===new Date(`${date}T12:00:00`).getDay()
@@ -1056,6 +1132,11 @@ class CourseCycleService {
             const selectedOverrideStatus = filters.instructor_id
               ? availabilityOverrides.get(`${row.id}:${filters.instructor_id}:${date}:${startTime}:${endTime}`)
               : null;
+            const selectedInstructorBusy = Boolean(filters.instructor_id)
+              && instructorBusyResult.rows.some(item =>
+                toDateString(item.schedule_date) === date
+                && normalizeTime(item.start_time) < endTime
+                && normalizeTime(item.end_time) > startTime);
             const occupied = occupancy.get(occupancyKey) || 0;
             const occupiedGlobally = filters.instructor_id ? occupied : (globalOccupancy.get(occupancyKey) || 0);
             const dailyCapacity = cycleHasSeats
@@ -1067,7 +1148,8 @@ class CourseCycleService {
               examCount: examAppointments.get(`${date}:${startTime}`) || 0,
               // En la vista agregada "Todos" también se debe advertir que la
               // franja ya está reservada, aunque aún queden otros instructores.
-              status: selectedOverrideStatus === 'reserved' || occupied > 0 || occupiedGlobally > 0 ? 'reserved' : null,
+              status: selectedOverrideStatus === 'reserved' || selectedInstructorBusy
+                || occupied > 0 || occupiedGlobally > 0 ? 'reserved' : null,
               available: Math.max(Math.min(dailyCapacity - occupied, dailyCapacity - occupiedGlobally), 0),
             }];
           }));
@@ -1085,7 +1167,36 @@ class CourseCycleService {
       };
     });
 
-    return options;
+    if (!selectedInstructorShowsFullSchedule) return options;
+
+    // Benito trabaja sobre una sola secuencia semanal, cuyo inicio base es el
+    // lunes 14/09/2026. Moto ocupa cinco dias y Automovil ocho, pero los ciclos
+    // automaticos intermedios no deben verse como nuevos inicios de Benito.
+    // Conservamos un ciclo tecnico por tipo/modalidad y semana para registrar
+    // la matricula, mientras la agenda global sigue evitando cruces entre ambos.
+    const weeklyOptions = new Map();
+    options.forEach(option => {
+      if (option.modality === 'intensivo') {
+        weeklyOptions.set(`intensivo:${option.id}`, option);
+        return;
+      }
+      const weeklyStart = benitoWeeklyStartDate(option.startDate);
+      const key = `${option.vehicleType}:${option.modality}:${weeklyStart}`;
+      const current = weeklyOptions.get(key);
+      const candidateDistance = Math.abs(
+        new Date(`${option.startDate}T12:00:00`) - new Date(`${weeklyStart}T12:00:00`)
+      );
+      const currentDistance = current ? Math.abs(
+        new Date(`${current.startDate}T12:00:00`) - new Date(`${weeklyStart}T12:00:00`)
+      ) : Number.MAX_SAFE_INTEGER;
+      if (!current || candidateDistance < currentDistance
+        || (candidateDistance === currentDistance && String(option.startDate) < String(current.startDate))) {
+        weeklyOptions.set(key, option);
+      }
+    });
+    return [...weeklyOptions.values()].sort((first, second) =>
+      String(first.practicalStartDate || first.startDate).localeCompare(String(second.practicalStartDate || second.startDate))
+      || String(first.vehicleType).localeCompare(String(second.vehicleType)));
   }
 
   static async getInstructorFirstAvailability(user, filters = {}) {
@@ -1509,11 +1620,15 @@ class CourseCycleService {
     const preferredInstructorId = data.preferredInstructorId || schedulePlan?.preferredInstructorId || null;
     const selections = Array.isArray(schedulePlan?.selections) ? schedulePlan.selections : [];
     const theorySelection = schedulePlan?.theorySchedule;
-    const theoryOption = theorySelection === 'virtual' ? null : TheoryCourseService.normalizeSelection(theorySelection);
-    const theorySchedule = theorySelection === 'virtual' ? 'virtual' : theoryOption.modality;
+    const theoryPending = !theorySelection || theorySelection === 'por_confirmar';
+    const theoryOption = theoryPending || theorySelection === 'virtual'
+      ? null
+      : TheoryCourseService.normalizeSelection(theorySelection);
+    const theorySchedule = theoryPending ? null : theorySelection === 'virtual' ? 'virtual' : theoryOption.modality;
     const requestedPracticalStart = schedulePlan?.practicalStartDate || null;
     const practicalStartReason = String(schedulePlan?.practicalStartReason || '').trim();
     const examOnly = schedulePlan?.practicalMode === 'exam_only';
+    const pickupLocation = String(schedulePlan?.pickupLocation || '').trim().slice(0, 160);
     const rescheduleFromCycleId = data.rescheduleFromCycleId || null;
     const rescheduleReason = String(data.rescheduleReason || '').trim();
     if (!studentId) throw createError(422, 'Estudiante requerido');
@@ -1521,7 +1636,7 @@ class CourseCycleService {
       throw createError(422, 'El motivo del reagendamiento es obligatorio');
     }
     if (!selections.length) throw createError(422, 'Debes seleccionar un horario');
-    if (!['presencial_regular', 'presencial_intensivo', 'virtual'].includes(theorySchedule)) {
+    if (theorySchedule && !['presencial_regular', 'presencial_intensivo', 'virtual'].includes(theorySchedule)) {
       throw createError(422, 'Debes seleccionar una modalidad de teoría válida');
     }
 
@@ -1618,12 +1733,21 @@ class CourseCycleService {
         }
       }
       const officialStart = toDateString(cycle.start_date);
+      const selectedInstructorIdentity = preferredInstructorId ? (await client.query(`
+        SELECT LOWER(TRIM(CONCAT(u.first_name, ' ', u.last_name))) AS full_name
+        FROM instructor_profiles ip
+        JOIN users u ON u.id=ip.user_id
+        WHERE ip.id=$1::uuid
+        LIMIT 1
+      `, [preferredInstructorId])).rows[0] : null;
+      const usesBenitoBaseStart = selectedInstructorIdentity?.full_name === 'benito alonzo'
+        && requestedPracticalStart === benitoWeeklyStartDate(officialStart);
       if (requestedPracticalStart) {
         const today = toDateString(new Date());
         if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedPracticalStart)) {
           throw createError(422, 'La fecha de inicio práctico no es válida');
         }
-        if (requestedPracticalStart < today || requestedPracticalStart >= officialStart) {
+        if (!usesBenitoBaseStart && (requestedPracticalStart < today || requestedPracticalStart >= officialStart)) {
           throw createError(422, 'El inicio práctico anticipado debe ser desde hoy y anterior al inicio oficial');
         }
         if (cycle.modality !== 'normal') {
@@ -1645,7 +1769,7 @@ class CourseCycleService {
         presencial_intensivo: theorySettings.saturday_enabled,
         virtual: theorySettings.virtual_enabled,
       };
-      if (!theorySettingBySelection[theorySchedule]) {
+      if (theorySchedule && !theorySettingBySelection[theorySchedule]) {
         throw createError(409, 'La modalidad de teoria seleccionada no esta habilitada en esta sucursal');
       }
       const configuredTemplates = await client.query(`SELECT t.day_of_week,t.start_time,t.end_time FROM branch_course_programs p JOIN branch_course_schedule_templates t ON t.program_id=p.id AND t.active=TRUE WHERE p.branch_id=$1 AND p.course_id=$2 AND t.modality=$3`,[cycle.branch_id,cycle.course_id,cycle.modality]);
@@ -1657,8 +1781,14 @@ class CourseCycleService {
         if (!allowedDates.has(selection.date)) throw createError(422, 'La fecha seleccionada no pertenece al calendario mostrado');
         if (selection.date < toDateString(new Date())) throw createError(422, 'El examen no puede programarse en una fecha pasada');
         const instructorResult = await client.query(`
-          SELECT ip.id,u.first_name,u.last_name
+          SELECT ip.id,u.first_name,u.last_name,
+            EXISTS(SELECT 1 FROM instructor_branch_priorities priority
+              WHERE priority.instructor_id=ip.id AND priority.branch_id=cc.branch_id
+                AND priority.assignment_type='priority' AND priority.active=TRUE
+                AND priority.effective_from<=CURRENT_DATE
+                AND (priority.effective_until IS NULL OR priority.effective_until>=CURRENT_DATE)) AS priority_in_branch
           FROM course_cycle_instructors cci
+          JOIN course_cycles cc ON cc.id=cci.cycle_id
           JOIN instructor_profiles ip ON ip.id=cci.instructor_id
           JOIN users u ON u.id=ip.user_id
           WHERE cci.cycle_id=$1 AND cci.instructor_id=$2::uuid AND cci.active=TRUE
@@ -1667,6 +1797,7 @@ class CourseCycleService {
         `,[cycleId,preferredInstructorId]);
         if (!instructorResult.rows.length) throw createError(422, 'El instructor no está habilitado para este curso');
         const instructor = instructorResult.rows[0];
+        if (instructor.priority_in_branch && !pickupLocation) throw createError(422, 'Indica donde se recoge al estudiante');
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`exam-only:${instructor.id}:${selection.date}`]);
         const dailyCount = Number((await client.query(`SELECT COUNT(*)::int total FROM practical_sessions
           WHERE instructor_id=$1 AND appointment_type='EXAM_ONLY' AND scheduled_start::date=$2::date
@@ -1685,14 +1816,15 @@ class CourseCycleService {
           WHERE enrollment_id=$1 AND active=TRUE`,[enrollment.id]);
         await client.query(`INSERT INTO enrollment_instructor_assignments
           (enrollment_id,instructor_id,assigned_by,start_date,end_date,active,observations)
-          VALUES($1,$2,$3,$4::date,$4::date,TRUE,'Solo examen práctico')`,[enrollment.id,instructor.id,user.id,selection.date]);
+          VALUES($1,$2,$3,$4::date,$4::date,TRUE,$5)`,[enrollment.id,instructor.id,user.id,selection.date,
+            pickupLocation ? `Solo examen práctico · Recoger en: ${pickupLocation}` : 'Solo examen práctico']);
         const appointment = (await client.query(`INSERT INTO practical_sessions
           (enrollment_id,instructor_id,branch_id,scheduled_start,scheduled_end,session_number,status,observations,appointment_type,created_by)
           VALUES($1,$2,$3,$4::date+$5::time,$4::date+$5::time+INTERVAL '40 minutes',1,'PROGRAMADA',
             'Examen práctico; el bloque es referencial y no consume cupo de clase','EXAM_ONLY',$6) RETURNING *`,
         [enrollment.id,instructor.id,cycle.branch_id,selection.date,startTime,user.id])).rows[0];
         await client.query('INSERT INTO history(student_id,action) VALUES($1,$2)',[studentId,
-          `Solo examen práctico asignado con ${instructor.first_name} ${instructor.last_name} el ${selection.date} a las ${startTime}`]);
+          `Solo examen práctico asignado con ${instructor.first_name} ${instructor.last_name} el ${selection.date} a las ${startTime}${pickupLocation ? ` · Recoger en: ${pickupLocation}` : ''}`]);
         await client.query('COMMIT');
         return { assignments:[],examAppointment:appointment,instructor:{id:instructor.id,name:`${instructor.first_name} ${instructor.last_name}`} };
       }
@@ -1802,6 +1934,9 @@ class CourseCycleService {
           throw createError(422, 'El instructor referido no está habilitado para este curso y sucursal');
         }
         preferredInstructor = preferredResult.rows[0];
+        if (String(preferredInstructor.priority_branch_id || '') === String(cycle.branch_id) && !pickupLocation) {
+          throw createError(422, 'Indica donde se recoge al estudiante');
+        }
         if (preferredInstructor.priority_branch_id && String(preferredInstructor.priority_branch_id) !== String(cycle.branch_id)) {
           const shared = Array.isArray(preferredInstructor.allowed_slots) && selections.every(selection => {
             const { startTime } = parseTimeRange(selection.time);
@@ -1832,13 +1967,15 @@ class CourseCycleService {
              practical_start_reason=CASE WHEN $5::boolean THEN NULLIF($7::text,'') ELSE NULL END,
              updated_at=NOW()
          WHERE id=$1`,
-        [enrollmentId, theorySchedule, practicalDates[0], practicalDates[practicalDates.length - 1], Boolean(requestedPracticalStart), user.id, practicalStartReason, theoryOption?.startTime||null, theoryOption?.endTime||null],
+        [enrollmentId, theorySchedule, practicalDates[0], practicalDates[practicalDates.length - 1], Boolean(requestedPracticalStart && !usesBenitoBaseStart), user.id, practicalStartReason, theoryOption?.startTime||null, theoryOption?.endTime||null],
       );
 
-      await TheoryCourseService.assignEnrollment(client, {
-        enrollmentId, studentId, branchId: cycle.branch_id, courseId: cycle.course_id,
-        selection: theorySelection, actorId: user.id,
-      });
+      if (!theoryPending) {
+        await TheoryCourseService.assignEnrollment(client, {
+          enrollmentId, studentId, branchId: cycle.branch_id, courseId: cycle.course_id,
+          selection: theorySelection, actorId: user.id,
+        });
+      }
 
       await client.query(`
         UPDATE course_cycle_schedule_assignments
@@ -1979,11 +2116,11 @@ class CourseCycleService {
           enrollmentId,
           preferredInstructor.id,
           user.id,
-          `Instructor referido seleccionado durante la inscripción (${cycle.code})`,
+          `Instructor seleccionado durante la inscripción (${cycle.code})${pickupLocation ? ` · Recoger en: ${pickupLocation}` : ''}`,
         ]);
         await client.query(
           'INSERT INTO history (student_id, action) VALUES ($1, $2)',
-          [studentId, `Instructor referido asignado: ${preferredInstructor.first_name} ${preferredInstructor.last_name} (${cycle.code})`]
+          [studentId, `Instructor asignado: ${preferredInstructor.first_name} ${preferredInstructor.last_name} (${cycle.code})${pickupLocation ? ` · Recoger en: ${pickupLocation}` : ''}`]
         );
       }
 

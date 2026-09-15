@@ -5,7 +5,6 @@
 
 import { authService } from '../core/auth/AuthService.js';
 import ApiService from '../core/api/apiService.js';
-import InstructorTheoryService from '../services/instructorTheoryService.js';
 
 class SidebarLayout {
   static async render(content) {
@@ -15,16 +14,6 @@ class SidebarLayout {
     const role = String(user?.role || '').trim().toLowerCase();
     const isInstructor = role === 'instructor';
     const isTheoryInstructor = isInstructor && user?.practiceArea === 'teoria';
-    let canTakeTheoryAttendance = false;
-    if (isInstructor) {
-      try {
-        const response = await InstructorTheoryService.groups();
-        canTakeTheoryAttendance = Array.isArray(response?.data) && response.data.length > 0;
-      } catch (_error) {
-        // Si no se puede comprobar la asignación, el acceso queda oculto.
-        canTakeTheoryAttendance = false;
-      }
-    }
     const isCashOnly = role === 'caja';
     const isBranchSecretary = role === 'secretaria_sucursal';
     const canViewPayments = user?.permissions?.includes('PAYMENT_VIEW');
@@ -111,10 +100,6 @@ class SidebarLayout {
                   <line x1="3" y1="10" x2="21" y2="10"></line>
                 </svg>
                 <span class="nav-text">Mi agenda</span>
-              </a>` : ''}
-              ${!isTheoryInstructor && canTakeTheoryAttendance ? `<a href="/instructor/theory" class="nav-item ${currentPath === '/instructor/theory' ? 'active' : ''}">
-                <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path><path d="m9 10 2 2 4-4"></path></svg>
-                <span class="nav-text">Asistencia teoría</span>
               </a>` : ''}
               ${!isTheoryInstructor ? `<a href="/instructor/referrals" class="nav-item ${currentPath === '/instructor/referrals' ? 'active' : ''}">
                 <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg>

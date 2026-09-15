@@ -247,10 +247,10 @@ class ScheduleView extends Component {
             <div class="calendar-summary-actions">
               <div class="weekly-availability-legend">
                 <span class="free">${availableCount} horas disponibles</span>
-                <span class="occupied">${calendar.availability?.occupiedSlots || 0} ocupadas</span>
+                <span class="occupied">${calendar.availability?.occupiedSlots || 0} ocupaciones totales</span>
                 <span class="reserved">Reservado</span>
               </div>
-              <button type="button" class="btn btn-secondary btn-small" id="view-instructor-students">Ver estudiante</button>
+              <button type="button" class="btn btn-secondary btn-small" id="view-instructor-students">Ver estudiantes de este curso</button>
             </div>
             <div class="calendar-course-actions">
               <span class="badge badge-primary">Prácticas normales · lunes a viernes</span>
@@ -790,7 +790,7 @@ class ScheduleView extends Component {
                 </article>
               `).join('')}
             </div>
-          ` : '<div class="schedule-empty">Este instructor todavía no tiene estudiantes ni reservas en el curso.</div>'}
+          ` : `<div class="schedule-empty">Este instructor no tiene estudiantes ni reservas en ${this.escapeHtml(calendar.course?.code || 'este curso')}. Las horas marcadas como ocupadas pueden pertenecer a otros cursos o sucursales, clases te&oacute;ricas o bloqueos de disponibilidad.</div>`}
         </div>
       </div>
     `;

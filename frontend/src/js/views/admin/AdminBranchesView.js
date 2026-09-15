@@ -375,7 +375,8 @@ export default class AdminBranchesView extends Component {
   }
 
   async renderStaff(body) {
-    const [staffResponse, rolesResponse] = await Promise.all([AdminService.branchStaff(this.branchId), this.branchAccess ? Promise.resolve({ data: [] }) : AdminService.roles()]);
+    const branchRoles = [{code:'SECRETARY',name:'Secretaría'},{code:'CASHIER',name:'Caja'},{code:'INSTRUCTOR',name:'Instructor'}];
+    const [staffResponse, rolesResponse] = await Promise.all([AdminService.branchStaff(this.branchId), this.branchAccess ? Promise.resolve({ data: branchRoles }) : AdminService.roles()]);
     const staff = staffResponse.data || [];
     const roles = rolesResponse.data || [];
     const canUpdateUsers = permissionService.can('USER_UPDATE');
@@ -1139,22 +1140,32 @@ export default class AdminBranchesView extends Component {
   }
 
   async openUserForm(roles) {
+    const availableRoles = roles.filter(role => role.code !== 'STUDENT');
     document.getElementById('branch-modal').innerHTML = `
       <div class="branch-modal-backdrop"><form class="branch-modal" id="branch-user-form">
         <h2>Nuevo usuario para ${esc(this.branch.name)}</h2>
         <input name="firstName" placeholder="Nombres" required><input name="lastName" placeholder="Apellidos" required>
-        <input name="username" placeholder="Usuario" required><input name="email" type="email" placeholder="Correo">
-        <input name="password" type="password" minlength="8" placeholder="Contraseña temporal" required>
-        <select name="roleCode" required>${roles.map(role => `<option value="${esc(role.code)}">${esc(role.name)} (${esc(role.code)})</option>`).join('')}</select>
+        <input name="email" type="email" placeholder="Correo">
+        <p>El usuario y la clave temporal se generarán automáticamente. Deberá cambiar la clave al ingresar por primera vez.</p>
+        <select name="roleCode" required>${availableRoles.map(role => `<option value="${esc(role.code)}">${esc(role.name)} (${esc(role.code)})</option>`).join('')}</select>
         <input type="hidden" name="branchId" value="${esc(this.branchId)}">
+        <div id="branch-user-status" class="branch-status" aria-live="polite"></div>
         <div class="branch-modal-actions"><button type="button" class="btn close-modal">Cancelar</button><button class="btn btn-primary">Crear usuario</button></div>
       </form></div>`;
     document.querySelector('.close-modal')?.addEventListener('click', () => document.getElementById('branch-modal').innerHTML = '');
     document.getElementById('branch-user-form')?.addEventListener('submit', async e => {
       e.preventDefault();
-      await AdminService.createUser(Object.fromEntries(new FormData(e.currentTarget)));
-      document.getElementById('branch-modal').innerHTML = '';
-      await this.renderActiveTab();
+      const form=e.currentTarget,button=form.querySelector('.btn-primary'),status=form.querySelector('#branch-user-status');
+      button.disabled=true;status.textContent='Creando acceso...';
+      try {
+        const response=await AdminService.createUser(Object.fromEntries(new FormData(form)));
+        if(response?.success===false)throw new Error(response.error||'No se pudo crear el usuario.');
+        const user=response.data;
+        await this.renderActiveTab();
+        this.showTemporaryPassword(user,user,document.getElementById('branch-detail-body'));
+      } catch(error) {
+        button.disabled=false;status.textContent=error.message||'No se pudo crear el usuario.';status.style.color='#b42318';
+      }
     });
   }
 

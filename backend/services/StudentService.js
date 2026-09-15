@@ -79,10 +79,6 @@ class StudentService {
         EXISTS(SELECT 1 FROM course_cycle_instructors cci WHERE cci.cycle_id=cc.id AND cci.instructor_id=$2 AND cci.active=TRUE)
         OR EXISTS(SELECT 1 FROM instructor_group_members igm WHERE igm.group_id=cc.group_id AND igm.instructor_id=$2 AND igm.active=TRUE AND igm.ended_at IS NULL))`,[cycleId,instructorId]);
       if(!belongs.rowCount)throw createError(422,'El instructor no pertenece al curso seleccionado');
-      const priorityInstructor=await client.query(`SELECT 1 FROM instructor_branch_priorities
-        WHERE instructor_id=$1 AND branch_id=$2 AND assignment_type='priority' AND active=TRUE
-          AND effective_from<=CURRENT_DATE AND (effective_until IS NULL OR effective_until>=CURRENT_DATE)`,[instructorId,branchId]);
-      if(priorityInstructor.rowCount&&!String(plan.pickupLocation||'').trim())throw createError(422,'Indica donde se recoge al estudiante');
       const duplicate=await client.query(`SELECT 1 FROM course_cycle_seat_reservations
         WHERE status='activo' AND referred_identification=$1 AND expires_at>NOW()`,[identification]);
       if(duplicate.rowCount)throw createError(409,'Esta cédula ya tiene una reserva activa');

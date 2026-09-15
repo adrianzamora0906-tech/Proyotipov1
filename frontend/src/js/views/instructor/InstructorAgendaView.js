@@ -131,7 +131,6 @@ class InstructorAgendaView extends Component {
           <dl class="agenda-class-grid">
             <div><dt>Fecha y horario</dt><dd id="agenda-class-schedule"></dd></div>
             <div><dt>Número de clase</dt><dd id="agenda-class-number"></dd></div>
-            <div><dt>Punto de encuentro</dt><dd>Sportmancar Flavio Reyes</dd></div>
             <div><dt>Ruta recomendada</dt><dd id="agenda-class-route"></dd></div>
           </dl>
           <div class="agenda-class-recommendation" id="agenda-class-recommendation" hidden>

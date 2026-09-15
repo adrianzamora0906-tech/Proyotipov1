@@ -1628,7 +1628,6 @@ class CourseCycleService {
     const requestedPracticalStart = schedulePlan?.practicalStartDate || null;
     const practicalStartReason = String(schedulePlan?.practicalStartReason || '').trim();
     const examOnly = schedulePlan?.practicalMode === 'exam_only';
-    const pickupLocation = String(schedulePlan?.pickupLocation || '').trim().slice(0, 160);
     const rescheduleFromCycleId = data.rescheduleFromCycleId || null;
     const rescheduleReason = String(data.rescheduleReason || '').trim();
     if (!studentId) throw createError(422, 'Estudiante requerido');
@@ -1797,7 +1796,6 @@ class CourseCycleService {
         `,[cycleId,preferredInstructorId]);
         if (!instructorResult.rows.length) throw createError(422, 'El instructor no está habilitado para este curso');
         const instructor = instructorResult.rows[0];
-        if (instructor.priority_in_branch && !pickupLocation) throw createError(422, 'Indica donde se recoge al estudiante');
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`exam-only:${instructor.id}:${selection.date}`]);
         const dailyCount = Number((await client.query(`SELECT COUNT(*)::int total FROM practical_sessions
           WHERE instructor_id=$1 AND appointment_type='EXAM_ONLY' AND scheduled_start::date=$2::date
@@ -1817,14 +1815,14 @@ class CourseCycleService {
         await client.query(`INSERT INTO enrollment_instructor_assignments
           (enrollment_id,instructor_id,assigned_by,start_date,end_date,active,observations)
           VALUES($1,$2,$3,$4::date,$4::date,TRUE,$5)`,[enrollment.id,instructor.id,user.id,selection.date,
-            pickupLocation ? `Solo examen práctico · Recoger en: ${pickupLocation}` : 'Solo examen práctico']);
+            'Solo examen práctico']);
         const appointment = (await client.query(`INSERT INTO practical_sessions
           (enrollment_id,instructor_id,branch_id,scheduled_start,scheduled_end,session_number,status,observations,appointment_type,created_by)
           VALUES($1,$2,$3,$4::date+$5::time,$4::date+$5::time+INTERVAL '40 minutes',1,'PROGRAMADA',
             'Examen práctico; el bloque es referencial y no consume cupo de clase','EXAM_ONLY',$6) RETURNING *`,
         [enrollment.id,instructor.id,cycle.branch_id,selection.date,startTime,user.id])).rows[0];
         await client.query('INSERT INTO history(student_id,action) VALUES($1,$2)',[studentId,
-          `Solo examen práctico asignado con ${instructor.first_name} ${instructor.last_name} el ${selection.date} a las ${startTime}${pickupLocation ? ` · Recoger en: ${pickupLocation}` : ''}`]);
+          `Solo examen práctico asignado con ${instructor.first_name} ${instructor.last_name} el ${selection.date} a las ${startTime}`]);
         await client.query('COMMIT');
         return { assignments:[],examAppointment:appointment,instructor:{id:instructor.id,name:`${instructor.first_name} ${instructor.last_name}`} };
       }
@@ -1934,9 +1932,6 @@ class CourseCycleService {
           throw createError(422, 'El instructor referido no está habilitado para este curso y sucursal');
         }
         preferredInstructor = preferredResult.rows[0];
-        if (String(preferredInstructor.priority_branch_id || '') === String(cycle.branch_id) && !pickupLocation) {
-          throw createError(422, 'Indica donde se recoge al estudiante');
-        }
         if (preferredInstructor.priority_branch_id && String(preferredInstructor.priority_branch_id) !== String(cycle.branch_id)) {
           const shared = Array.isArray(preferredInstructor.allowed_slots) && selections.every(selection => {
             const { startTime } = parseTimeRange(selection.time);
@@ -2116,11 +2111,11 @@ class CourseCycleService {
           enrollmentId,
           preferredInstructor.id,
           user.id,
-          `Instructor seleccionado durante la inscripción (${cycle.code})${pickupLocation ? ` · Recoger en: ${pickupLocation}` : ''}`,
+          `Instructor seleccionado durante la inscripción (${cycle.code})`,
         ]);
         await client.query(
           'INSERT INTO history (student_id, action) VALUES ($1, $2)',
-          [studentId, `Instructor asignado: ${preferredInstructor.first_name} ${preferredInstructor.last_name} (${cycle.code})${pickupLocation ? ` · Recoger en: ${pickupLocation}` : ''}`]
+          [studentId, `Instructor asignado: ${preferredInstructor.first_name} ${preferredInstructor.last_name} (${cycle.code})`]
         );
       }
 

@@ -1152,10 +1152,6 @@ class StudentProfileView extends Component {
               <label class="form-label">Horario de teoría *</label>
               <div class="theory-schedule-selector" id="profile-theory-options"></div>
             </div>
-            <label class="late-pickup-notice" id="profile-late-pickup" hidden>
-              <input type="checkbox" id="profile-late-pickup-confirmed">
-              <span><strong>Confirmar punto de recogida</strong> A las 20:00 el instructor recoge al estudiante en la sucursal Flavio Reyes.</span>
-            </label>
           ` : '<div class="student-empty">No hay un próximo curso disponible para esta sucursal.</div>'}
           <div class="form-error" id="profile-schedule-error"></div>
         </div>
@@ -1188,10 +1184,6 @@ class StudentProfileView extends Component {
         button.classList.add('selected');
         const cycle = cycles.find(item => item.id === button.dataset.cycleId);
         renderTheoryOptions(cycle);
-        const isLateManta = /manta\s*2000/i.test(student.branch || '') && button.dataset.startTime === '20:00';
-        const warning = modal.querySelector('#profile-late-pickup');
-        warning.hidden = !isLateManta;
-        if (!isLateManta) warning.querySelector('input').checked = false;
         modal.querySelector('#profile-schedule-error').textContent = '';
       });
     });
@@ -1208,11 +1200,6 @@ class StudentProfileView extends Component {
       }
       if (!theorySchedule) {
         errorHost.textContent = 'Selecciona el horario de teoría.';
-        return;
-      }
-      const lateWarning = modal.querySelector('#profile-late-pickup');
-      if (!lateWarning.hidden && !modal.querySelector('#profile-late-pickup-confirmed')?.checked) {
-        errorHost.textContent = 'Confirma que se informó el punto de recogida de las 20:00.';
         return;
       }
       try {

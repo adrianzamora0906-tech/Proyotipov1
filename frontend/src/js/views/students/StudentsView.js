@@ -782,10 +782,6 @@ class StudentsView extends Component {
                   <div><small>Selecci&oacute;n actual</small><strong>A&uacute;n no has elegido un horario</strong></div>
                 </div>
                 <button type="button" class="btn btn-secondary temporary-reservation-toggle" id="temporary-reservation-toggle">Reservar este cupo por 2 días</button>
-                <label class="late-pickup-notice" id="late-pickup-notice" hidden>
-                  <input type="checkbox" name="latePickupConfirmed">
-                  <span><strong>Punto de encuentro: Flavio Reyes</strong>El horario de las 20:00 s&iacute; est&aacute; disponible. Confirma que informaste al estudiante que el instructor lo recoger&aacute; en la sucursal Flavio Reyes.</span>
-                </label>
                 <div class="form-error" id="schedule-error"></div>
                 </div>
                 <section class="schedule-workflow-card schedule-workflow-card--theory" aria-labelledby="theory-schedule-title">
@@ -1058,16 +1054,6 @@ class StudentsView extends Component {
         preferredSelect.value = instructorId;
       } else if (preferredSelect && !instructorId) {
         preferredSelect.value = '';
-      }
-      const prioritySelected = (this.modalBranchInstructors || []).some(instructor =>
-        String(instructor.id) === String(instructorId || '') && instructor.priority_branch);
-      const pickup = document.querySelector('#external-instructor-selector .instructor-pickup-location');
-      if (pickup) {
-        pickup.hidden = !prioritySelected;
-        if (!prioritySelected) {
-          const input = pickup.querySelector('[name="pickupLocation"]');
-          if (input) input.value = '';
-        }
       }
       this.useInstructorFirstAvailability = false;
       this.instructorFirstAvailabilityDate = null;
@@ -2429,10 +2415,6 @@ class StudentsView extends Component {
           (instructor.courses || []).some(course => String(course.id) === String(selectedCourseId)))
       : [];
     const externalSelector = document.getElementById('external-instructor-selector');
-    const currentPickupLocation = externalSelector
-      ?.querySelector('[name="pickupLocation"]')?.value || '';
-    const recommendedPickupBranch = currentPickupLocation
-      || String(this.currentBranchRecord?.name || '').trim();
     const branchName = document.getElementById('modal-branch-select')?.selectedOptions?.[0]?.textContent?.trim() || '';
     const mantaPriority = /manta\s*2000/i.test(branchName)
       ? compatible.filter(instructor => instructor.priority_branch
@@ -2444,14 +2426,7 @@ class StudentsView extends Component {
         <strong>Instructor de Manta 2000</strong>
         <div class="course-instructor-filters" role="group" aria-label="Escoger instructor de Manta 2000">
           ${mantaPriority.map(instructor => `<button type="button" class="course-instructor-chip" data-external-instructor-id="${escapeHtml(instructor.id)}">${escapeHtml(instructor.name)}</button>`).join('')}
-        </div>
-        <label class="instructor-pickup-location" hidden>
-          <span>Recomendaci&oacute;n de recogida</span>
-          <strong>${recommendedPickupBranch
-            ? `Recoger al estudiante en ${escapeHtml(recommendedPickupBranch)}.`
-            : 'Confirma la sucursal de recogida antes de continuar.'}</strong>
-          <input type="hidden" name="pickupLocation" value="${escapeHtml(recommendedPickupBranch)}">
-        </label>` : '';
+        </div>` : '';
     }
     const priority = compatible.filter(instructor => instructor.priority_branch);
     const cantonSupport = compatible.filter(instructor => !instructor.priority_branch);
@@ -3298,7 +3273,6 @@ class StudentsView extends Component {
       practicalMode: document.getElementById('selected-practical-mode')?.value || 'classes',
       selections: plan,
     });
-    this.syncLatePickupNotice(plan);
     const count = calendar?.querySelector('.schedule-selection-count');
     if (count) {
       const requiredClasses = document.getElementById('selected-practical-mode')?.value === 'exam_only'
@@ -3384,20 +3358,6 @@ class StudentsView extends Component {
       if (preview.dataset.requestId !== requestId) return;
       preview.className = 'schedule-instructor-preview unavailable';
       preview.innerHTML = `<strong>${escapeHtml(error.message || 'No se pudo comprobar el instructor.')}</strong>`;
-    }
-  }
-
-  syncLatePickupNotice(plan = []) {
-    const notice = document.getElementById('late-pickup-notice');
-    if (!notice) return;
-    const branchName = document.querySelector('#student-modal-form [name="branch"]')
-      ?.selectedOptions?.[0]?.textContent?.trim() || '';
-    const requiresFlavioPickup = /manta\s*2000/i.test(branchName)
-      && plan.some(selection => String(selection.time || '').startsWith('20:00'));
-    notice.hidden = !requiresFlavioPickup;
-    if (!requiresFlavioPickup) {
-      const confirmation = notice.querySelector('input[name="latePickupConfirmed"]');
-      if (confirmation) confirmation.checked = false;
     }
   }
 
@@ -3614,25 +3574,7 @@ class StudentsView extends Component {
       this.goToModalStep(1);
       return;
     }
-    const latePickupNotice = document.getElementById('late-pickup-notice');
-    if (latePickupNotice && !latePickupNotice.hidden && !formData.get('latePickupConfirmed')) {
-      const scheduleError = document.getElementById('schedule-error');
-      if (scheduleError) scheduleError.textContent = 'Confirma que informaste al estudiante que a las 20:00 debe acudir a la sucursal Flavio Reyes.';
-      this.showModalAlert('error', 'Confirma que informaste al estudiante que a las 20:00 debe acudir a la sucursal Flavio Reyes.');
-      this.goToModalStep(1);
-      return;
-    }
     const selectedBranchId = form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || null;
-    const pickupLocation = String(formData.get('pickupLocation') || '').trim();
-    const selectedPriorityInstructor = (this.modalBranchInstructors || []).find(instructor =>
-      String(instructor.id) === String(preferredInstructorId || '') && instructor.priority_branch);
-    if (selectedPriorityInstructor && !pickupLocation) {
-      const scheduleError = document.getElementById('schedule-error');
-      if (scheduleError) scheduleError.textContent = 'Indica dónde debe recoger el instructor al estudiante.';
-      this.showModalAlert('error', 'Indica dónde debe recoger el instructor al estudiante.');
-      this.goToModalStep(1);
-      return;
-    }
     const availableSchedules = await this.getSchedulesForModal(selectedBranchId, preferredInstructorId, practicalStartDate || null);
     if (examOnly && !preferredInstructorId) {
       const scheduleError = document.getElementById('schedule-error');
@@ -3665,7 +3607,6 @@ class StudentsView extends Component {
       || schedulePlan.selections[0]?.practicalStartDate
       || null;
     schedulePlan.practicalStartReason = practicalStartDate ? String(formData.get('practicalStartReason') || '').trim() : null;
-    schedulePlan.pickupLocation = pickupLocation || null;
 
     const shouldCollectPayment = authService.can('PAYMENT_CREATE') && formData.get('collectPayment') === 'on';
     const discountAmount = Number(formData.get('discountAmount') || 0);
@@ -3836,12 +3777,9 @@ class StudentsView extends Component {
     const instructorId=formData.get('preferredInstructorId');
     const branchId=form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId||null;
     const theorySchedule=formData.get('theorySchedule');
-    const pickupLocation=String(formData.get('pickupLocation')||'').trim();
     if(!instructorId){this.showModalAlert('error','Selecciona el instructor que reservará el cupo.');this.goToModalStep(1);return;}
     if(!formData.get('scheduleId')||!schedulePlan.selections.length){this.showModalAlert('error','Selecciona un horario disponible.');this.goToModalStep(1);return;}
-    const selectedPriorityInstructor=(this.modalBranchInstructors||[]).find(item=>String(item.id)===String(instructorId)&&item.priority_branch);
-    if(selectedPriorityInstructor&&!pickupLocation){this.showModalAlert('error','Indica donde se recoge al estudiante.');this.goToModalStep(1);return;}
-    schedulePlan.preferredInstructorId=instructorId;schedulePlan.theorySchedule=theorySchedule||'por_confirmar';schedulePlan.pickupLocation=pickupLocation||null;
+    schedulePlan.preferredInstructorId=instructorId;schedulePlan.theorySchedule=theorySchedule||'por_confirmar';
     if(submitBtn){submitBtn.disabled=true;submitBtn.textContent='Reservando cupo...';}
     const result=await StudentService.createTemporaryReservation({
       identification:formData.get('cedula'),firstName:formData.get('firstName'),lastName:formData.get('lastName'),

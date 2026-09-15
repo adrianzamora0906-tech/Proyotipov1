@@ -144,8 +144,6 @@ class InstructorDashboardView extends Component {
     if (!session) {
       return `<div class="card"><div class="card-header"><h3 class="card-title">Próxima clase</h3></div><div class="card-body"><div class="instructor-empty">No tienes clases próximas programadas.</div></div></div>`;
     }
-    const address = 'Sportmancar Flavio Reyes';
-    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
     return `
       <div class="card next-class-card">
         <div class="card-header">
@@ -157,12 +155,7 @@ class InstructorDashboardView extends Component {
             <div class="next-class-student"><span class="info-label">Estudiante</span><strong>${escapeHtml(session.studentName)}</strong><small>${escapeHtml(session.course)} · Clase ${escapeHtml(session.sessionNumber || 'N/A')}</small></div>
             <div><span class="info-label">Horario</span><strong>${formatDateTime(session.scheduledStart)} – ${formatTime(session.scheduledEnd)}</strong></div>
           </div>
-          <div class="pickup-point">
-            <div class="pickup-point-icon">⌖</div>
-            <div><span class="info-label">Punto de encuentro</span><strong>${escapeHtml(address)}</strong><small>Encuentro en la escuela antes de iniciar la clase.</small></div>
-          </div>
           <div class="next-class-actions">
-            ${mapsUrl ? `<a class="btn btn-primary" href="${mapsUrl}" target="_blank" rel="noopener">Abrir ubicación</a>` : ''}
             ${this.renderSessionActions(session)}
           </div>
         </div>

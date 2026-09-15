@@ -3715,6 +3715,9 @@ class StudentsView extends Component {
       if (submitBtn) submitBtn.textContent = 'Reservando horario...';
       const scheduleReservation = await this.selectStudentSchedule(student.id, scheduleId, schedulePlan);
       student.assignedInstructor = scheduleReservation?.instructor || null;
+      // El registro ya quedó confirmado en el servidor. Cerramos aquí el
+      // formulario principal para que ninguna tarea secundaria lo deje visible.
+      this.closeStudentModal();
     } catch (error) {
       this.showModalAlert('error', error.message || 'El estudiante se registró, pero hubo un problema guardando documentos u horario.');
       this.restoreSubmitButton(submitBtn);
@@ -3749,12 +3752,16 @@ class StudentsView extends Component {
       }
     }
 
-    NotificationService.createNotification(
-      student.id,
-      'Registro Completado',
-      'El registro fue completado con documentos y horario seleccionados.',
-      'info'
-    );
+    try {
+      NotificationService.createNotification(
+        student.id,
+        'Registro Completado',
+        'El registro fue completado con documentos y horario seleccionados.',
+        'info'
+      );
+    } catch (error) {
+      console.warn('El registro terminó, pero no se pudo crear la notificación local:', error);
+    }
 
     if (student.access?.created) {
       this.showStudentAccess(student);
@@ -3996,7 +4003,8 @@ class StudentsView extends Component {
     if (String(scheduleId).startsWith('cycle:')) {
       const response = await ApiService.reserveCourseCycleSchedule({ studentId, schedulePlan });
       if (!response.success) throw new Error(response.error || 'No se pudo reservar el cupo del curso');
-      NotificationService.notifyScheduleSelected(studentId);
+      try { NotificationService.notifyScheduleSelected(studentId); }
+      catch (error) { console.warn('El horario se guardó, pero no se pudo crear la notificación local:', error); }
       return response.data || null;
     }
 
@@ -4008,7 +4016,8 @@ class StudentsView extends Component {
       if (!fallback.success) throw new Error(fallback.error || 'No se pudo seleccionar el horario');
       await StudentService.updateStudentStatus(studentId, 'horario_seleccionado');
     }
-    NotificationService.notifyScheduleSelected(studentId);
+    try { NotificationService.notifyScheduleSelected(studentId); }
+    catch (error) { console.warn('El horario se guardó, pero no se pudo crear la notificación local:', error); }
     return null;
   }
 

@@ -289,6 +289,18 @@ class App {
         return false;
       }
 
+      // La obligación se consulta nuevamente al servidor en cada navegación.
+      // Así también se cubren sesiones creadas antes de incorporar esta regla.
+      if (
+        isAuthenticated &&
+        currentUser?.mustChangePassword &&
+        route.name !== "profile" &&
+        !isPublicPage
+      ) {
+        this.router.navigate("/profile");
+        return false;
+      }
+
       // Si está autenticado y trata de ir a login
       if (isAuthenticated && isLoginPage) {
         if (isAdminSystem) {

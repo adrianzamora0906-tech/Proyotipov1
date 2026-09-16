@@ -17,7 +17,7 @@ class AuthService {
       return{success:true,message:'Sesión iniciada',user:session};
     }catch(error){return{success:false,message:error.message||'No se pudo conectar con el servidor'};}
   }
-  async refreshAuthorization(branchId=null){const user=this.getCurrentUser();if(!user)return null;const q=branchId?`?branchId=${encodeURIComponent(branchId)}`:'';const r=await apiClient.get(`/auth/authorization${q}`);const session={...user,roles:r.data.roles||[],permissions:r.data.permissions||[],scope:r.data.scope||'BRANCH',instructorType:r.data.instructorType||null,practiceArea:r.data.practiceArea||null};sessionStorage.setItem(this.sessionKey,JSON.stringify(session));return session;}
+  async refreshAuthorization(branchId=null){const user=this.getCurrentUser();if(!user)return null;const q=branchId?`?branchId=${encodeURIComponent(branchId)}`:'';const r=await apiClient.get(`/auth/authorization${q}`);const session={...user,roles:r.data.roles||[],permissions:r.data.permissions||[],scope:r.data.scope||'BRANCH',instructorType:r.data.instructorType||null,practiceArea:r.data.practiceArea||null,mustChangePassword:Boolean(r.data.mustChangePassword)};sessionStorage.setItem(this.sessionKey,JSON.stringify(session));return session;}
   async logout(){try{if(apiClient.getToken())await apiClient.post('/auth/logout',{});}catch(error){console.warn('No se pudo confirmar el logout:',error.message);}finally{sessionStorage.removeItem(this.sessionKey);apiClient.setToken(null);}return{success:true,message:'Sesión cerrada'};}
   getCurrentUser(){try{return JSON.parse(sessionStorage.getItem(this.sessionKey)||'null');}catch{return null;}}
   isAuthenticated(){return Boolean(this.getCurrentUser()?.apiToken);}

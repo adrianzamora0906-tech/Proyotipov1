@@ -6,6 +6,10 @@ class AuthService {
   initializeUsers() { /* La identidad se administra exclusivamente en PostgreSQL. */ }
   async login(username, password) {
     try {
+      // La pantalla de acceso inicia una autenticacion nueva. No debe reutilizar
+      // tokens de una sesion anterior para intentar refrescar un login fallido.
+      sessionStorage.removeItem(this.sessionKey);
+      apiClient.setToken(null);
       const result = await ApiService.login(username, password);
       if (!result.success || !result.user) return { success:false, message:'Credenciales inválidas' };
       const user=result.user;const session={userId:user.id,username:user.username,name:user.name,email:user.email,

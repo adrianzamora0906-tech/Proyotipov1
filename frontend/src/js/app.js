@@ -332,6 +332,7 @@ class App {
         isAuthenticated &&
         currentRole === "instructor" &&
         !route.name.startsWith("instructor-") &&
+        !(route.name === "profile" && currentUser?.mustChangePassword) &&
         !["notifications", "course-reports"].includes(route.name) &&
         !isPublicPage
       ) {
@@ -343,7 +344,10 @@ class App {
         this.router.navigate("/instructor/theory");
         return false;
       }
-      if (isAuthenticated && isStudent && route.name !== "student-portal" && !isPublicPage) {
+      if (isAuthenticated && isStudent
+        && route.name !== "student-portal"
+        && !(route.name === "profile" && currentUser?.mustChangePassword)
+        && !isPublicPage) {
         this.router.navigate("/student");
         return false;
       }

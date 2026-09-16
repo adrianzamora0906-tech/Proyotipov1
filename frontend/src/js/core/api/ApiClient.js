@@ -105,7 +105,8 @@ class ApiClient {
 
   async request(method, endpoint, body, retry = true) {
     const response = await this.fetchWithFallback(endpoint, { method, headers: this.getHeaders(), ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-    if (response.status === 401 && retry && endpoint !== '/auth/refresh') {
+    const isAuthenticationRequest = endpoint === '/auth/login' || endpoint === '/auth/refresh';
+    if (response.status === 401 && retry && !isAuthenticationRequest) {
       if (await this.tryRefresh()) return this.request(method, endpoint, body, false);
       this.expireSession(); const error = new Error('Tu sesión expiró. Inicia sesión nuevamente.'); error.status = 401; throw error;
     }

@@ -749,8 +749,14 @@ class ScheduleView extends Component {
         return { date, startTime, endTime, status: 'blocked' };
       });
       try {
-        await ApiService.saveInstructorAvailabilityOverrides(calendar.instructor.id, overrides, calendar.week.startDate, calendar.week.endDate);
-        this.openInstructorCalendar(calendar.instructor.id, calendar.course?.id);
+        const result = await ApiService.saveInstructorAvailabilityOverrides(
+          calendar.instructor.id,
+          overrides,
+          calendar.week.startDate,
+          calendar.week.endDate,
+        );
+        if (!result.success) throw new Error(result.error || 'No se pudo actualizar la disponibilidad.');
+        await this.openInstructorCalendar(calendar.instructor.id, calendar.course?.id);
       } catch (error) {
         event.currentTarget.disabled = false;
         window.alert(error.data?.error?.message || error.message || 'No se pudo actualizar la disponibilidad.');

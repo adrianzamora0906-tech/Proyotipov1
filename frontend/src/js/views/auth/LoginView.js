@@ -97,7 +97,9 @@ class LoginView extends Component {
 
       // Login exitoso: navegar usando history API para evitar recargar la página
       const role = String(result.user.role || '').trim().toLowerCase();
-      const target = role === 'caja'
+      const target = result.user.mustChangePassword
+        ? '/profile'
+        : role === 'caja'
         ? '/cash'
         : role === 'instructor'
           ? (result.user.practiceArea === 'teoria' ? '/instructor/theory' : '/instructor')

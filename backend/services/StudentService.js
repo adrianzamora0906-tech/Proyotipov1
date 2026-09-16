@@ -308,6 +308,10 @@ class StudentService {
       SELECT s.*, b.name as branch_name, c.name as city_name, c.province as city_province,
         TRIM(CONCAT(referrer.first_name, ' ', referrer.last_name)) AS referred_by_name,
         referrer_branch.name AS referred_by_branch_name,
+        instructor.instructor_id,
+        instructor.instructor_name,
+        instructor.assignment_start_date,
+        instructor.assignment_end_date,
         (SELECT json_build_object(
           'id', account.id,
           'username', account.username,

@@ -19,6 +19,10 @@ class ApiService {
     return apiClient.put('/auth/profile', data);
   }
 
+  static async updatePassword(currentPassword, newPassword) {
+    return apiClient.put('/auth/password', { currentPassword, newPassword });
+  }
+
   // ── STUDENTS ──
   static async getStudents(params = {}) {
     const qs = new URLSearchParams(params).toString();

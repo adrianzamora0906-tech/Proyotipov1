@@ -81,7 +81,7 @@ function practicalCycleDates(cycle, requestedStartDate = null) {
 
   const officialStart = toDateString(cycle.start_date);
   const practicalStart = toDateString(requestedStartDate);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(practicalStart) || practicalStart >= officialStart) return officialDates;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(practicalStart)) return officialDates;
 
   const required = Math.max(Number(cycle.duration_business_days) || officialDates.length || 1, 1);
   const allowedDays = new Set(
@@ -669,7 +669,7 @@ class CourseCycleService {
       cc.active = true
       AND cc.deleted_at IS NULL
       AND cc.status IN ('activo', 'proximo')
-      AND CURRENT_DATE <= cc.start_date + 2
+      AND CURRENT_DATE <= cc.end_date
       AND EXISTS (SELECT 1 FROM branch_courses bc WHERE bc.branch_id=cc.branch_id AND bc.course_id=cc.course_id AND bc.active=TRUE)
     `;
 
@@ -855,15 +855,24 @@ class CourseCycleService {
       : null;
     const selectedInstructorShowsFullSchedule = String(selectedInstructorRule?.instructor_name || '')
       .trim().toLowerCase() === 'benito alonzo';
-    const practicalDatesForRow = row => practicalCycleDates(
-      row,
-      filters.practical_start_date
-        || (selectedInstructorShowsFullSchedule ? benitoWeeklyStartDate(row.start_date) : null),
-    );
+    const requestedStartAppliesToRow = row => Boolean(filters.practical_start_date
+      && (!filters.practical_cycle_id || String(filters.practical_cycle_id) === String(row.id)));
+    const practicalDatesForRow = row => {
+      const requestedStartApplies = requestedStartAppliesToRow(row);
+      return practicalCycleDates(
+        row,
+        (requestedStartApplies ? filters.practical_start_date : null)
+          || (selectedInstructorShowsFullSchedule ? benitoWeeklyStartDate(row.start_date) : null),
+      );
+    };
+    const displayedDatesForRow = row => [...new Set([
+      ...practicalCycleDates(row),
+      ...practicalDatesForRow(row),
+    ])].sort();
     // La ocupación debe cubrir las fechas prácticas que realmente se muestran.
     // Cuando Secretaría adelanta el inicio, esas fechas pueden ser anteriores
     // al inicio oficial del ciclo y no deben aparecer como libres.
-    const displayedPracticalDates = result.rows.flatMap(practicalDatesForRow);
+    const displayedPracticalDates = result.rows.flatMap(displayedDatesForRow);
     const availabilityRange = displayedPracticalDates.reduce((range, date) => ({
       start: !range.start || date < range.start ? date : range.start,
       end: !range.end || date > range.end ? date : range.end,
@@ -1004,6 +1013,7 @@ class CourseCycleService {
         : configuredPublishedCapacity * Math.max(practicalSlots(row).length, 1);
       const cycleHasSeats = usedCycleSeats < configuredCourseCapacity;
       const practicalDates = practicalDatesForRow(row);
+      const displayedDates = displayedDatesForRow(row);
       const instructorBaseStart = selectedInstructorShowsFullSchedule
         && practicalDates[0] < toDateString(row.start_date);
       const rowCycleRules = instructorRules.get(row.id) || [];
@@ -1059,11 +1069,12 @@ class CourseCycleService {
         vehicleType: row.vehicle_type,
         startDate: toDateString(row.start_date),
         endDate: toDateString(row.end_date),
-        enrollmentDeadline: addCalendarDays(row.start_date, 2),
+        enrollmentDeadline: toDateString(row.end_date),
         enrollmentStarted: toDateString(row.start_date) <= toDateString(new Date()),
         practicalStartDate: practicalDates[0] || toDateString(row.start_date),
         practicalEndDate: practicalDates[practicalDates.length - 1] || toDateString(row.end_date),
-        practicalStartAdvanced: Boolean(filters.practical_start_date && practicalDates[0] < toDateString(row.start_date)),
+        practicalStartAdvanced: Boolean(requestedStartAppliesToRow(row)
+          && practicalDates[0] < toDateString(row.start_date)),
         instructorBaseStart,
         durationBusinessDays: Number(row.duration_business_days),
         status: row.status,
@@ -1077,7 +1088,7 @@ class CourseCycleService {
         slotCapacity: configuredCapacity,
         fullNormalSchedule: showFullNormalSchedule,
         slots: rowPracticalSlots.map(([startTime, endTime]) => {
-          const dates = practicalDates;
+          const dates = displayedDates;
           const eligibleDates = !showFullNormalSchedule && Array.isArray(row.schedule_templates) && row.schedule_templates.length
             ? dates.filter(date => row.schedule_templates.some(template =>
               Number(template.day_of_week) === new Date(`${date}T00:00:00`).getDay()
@@ -1704,9 +1715,9 @@ class CourseCycleService {
           AND cc.active = true
           AND cc.deleted_at IS NULL
           AND cc.status IN ('activo', 'proximo')
-          AND (CURRENT_DATE <= cc.start_date + 2 OR ($2::boolean AND cc.end_date >= CURRENT_DATE))
+          AND cc.end_date >= CURRENT_DATE
         FOR UPDATE
-      `, [cycleId,examOnly]);
+      `, [cycleId]);
 
       if (cycleResult.rows.length === 0) throw createError(404, 'Curso no disponible para inscripcion');
       const cycle = cycleResult.rows[0];
@@ -1746,8 +1757,8 @@ class CourseCycleService {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedPracticalStart)) {
           throw createError(422, 'La fecha de inicio práctico no es válida');
         }
-        if (!usesBenitoBaseStart && (requestedPracticalStart < today || requestedPracticalStart >= officialStart)) {
-          throw createError(422, 'El inicio práctico anticipado debe ser desde hoy y anterior al inicio oficial');
+        if (requestedPracticalStart < today || requestedPracticalStart > toDateString(cycle.end_date)) {
+          throw createError(422, 'El inicio práctico debe estar entre hoy y el último día visible del curso');
         }
         if (cycle.modality !== 'normal') {
           throw createError(422, 'El inicio anticipado solo aplica a horarios normales');
@@ -1962,7 +1973,7 @@ class CourseCycleService {
              practical_start_reason=CASE WHEN $5::boolean THEN NULLIF($7::text,'') ELSE NULL END,
              updated_at=NOW()
          WHERE id=$1`,
-        [enrollmentId, theorySchedule, practicalDates[0], practicalDates[practicalDates.length - 1], Boolean(requestedPracticalStart && !usesBenitoBaseStart), user.id, practicalStartReason, theoryOption?.startTime||null, theoryOption?.endTime||null],
+        [enrollmentId, theorySchedule, practicalDates[0], practicalDates[practicalDates.length - 1], Boolean(requestedPracticalStart && requestedPracticalStart < officialStart && !usesBenitoBaseStart), user.id, practicalStartReason, theoryOption?.startTime||null, theoryOption?.endTime||null],
       );
 
       if (!theoryPending) {
@@ -2105,12 +2116,14 @@ class CourseCycleService {
         `, [enrollmentId]);
         await client.query(`
           INSERT INTO enrollment_instructor_assignments (
-            enrollment_id, instructor_id, assigned_by, active, observations
-          ) VALUES ($1, $2, $3, true, $4)
+            enrollment_id, instructor_id, assigned_by, start_date, end_date, active, observations
+          ) VALUES ($1, $2, $3, $4::date, $5::date, true, $6)
         `, [
           enrollmentId,
           preferredInstructor.id,
           user.id,
+          practicalDates[0],
+          practicalDates[practicalDates.length - 1],
           `Instructor seleccionado durante la inscripción (${cycle.code})`,
         ]);
         await client.query(

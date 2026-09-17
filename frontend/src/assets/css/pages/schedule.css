@@ -284,6 +284,32 @@
   margin-bottom: 1rem;
 }
 
+.schedule-availability-scope {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
+  background: var(--gray-50);
+}
+
+.schedule-availability-scope button {
+  padding: .5rem .75rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gray-600);
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.schedule-availability-scope button.active {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, .16);
+}
+
 .calendar-slot-editor {
   width: 100%;
   border-right: 0;

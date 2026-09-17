@@ -507,6 +507,10 @@ class StudentsView extends Component {
     const canRegisterPayment = authService.can('PAYMENT_CREATE');
     const paymentMethods = canRegisterPayment ? await PaymentService.getAvailableMethods(authService.getCurrentUser()?.branch_id || '') : [];
     const paymentOptions = paymentMethods.map(method => `<option value="${method.code}" data-requires-reference="${method.requires_reference ? 'true' : 'false'}">${method.name}</option>`).join('');
+    const transferPaymentMethod = paymentMethods.find(method => (
+      String(method.code || '').toLowerCase() === 'transferencia'
+      || String(method.name || '').toLowerCase().includes('transferencia')
+    ));
     const observationsField = (extraClass = '') => `
       <div class="form-group registration-observations-field ${extraClass}"${extraClass.includes('renewal-observations-field') ? ' hidden' : ''}>
         <label class="form-label">Observaciones <small>(opcional)</small></label>
@@ -626,7 +630,13 @@ class StudentsView extends Component {
 
                 <div class="form-row regular-enrollment-only renewal-hidden" id="regular-course-fields">
                   <div class="form-group">
-                    <label class="form-label required">Tipo de sangre</label>
+                    <div class="student-blood-type-heading">
+                      <label class="form-label required">Tipo de sangre</label>
+                      <label class="student-transfer-check" for="student-transfer-payment">
+                        <input type="checkbox" id="student-transfer-payment" data-payment-method="${transferPaymentMethod?.code || 'transferencia'}">
+                        <span>Transferencia</span>
+                      </label>
+                    </div>
                     <select class="form-select" name="bloodType" required>
                       <option value="">Seleccionar...</option>
                       <option value="O+">O+</option>
@@ -964,6 +974,28 @@ class StudentsView extends Component {
     document.getElementById('student-collect-payment')?.addEventListener('change', event => {
       const fields = document.getElementById('student-payment-fields');
       if (fields) fields.style.display = event.target.checked ? 'block' : 'none';
+    });
+    const transferCheck = document.getElementById('student-transfer-payment');
+    const paymentMethodSelect = form?.querySelector('[name="paymentMethod"]');
+    transferCheck?.addEventListener('change', event => {
+      const transferMethod = event.currentTarget.dataset.paymentMethod;
+      const collectPayment = document.getElementById('student-collect-payment');
+      if (event.currentTarget.checked) {
+        if (collectPayment) {
+          collectPayment.checked = true;
+          collectPayment.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        if (paymentMethodSelect) {
+          paymentMethodSelect.value = transferMethod;
+          paymentMethodSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      } else if (paymentMethodSelect?.value === transferMethod) {
+        paymentMethodSelect.value = '';
+        paymentMethodSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    paymentMethodSelect?.addEventListener('change', event => {
+      if (transferCheck) transferCheck.checked = event.currentTarget.value === transferCheck.dataset.paymentMethod;
     });
     document.getElementById('additional-practice-toggle')?.addEventListener('change', event => this.toggleAdditionalPracticeMode(event.target.checked));
     form?.querySelectorAll('[name="registrationMode"]').forEach(input => input.addEventListener('change', event => this.setRegistrationMode(event.target.value)));

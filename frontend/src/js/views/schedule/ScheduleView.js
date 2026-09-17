@@ -224,7 +224,12 @@ class ScheduleView extends Component {
     const availabilityKeys = new Set((calendar.availabilityOverrides || [])
       .filter(item => item.status !== 'reserved')
       .map(item => `${String(item.schedule_date).slice(0, 10)}:${item.start_time}:${item.end_time}`));
-    const availabilityDraft = calendar.availabilityDraft || availabilityKeys;
+    const availabilityScope = calendar.availabilityScope || 'daily';
+    const permanentKeys = new Set((calendar.slots || [])
+      .filter(slot => slot.permanentlyAvailable === false)
+      .map(slot => `${slot.date}|${slot.startTime}|${slot.endTime}`));
+    const availabilityDraft = calendar.availabilityDrafts?.[availabilityScope]
+      || (availabilityScope === 'permanent' ? permanentKeys : availabilityKeys);
 
     return `
       <div class="modal instructor-calendar-modal">
@@ -257,7 +262,14 @@ class ScheduleView extends Component {
               ${calendar.availabilityEditMode ? '' : '<button type="button" class="btn btn-secondary" id="configure-instructor-availability">Configurar disponibilidad</button>'}
             </div>
           </div>
-          ${calendar.availabilityEditMode ? '<div class="schedule-availability-actions"><span class="schedule-edit-indicator">Editando disponibilidad del curso</span><button type="button" class="btn btn-primary" id="save-instructor-availability">Guardar</button><button type="button" class="btn btn-secondary" id="cancel-instructor-availability">Cancelar</button></div>' : ''}
+          ${calendar.availabilityEditMode ? `<div class="schedule-availability-actions">
+            <div class="schedule-availability-scope" role="radiogroup" aria-label="Alcance del cambio">
+              <button type="button" class="${availabilityScope === 'daily' ? 'active' : ''}" data-availability-scope="daily" aria-pressed="${availabilityScope === 'daily'}">Solo este d&iacute;a</button>
+              <button type="button" class="${availabilityScope === 'permanent' ? 'active' : ''}" data-availability-scope="permanent" aria-pressed="${availabilityScope === 'permanent'}">Permanente</button>
+            </div>
+            <span class="schedule-edit-indicator">${availabilityScope === 'permanent' ? 'Se repetir&aacute; cada semana' : 'Cambio puntual por fecha'}</span>
+            <button type="button" class="btn btn-primary" id="save-instructor-availability">Guardar</button><button type="button" class="btn btn-secondary" id="cancel-instructor-availability">Cancelar</button>
+          </div>` : ''}
           ${visibleSlots.length && workingDays.length ? `<div class="weekly-calendar" style="--calendar-day-count:${Math.max(workingDays.length, 1)}">
             <div class="calendar-time-column">
               <div class="calendar-heading">Hora</div>
@@ -719,32 +731,67 @@ class ScheduleView extends Component {
     });
     modal.querySelector('#configure-instructor-availability')?.addEventListener('click', () => {
       calendar.availabilityEditMode = true;
-      calendar.availabilityDraft = new Set((calendar.availabilityOverrides || [])
-        .filter(item => item.status !== 'reserved')
-        .map(item => `${String(item.schedule_date).slice(0, 10)}|${item.start_time}|${item.end_time}`));
+      calendar.availabilityScope = 'daily';
+      calendar.availabilityDrafts = {
+        daily: new Set((calendar.availabilityOverrides || [])
+          .filter(item => item.status !== 'reserved')
+          .map(item => `${String(item.schedule_date).slice(0, 10)}|${item.start_time}|${item.end_time}`)),
+        permanent: new Set((calendar.slots || [])
+          .filter(slot => slot.permanentlyAvailable === false)
+          .map(slot => `${slot.date}|${slot.startTime}|${slot.endTime}`)),
+      };
       modal.innerHTML = this.renderCalendar(calendar);
       this.bindModalClose(modal);
       this.bindCalendarAvailabilityEditor(modal, calendar);
     });
+    modal.querySelectorAll('[data-availability-scope]').forEach(button => button.addEventListener('click', () => {
+      calendar.availabilityScope = button.dataset.availabilityScope;
+      modal.innerHTML = this.renderCalendar(calendar);
+      this.bindModalClose(modal);
+      this.bindCalendarAvailabilityEditor(modal, calendar);
+    }));
     modal.querySelectorAll('[data-inline-availability]').forEach(slot => slot.addEventListener('click', () => {
       const key = slot.dataset.inlineAvailability;
-      if (calendar.availabilityDraft.has(key)) calendar.availabilityDraft.delete(key);
-      else calendar.availabilityDraft.add(key);
-      slot.classList.toggle('occupied', calendar.availabilityDraft.has(key));
-      slot.classList.toggle('free', !calendar.availabilityDraft.has(key));
-      slot.querySelector('.slot-status').textContent = calendar.availabilityDraft.has(key) ? 'No disponible' : 'Disponible';
-      slot.setAttribute('aria-pressed', calendar.availabilityDraft.has(key));
+      const draft = calendar.availabilityDrafts[calendar.availabilityScope];
+      if (calendar.availabilityScope === 'permanent') {
+        const selected = (calendar.slots || []).filter(item => (
+          item.date === key.split('|')[0]
+          && item.startTime === key.split('|')[1]
+          && item.endTime === key.split('|')[2]
+        ))[0];
+        (calendar.slots || []).filter(item => (
+          item.weekday === selected?.weekday
+          && item.startTime === selected?.startTime
+          && item.endTime === selected?.endTime
+        )).forEach(item => {
+          const repeatedKey = `${item.date}|${item.startTime}|${item.endTime}`;
+          if (draft.has(key)) draft.delete(repeatedKey);
+          else draft.add(repeatedKey);
+        });
+        modal.innerHTML = this.renderCalendar(calendar);
+        this.bindModalClose(modal);
+        this.bindCalendarAvailabilityEditor(modal, calendar);
+        return;
+      }
+      if (draft.has(key)) draft.delete(key);
+      else draft.add(key);
+      slot.classList.toggle('occupied', draft.has(key));
+      slot.classList.toggle('free', !draft.has(key));
+      slot.querySelector('.slot-status').textContent = draft.has(key) ? 'No disponible' : 'Disponible';
+      slot.setAttribute('aria-pressed', draft.has(key));
     }));
     modal.querySelector('#cancel-instructor-availability')?.addEventListener('click', () => {
       calendar.availabilityEditMode = false;
-      delete calendar.availabilityDraft;
+      delete calendar.availabilityDrafts;
+      delete calendar.availabilityScope;
       modal.innerHTML = this.renderCalendar(calendar);
       this.bindModalClose(modal);
       this.bindCalendarAvailabilityEditor(modal, calendar);
     });
     modal.querySelector('#save-instructor-availability')?.addEventListener('click', async event => {
       event.currentTarget.disabled = true;
-      const overrides = [...calendar.availabilityDraft].map(key => {
+      const scope = calendar.availabilityScope || 'daily';
+      const overrides = [...calendar.availabilityDrafts[scope]].map(key => {
         const [date, startTime, endTime] = key.split('|');
         return { date, startTime, endTime, status: 'blocked' };
       });
@@ -754,6 +801,11 @@ class ScheduleView extends Component {
           overrides,
           calendar.week.startDate,
           calendar.week.endDate,
+          scope,
+          [...new Map((calendar.slots || []).map(slot => [
+            `${slot.weekday}:${slot.startTime}:${slot.endTime}`,
+            { weekday: slot.weekday, startTime: slot.startTime, endTime: slot.endTime },
+          ])).values()],
         );
         if (!result.success) throw new Error(result.error || 'No se pudo actualizar la disponibilidad.');
         await this.openInstructorCalendar(calendar.instructor.id, calendar.course?.id);
@@ -859,7 +911,13 @@ class ScheduleView extends Component {
           return { date, startTime, endTime, status: 'blocked' };
         });
         try {
-          await ApiService.saveInstructorAvailabilityOverrides(calendar.instructor.id, overrides);
+          await ApiService.saveInstructorAvailabilityOverrides(
+            calendar.instructor.id,
+            overrides,
+            calendar.week.startDate,
+            calendar.week.endDate,
+            'daily',
+          );
           modal.innerHTML = this.renderCalendar(calendar);
           this.bindModalClose(modal);
           modal.querySelector('#configure-instructor-availability')?.addEventListener('click', () => this.openAvailabilityConfiguration(calendar));

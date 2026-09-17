@@ -360,8 +360,8 @@ class ApiService {
     return apiClient.get(`/instructors/${instructorId}/availability-overrides?${params.toString()}`);
   }
 
-  static async saveInstructorAvailabilityOverrides(instructorId, overrides, startDate, endDate) {
-    return apiClient.put(`/instructors/${instructorId}/availability-overrides`, { overrides, startDate, endDate });
+  static async saveInstructorAvailabilityOverrides(instructorId, overrides, startDate, endDate, scope = 'daily', slots = []) {
+    return apiClient.put(`/instructors/${instructorId}/availability-overrides`, { overrides, startDate, endDate, scope, slots });
   }
 }
 

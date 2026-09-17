@@ -331,6 +331,30 @@
   color: var(--danger);
 }
 
+.student-blood-type-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.student-transfer-check {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  color: var(--gray-700);
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.student-transfer-check input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
 .form-input,
 .form-textarea,
 .form-select {

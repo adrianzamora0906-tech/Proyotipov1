@@ -1,4 +1,4 @@
-import '../../lib/qrcodeLocal.js';
+import '../../lib/qrcode.browser.js';
 import PracticalSessionService from '../../services/practicalSessionService.js';
 
 function generateQrDataUrl(value) {

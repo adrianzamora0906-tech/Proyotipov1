@@ -124,6 +124,18 @@ export default class AdminService {
   static branchStaff(id, params = {}) {
     return apiClient.get(`/admin/branches/${id}/staff${query(params)}`);
   }
+  static branchVacations(id) {
+    return apiClient.get(`/admin/branches/${id}/vacations`);
+  }
+  static branchVacationPreview(branchId, userId, params = {}) {
+    return apiClient.get(`/admin/branches/${branchId}/staff/${userId}/vacation-preview${query(params)}`);
+  }
+  static createBranchVacation(branchId, data) {
+    return apiClient.post(`/admin/branches/${branchId}/vacations`, data);
+  }
+  static cancelBranchVacation(branchId, vacationId) {
+    return apiClient.delete(`/admin/branches/${branchId}/vacations/${vacationId}`);
+  }
   static branchWorkflow(id) {
     return apiClient.get(`/admin/branches/${id}/workflow`);
   }

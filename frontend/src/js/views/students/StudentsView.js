@@ -31,7 +31,10 @@ class StudentsView extends Component {
     const selectedRegistrationType = queryParams.get('registration_type') || 'REGULAR';
     this.registrationType = selectedRegistrationType;
     const listParams = {};
+    // REGLA PROTEGIDA: el listado inicia mostrando todo el cantón; la
+    // sucursal de la sesión solo se usa si el usuario la selecciona.
     if (queryParams.get('scope')) listParams.scope = queryParams.get('scope');
+    else if (!queryParams.get('branch_id')) listParams.scope = 'all';
     if (queryParams.get('branch_id')) listParams.branch_id = queryParams.get('branch_id');
     if (searchQuery) listParams.search = searchQuery;
     const selectedStatus = queryParams.has('status') ? queryParams.get('status') : (isBranchAdmin ? 'active' : '');
@@ -86,7 +89,14 @@ class StudentsView extends Component {
     if (currentBranchRecord && !cantonBranches.some(branch => branch.id === currentBranchRecord.id)) {
       cantonBranches.unshift(currentBranchRecord);
     }
-    const activeStudentFilter = queryParams.get('scope') === 'all'
+    // Aunque el alcance inicial sea todo el cantón, la sede de la sesión se
+    // presenta primero tanto en el selector como en los resultados.
+    cantonBranches.sort((first, second) => {
+      const firstCurrent = String(first.id) === String(currentBranchRecord?.id) ? 0 : 1;
+      const secondCurrent = String(second.id) === String(currentBranchRecord?.id) ? 0 : 1;
+      return firstCurrent - secondCurrent || String(first.name || '').localeCompare(String(second.name || ''), 'es');
+    });
+    const activeStudentFilter = !queryParams.get('branch_id') && queryParams.get('scope') !== 'created'
       ? 'all'
       : queryParams.get('scope') === 'created'
         ? 'created'
@@ -100,8 +110,10 @@ class StudentsView extends Component {
         return firstInstructor.localeCompare(secondInstructor)
           || this.compareStudentsByCreationDate(first, second);
       }
-      const firstCurrent = first.branch === currentBranch ? 0 : 1;
-      const secondCurrent = second.branch === currentBranch ? 0 : 1;
+      const belongsToCurrentBranch = student => String(student.branchId || '') === String(currentBranchId || '')
+        || String(student.branch || '').trim() === String(currentBranch || '').trim();
+      const firstCurrent = belongsToCurrentBranch(first) ? 0 : 1;
+      const secondCurrent = belongsToCurrentBranch(second) ? 0 : 1;
       return firstCurrent - secondCurrent
         || (first.branch || '').localeCompare(second.branch || '')
         || this.compareStudentsByCreationDate(first, second);
@@ -1653,11 +1665,13 @@ class StudentsView extends Component {
   }
 
   renderCourseCalendar(courseKey, schedules, modality = 'normal') {
-    const title = courseKey === 'moto' ? 'Moto' : 'Automovil';
     schedules = schedules.filter(schedule => (schedule.modality || 'normal') === modality);
+    const title = schedules.find(schedule => schedule.course)?.course
+      || (courseKey === 'moto' ? 'Clase A - Moto' : 'Clase B - Automóvil');
+    // REGLA GLOBAL PROTEGIDA: una fecha aislada libre no basta para publicar
+    // un instructor; debe existir una franja completa reservable en el curso.
     const availableCycleKeys = new Set(schedules
-      .filter(schedule => Object.values(schedule.availabilityByDate || {})
-        .some(availability => Number(availability?.available || 0) > 0))
+      .filter(schedule => Number(schedule.available || 0) > 0)
       .map(schedule => schedule.cycleId || schedule.day));
     schedules = schedules.filter(schedule => availableCycleKeys.has(schedule.cycleId || schedule.day));
     if (!schedules.length) {
@@ -1760,8 +1774,7 @@ class StudentsView extends Component {
               <button type="button" class="course-cycle-btn" data-cycle-direction="-1" ${cycleIndex === 0 ? 'disabled' : ''}>Anterior</button>
               <span>Curso ${cycleIndex + 1}${cycleCount > 1 ? ` de ${cycleCount}` : ''}</span>
               <button type="button" class="course-cycle-btn" data-cycle-direction="1"
-                data-load-next="${cycleIndex === cycleCount - 1 && cycleCount < 6 ? 'true' : 'false'}"
-                ${cycleIndex === cycleCount - 1 && cycleCount >= 6 ? 'disabled' : ''}>Próximo</button>
+                data-load-next="${cycleIndex === cycleCount - 1 ? 'true' : 'false'}">Próximo</button>
             </div>
             <button type="button" class="schedule-rotation-toggle" aria-pressed="false" data-course="${courseKey}">
               <span class="schedule-rotation-switch" aria-hidden="true"></span>
@@ -2106,8 +2119,7 @@ class StudentsView extends Component {
         this.getScheduleCourseKey(schedule.course) === selectedCourse
         && (schedule.modality || 'normal') === selectedModality
         && (schedule.instructors || []).length > 0
-        && Object.values(schedule.availabilityByDate || {})
-          .some(availability => Number(availability?.available || 0) > 0));
+        && Number(schedule.available || 0) > 0);
       selectedInstructorId = firstCycleSchedule?.instructors?.[0]?.id || null;
       const preferredSelect = document.getElementById('preferred-instructor-select');
       if (preferredSelect && selectedInstructorId
@@ -2276,7 +2288,9 @@ class StudentsView extends Component {
         fullNormalSchedule: Boolean(cycle.fullNormalSchedule),
         durationBusinessDays: cycle.durationBusinessDays,
         time: `${slot.startTime} - ${slot.endTime}`,
-        course: cycle.vehicleType === 'moto' ? 'Moto' : 'Automovil',
+        // Conserva el nombre institucional del curso (por ejemplo,
+        // "Clase A - Moto") en vez de reducirlo a una etiqueta genérica.
+        course: cycle.course || (cycle.vehicleType === 'moto' ? 'Clase A - Moto' : 'Clase B - Automóvil'),
         cycleLabel: `${cycle.code}${groupLabel}`,
         capacity: slot.capacity,
         available: slot.available,
@@ -2440,7 +2454,10 @@ class StudentsView extends Component {
     try {
       const response = await ApiService.getBranchCourses(branchId);
       const courses = response.data || [];
-      const courseOptions = courses.map(course => `<option value="${course.id}" data-price="${Number(course.price || 0)}" data-course-type="${/moto|motocicleta|clase a/i.test(course.name) ? 'moto' : /auto|automóvil|clase b/i.test(course.name) ? 'carro' : /tipo f/i.test(course.name) ? 'tipo-f' : ''}">${course.name}</option>`).join('');
+      const courseOptions = courses.map(course => {
+        const courseType = this.getCourseCatalogType(course);
+        return `<option value="${escapeHtml(course.id)}" data-price="${Number(course.price || 0)}" data-course-type="${courseType}" data-course-name="${escapeHtml(course.name)}">${escapeHtml(course.name)}</option>`;
+      }).join('');
       const typeFOption = courses.some(course => /tipo f/i.test(course.name))
         ? ''
         : '<option value="tipo-f" data-price="0" data-course-type="tipo-f" disabled>Tipo F</option>';
@@ -2699,6 +2716,24 @@ class StudentsView extends Component {
     clearTimeout(this.additionalPracticeLookupTimer);
     clearTimeout(this.additionalPracticeResolutionTimer);
     form?.reset();
+    // REGLA PROTEGIDA: cerrar el modal siempre descarta el borrador completo.
+    // form.reset() no basta para opciones agregadas dinamicamente ni para el
+    // estado visual/interno de los calendarios de horarios.
+    form?.querySelectorAll('select').forEach(select => {
+      select.selectedIndex = select.options.length ? 0 : -1;
+    });
+    document.querySelectorAll('#student-schedule-calendar .enrollment-calendar').forEach(calendar => {
+      this.resetCalendarSelection(calendar);
+      calendar.dataset.dayWindowStart = '0';
+    });
+    document.querySelectorAll('#student-schedule-calendar .enrollment-cycle-set').forEach(set => {
+      set.dataset.activeCycleIndex = '0';
+      [...set.querySelectorAll(':scope > .enrollment-calendar')].forEach((calendar, index) => {
+        calendar.style.display = index === 0 ? 'block' : 'none';
+      });
+    });
+    if (form?.elements.scheduleId) form.elements.scheduleId.value = '';
+    if (form?.elements.schedulePlan) form.elements.schedulePlan.value = '';
     this.scheduleInstructorFilterId = null;
     this.useInstructorFirstAvailability = false;
     this.instructorFirstAvailabilityDate = null;
@@ -3047,9 +3082,6 @@ class StudentsView extends Component {
   async loadNextEnrollmentCycle(button, currentIndex) {
     if (this.loadingNextEnrollmentCycle) return;
     const calendar = button.closest('.enrollment-calendar');
-    const loadedCycleCount = calendar?.closest('.enrollment-cycle-set')
-      ?.querySelectorAll(':scope > .enrollment-calendar').length || 0;
-    if (loadedCycleCount >= 6) return;
     const currentCycleId = calendar?.dataset.cycleId;
     const courseKey = calendar?.dataset.course;
     const modality = calendar?.dataset.modality || 'normal';
@@ -3520,8 +3552,22 @@ class StudentsView extends Component {
   }
 
   getScheduleCourseKey(course) {
-    const normalized = (course || '').toLowerCase();
-    return normalized.includes('moto') || normalized.includes('clase a') ? 'moto' : 'carro';
+    return this.getCourseCatalogType({ name: course }) === 'moto' ? 'moto' : 'carro';
+  }
+
+  getCourseCatalogType(course = {}) {
+    const explicitType = String(course.vehicle_type || course.vehicleType || '').trim().toLowerCase();
+    if (['moto', 'carro', 'tipo-f'].includes(explicitType)) return explicitType;
+
+    const normalizedName = String(course.name || course.course || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+    if (/\btipo\s*f\b/.test(normalizedName)) return 'tipo-f';
+    if (/\bclase\s*a\b|\bmoto(?:cicleta)?\b/.test(normalizedName)) return 'moto';
+    if (/\bclase\s*b\b|\bautomovil\b|\bauto\b|\bcarro\b/.test(normalizedName)) return 'carro';
+    return '';
   }
 
   getCourseBusinessDays(startDate, endDate, courseKey = 'carro', modality = 'normal') {

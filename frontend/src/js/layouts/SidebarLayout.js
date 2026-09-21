@@ -15,7 +15,7 @@ class SidebarLayout {
     const isInstructor = role === 'instructor';
     const isTheoryInstructor = isInstructor && user?.practiceArea === 'teoria';
     const isCashOnly = role === 'caja';
-    const isBranchSecretary = role === 'secretaria_sucursal';
+    const isBranchSecretary = role === 'secretaria_sucursal' || role === 'secretaria';
     const canViewPayments = user?.permissions?.includes('PAYMENT_VIEW');
     const isAdminSystem = user?.roles?.includes('ADMIN_SYSTEM');
     const isGeneralManager = user?.roles?.includes('GENERAL_MANAGER');
@@ -176,15 +176,6 @@ class SidebarLayout {
                 </svg>
                 <span class="nav-text">Estudiantes</span>
               </a>` : ''}
-              ${user?.permissions?.includes('DOCUMENT_VIEW') ? `<a href="/documents" class="nav-item ${currentPath === '/documents' ? 'active' : ''}">
-                <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                  <polyline points="14 2 14 8 20 8"></polyline>
-                  <line x1="12" y1="11" x2="12" y2="17"></line>
-                  <line x1="9" y1="14" x2="15" y2="14"></line>
-                </svg>
-                <span class="nav-text">Documentación</span>
-              </a>` : ''}
               ${user?.permissions?.includes('SCHEDULE_VIEW') ? `<a href="/schedule" class="nav-item ${currentPath === '/schedule' ? 'active' : ''}">
                 <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
@@ -193,6 +184,19 @@ class SidebarLayout {
                   <line x1="3" y1="10" x2="21" y2="10"></line>
                 </svg>
                 <span class="nav-text">Horarios</span>
+              </a>` : ''}
+              ${isBranchSecretary && user?.permissions?.includes('SCHEDULE_CHANGE') ? `<a href="/schedule/recoveries" class="nav-item ${currentPath === '/schedule/recoveries' ? 'active' : ''}">
+                <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v6h6"></path><path d="M12 7v5l3 2"></path></svg>
+                <span class="nav-text">Clases por reagendar</span>
+              </a>` : ''}
+              ${user?.permissions?.includes('DOCUMENT_VIEW') ? `<a href="/documents" class="nav-item ${currentPath === '/documents' ? 'active' : ''}">
+                <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="12" y1="11" x2="12" y2="17"></line>
+                  <line x1="9" y1="14" x2="15" y2="14"></line>
+                </svg>
+                <span class="nav-text">Documentación</span>
               </a>` : ''}
               ${canViewPayments ? `
                 <a href="/cash/pending" class="nav-item ${currentPath === '/cash/pending' ? 'active' : ''}">
@@ -264,7 +268,7 @@ class SidebarLayout {
                 <span class="time" id="current-time"></span>
               </div>
 
-              <button class="topbar-item notifications-btn" id="notifications-btn" ${isInstructor ? 'style="display:none;"' : ''}>
+              <button class="topbar-item notifications-btn" id="notifications-btn">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
                   <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
@@ -429,6 +433,7 @@ class SidebarLayout {
     try {
       const response = await ApiService.getInstructorScheduleChangeNotifications();
       const notifications = response?.success && Array.isArray(response.data) ? response.data : [];
+      this.renderInstructorNotificationBadge(notifications.length);
       if (notifications.length) this.showInstructorScheduleChangeModal(notifications[0]);
     } catch (error) {
       console.warn('No se pudieron consultar los cambios de horario del instructor:', error.message);
@@ -437,19 +442,28 @@ class SidebarLayout {
     }
   }
 
+  static renderInstructorNotificationBadge(count) {
+    const badge = document.getElementById('notification-badge');
+    if (!badge) return;
+    badge.textContent = count > 99 ? '99+' : String(count || '');
+    badge.style.display = count ? 'inline-flex' : 'none';
+  }
+
   static showInstructorScheduleChangeModal(notification) {
     if (!notification?.id || document.querySelector('.instructor-schedule-change-overlay')) return;
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay active instructor-schedule-change-overlay';
     overlay.innerHTML = `
       <div class="modal instructor-schedule-change-modal" role="dialog" aria-modal="true" aria-labelledby="instructor-schedule-change-title">
-        <div class="instructor-schedule-change-icon" aria-hidden="true">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line><path d="m9 16 2 2 4-4"></path></svg>
-        </div>
         <div class="instructor-schedule-change-content">
-          <span class="instructor-schedule-change-eyebrow">Actualización de agenda</span>
-          <h3 id="instructor-schedule-change-title"></h3>
-          <p class="instructor-schedule-change-message"></p>
+          <div class="instructor-schedule-change-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line><path d="m9 16 2 2 4-4"></path></svg>
+          </div>
+          <div class="instructor-schedule-change-text">
+            <span class="instructor-schedule-change-eyebrow">Actualización de agenda</span>
+            <h3 id="instructor-schedule-change-title"></h3>
+            <p class="instructor-schedule-change-message"></p>
+          </div>
         </div>
         <div class="modal-footer instructor-schedule-change-actions">
           <button type="button" class="btn btn-primary" data-acknowledge-schedule-change>Entendido</button>

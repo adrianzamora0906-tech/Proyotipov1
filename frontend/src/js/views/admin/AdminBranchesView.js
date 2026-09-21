@@ -376,9 +376,15 @@ export default class AdminBranchesView extends Component {
 
   async renderStaff(body) {
     const branchRoles = [{code:'SECRETARY',name:'Secretaría'},{code:'CASHIER',name:'Caja'},{code:'INSTRUCTOR',name:'Instructor'}];
-    const [staffResponse, rolesResponse] = await Promise.all([AdminService.branchStaff(this.branchId), this.branchAccess ? Promise.resolve({ data: branchRoles }) : AdminService.roles()]);
+    const canManageVacations = authService.hasRole('BRANCH_ADMIN');
+    const [staffResponse, rolesResponse, vacationResponse] = await Promise.all([
+      AdminService.branchStaff(this.branchId),
+      this.branchAccess ? Promise.resolve({ data: branchRoles }) : AdminService.roles(),
+      canManageVacations ? AdminService.branchVacations(this.branchId) : Promise.resolve({ data: [] }),
+    ]);
     const staff = staffResponse.data || [];
     const roles = rolesResponse.data || [];
+    const vacations = vacationResponse.data || [];
     const canUpdateUsers = permissionService.can('USER_UPDATE');
     body.innerHTML = `
       <section class="branch-card">
@@ -389,6 +395,16 @@ export default class AdminBranchesView extends Component {
       </section>
       ${this.branchAccess ? '' : `<section class="branch-card"><h2>Roles disponibles</h2><div class="branch-role-list">${roles.map(role => `<span>${esc(role.code)} · ${esc(role.name)}</span>`).join('')}</div></section>`}
     `;
+    if (canManageVacations) {
+      const table=body.querySelector('#branch-staff-rows')?.closest('.branch-table-wrap');
+      table?.insertAdjacentHTML('beforebegin',`<form class="staff-vacation-filters" id="staff-vacation-filters">
+        <label>Buscar por alumno<input name="student" placeholder="Nombre o cedula del alumno"></label>
+        <label>Vacaciones<select name="vacation"><option value="all">Todos</option><option value="vacation">De vacaciones hoy</option><option value="available">Sin vacaciones hoy</option></select></label>
+        <button type="button" class="btn btn-secondary" id="clear-staff-vacation-filters">Limpiar</button>
+        <span id="staff-filter-count"></span>
+      </form>`);
+    }
+    if (canManageVacations) body.insertAdjacentHTML('beforeend', this.renderVacationList(vacations));
     const roleSort = body.querySelector('#sort-staff-role');
     roleSort?.addEventListener('click', () => {
       const tbody = body.querySelector('#branch-staff-rows');
@@ -418,6 +434,38 @@ export default class AdminBranchesView extends Component {
       if (user) this.openPermissionsModal(user);
     }));
     document.querySelectorAll('.view-user-sessions').forEach(button => button.addEventListener('click', () => { const user=staff.find(item=>String(item.id)===String(button.dataset.userId));if(user)this.openSessionsModal(user); }));
+    if (canManageVacations) document.querySelectorAll('#branch-staff-rows tr[data-role-rank]').forEach(row => {
+      const userId=row.querySelector('.view-user-access')?.dataset.userId;
+      const user=staff.find(item=>String(item.id)===String(userId));
+      row.dataset.studentSearch=String(user?.assigned_student_search||'').toLocaleLowerCase('es');
+      row.dataset.vacation=user?.current_vacation_id?'vacation':'available';
+      if(user?.current_vacation_id){const status=row.querySelector('td:nth-child(4)');status?.insertAdjacentHTML('beforeend',`<span class="branch-pill warning vacation-now">De vacaciones hasta ${dateOnly(user.current_vacation_end)}</span>`);}
+      if(!user?.active||String(user.branch_id)!==String(this.branchId))return;
+      const button=document.createElement('button');button.type='button';button.className='btn btn-small manage-vacation';button.textContent='Vacaciones';
+      row.querySelector('.branch-actions')?.appendChild(button);
+      button.addEventListener('click',()=>this.openVacationModal(user,body));
+    });
+    const vacationFilters=body.querySelector('#staff-vacation-filters');
+    const applyVacationFilters=()=>{
+      const student=String(vacationFilters?.elements.student.value||'').trim().toLocaleLowerCase('es');
+      const vacation=vacationFilters?.elements.vacation.value||'all';
+      let visible=0;
+      body.querySelectorAll('#branch-staff-rows tr[data-role-rank]').forEach(row=>{
+        const matchesStudent=!student||row.dataset.studentSearch.includes(student);
+        const matchesVacation=vacation==='all'||row.dataset.vacation===vacation;
+        row.hidden=!(matchesStudent&&matchesVacation);if(!row.hidden)visible+=1;
+      });
+      const count=body.querySelector('#staff-filter-count');if(count)count.textContent=`${visible} personas`;
+    };
+    vacationFilters?.addEventListener('input',applyVacationFilters);
+    vacationFilters?.addEventListener('change',applyVacationFilters);
+    body.querySelector('#clear-staff-vacation-filters')?.addEventListener('click',()=>{vacationFilters.reset();applyVacationFilters();});
+    applyVacationFilters();
+    document.querySelectorAll('.cancel-vacation').forEach(button => button.addEventListener('click', async()=>{
+      if(!window.confirm('Cancelar estas vacaciones y liberar la disponibilidad del instructor?'))return;
+      try{await AdminService.cancelBranchVacation(this.branchId,button.dataset.vacationId);await this.renderStaff(body);}
+      catch(error){window.alert(error.message||'No se pudieron cancelar las vacaciones.');}
+    }));
     document.querySelectorAll('.toggle-branch-user').forEach(button => button.addEventListener('click', async()=>{try{button.disabled=true;await AdminService.setActive(button.dataset.userId,button.dataset.active==='true','Cambio desde Personal y Accesos');await this.renderStaff(body);}catch(error){button.disabled=false;window.alert(error.message||'No se pudo cambiar el estado del usuario.');}}));
     document.querySelectorAll('.reset-user-access').forEach(button=>{
       const user=staff.find(item=>String(item.id)===String(button.dataset.userId));
@@ -434,6 +482,72 @@ export default class AdminBranchesView extends Component {
         this.showTemporaryPassword(user,response.data,body);
       }catch(error){button.disabled=false;window.alert(error.message||'No se pudo generar la clave temporal.');}
     }));
+  }
+
+  renderVacationList(vacations) {
+    const rows=vacations.map(item=>`<tr>
+      <td><strong>${esc(item.staff_name)}</strong></td>
+      <td>${dateOnly(item.start_date)} - ${dateOnly(item.end_date)}</td>
+      <td>${item.is_instructor?'Instructor':'Administrativo'}</td>
+      <td>${item.status}</td>
+      <td>${item.status==='approved'?`<button class="btn btn-small cancel-vacation" data-vacation-id="${esc(item.id)}">Cancelar</button>`:'-'}</td>
+    </tr>`).join('');
+    return `<section class="branch-card"><h2>Vacaciones programadas</h2><div class="branch-table-wrap"><table><tbody>${rows||'<tr><td>No hay vacaciones registradas.</td></tr>'}</tbody></table></div></section>`;
+  }
+
+  openVacationModal(user, body) {
+    const modal=document.getElementById('branch-modal');
+    const today=new Date().toISOString().slice(0,10);
+    const name=`${user.first_name||''} ${user.last_name||''}`.trim();
+    const instructor=(user.roles||[]).some(role=>role.code==='INSTRUCTOR');
+    modal.innerHTML=`<div class="branch-modal-backdrop"><section class="branch-modal vacation-modal">
+      <div><h2>Programar vacaciones</h2><p>${esc(name)} · ${instructor?'Instructor':'Personal administrativo'}</p></div>
+      <form id="vacation-form" class="vacation-form">
+        <div class="vacation-date-grid"><label>Desde<input type="date" name="startDate" min="${today}" required></label><label>Hasta<input type="date" name="endDate" min="${today}" required></label></div>
+        <label>Motivo o referencia<textarea name="reason" required minlength="5"></textarea></label>
+        <button type="button" class="btn btn-secondary" id="preview-vacation">Revisar impacto</button>
+        <div id="vacation-preview"><p>Selecciona las fechas para calcular el resumen mensual y el impacto operativo.</p></div>
+        <div class="branch-modal-actions"><button type="button" class="btn close-vacation">Cancelar</button><button class="btn btn-primary" id="approve-vacation" disabled>Aprobar vacaciones</button></div>
+      </form></section></div>`;
+    const close=()=>{modal.innerHTML='';};
+    modal.querySelector('.close-vacation').addEventListener('click',close);
+    const form=modal.querySelector('#vacation-form');
+    const host=modal.querySelector('#vacation-preview');
+    const approve=modal.querySelector('#approve-vacation');
+    let preview=null;
+    modal.querySelector('#preview-vacation').addEventListener('click',async()=>{
+      if(!form.reportValidity())return;
+      host.innerHTML='<p>Calculando resumen...</p>';approve.disabled=true;
+      try{
+        preview=(await AdminService.branchVacationPreview(this.branchId,user.id,{startDate:form.elements.startDate.value,endDate:form.elements.endDate.value})).data;
+        this.renderVacationPreview(host,preview);
+        const ack=host.querySelector('[name="reorganizationAcknowledged"]');
+        const sync=()=>{approve.disabled=!preview.eligible||(preview.isInstructor&&!ack?.checked);};
+        ack?.addEventListener('change',sync);sync();
+      }catch(error){preview=null;host.innerHTML=`<p class="vacation-warning">${esc(error.message||'No se pudo evaluar la solicitud.')}</p>`;}
+    });
+    form.addEventListener('submit',async event=>{
+      event.preventDefault();if(!preview)return;
+      try{
+        approve.disabled=true;approve.textContent='Guardando...';
+        await AdminService.createBranchVacation(this.branchId,{userId:user.id,startDate:form.elements.startDate.value,endDate:form.elements.endDate.value,reason:form.elements.reason.value,reorganizationAcknowledged:Boolean(host.querySelector('[name="reorganizationAcknowledged"]')?.checked)});
+        close();await this.renderStaff(body);
+      }catch(error){approve.textContent='Aprobar vacaciones';approve.disabled=false;window.alert(error.message||'No se pudieron aprobar las vacaciones.');}
+    });
+  }
+
+  renderVacationPreview(host, preview) {
+    const groups=preview.groups||[];
+    host.innerHTML=`<div class="vacation-metrics">
+      <article><strong>${number(preview.studentsTaught)}</strong><span>Alumnos atendidos este mes</span></article>
+      <article><strong>${number(preview.completedClasses)}</strong><span>Clases completadas</span></article>
+      <article><strong>${number(preview.affectedStudents)}</strong><span>Alumnos afectados</span></article>
+      <article><strong>${number(preview.affectedClasses)}</strong><span>Clases por reorganizar</span></article>
+    </div>
+    ${preview.isInstructor?`<div class="vacation-rule ${preview.studentsTaught>=preview.minimumRequired?'ok':'blocked'}"><strong>Meta mensual: ${preview.studentsTaught} de ${preview.minimumRequired} alumnos</strong><span>${preview.studentsTaught>=preview.minimumRequired?'Cumple la regla para aprobar vacaciones.':'No se pueden aprobar vacaciones todavia.'}</span></div>`:''}
+    ${groups.length?`<div class="vacation-groups"><h3>Grupos que deben reorganizarse</h3>${groups.map(group=>`<div><strong>${esc(group.code)} · ${esc(group.cycle_code)}</strong><span>${number(group.students)} alumnos · instructores ${number(group.instructors_before)} a ${number(group.instructors_during)}</span></div>`).join('')}</div>`:''}
+    ${(preview.warnings||[]).map(warning=>`<p class="vacation-warning">${esc(warning)}</p>`).join('')}
+    ${preview.isInstructor?'<label class="vacation-ack"><input type="checkbox" name="reorganizationAcknowledged"> Revise los grupos y clases que deben reorganizarse.</label>':''}`;
   }
 
   showTemporaryPassword(user, data, body) {
@@ -749,15 +863,44 @@ export default class AdminBranchesView extends Component {
     const intensive=ranges('intensivo',[{start:'06:00',end:'08:30'},{start:'09:00',end:'11:30'},{start:'12:00',end:'14:30'}]);
     const slotRows=(modality,items)=>items.map((item,index)=>`<div class="course-slot-row"><span>${index+1}</span><label>Desde<input type="time" name="${modality}Start" value="${item.start}" required></label><i>→</i><label>Hasta<input type="time" name="${modality}End" value="${item.end}" required></label><button type="button" class="course-slot-remove" aria-label="Eliminar horario">&times;</button></div>`).join('');
     const instructors=data.instructors||[];
-    const priorityInstructors=instructors.filter(instructor=>instructor.priority_branch);
-    const rotationCandidates=priorityInstructors.filter(instructor=>(instructor.practice_area==='mixto'||instructor.practice_area===selectedVehicleType)&&(instructor.course_enabled||instructor.priority_branch));
-    const savedRotation=data.rotation||[],savedIds=new Set(savedRotation.map(item=>String(item.instructor_id)));
-    const rotationInstructors=[...savedRotation.map(item=>({id:item.instructor_id,name:item.instructor_name,observation:item.observation||''})),...rotationCandidates.filter(item=>!savedIds.has(String(item.id))).map(item=>({id:item.id,name:item.name,observation:''}))];
+    // REGLA PROTEGIDA: una sede puede formar sus equipos con todos los instructores
+    // activos y compatibles de su cantón, aunque la cuenta pertenezca a otra sucursal.
+    const cantonInstructors=instructors.filter(instructor=>instructor.practice_area==='mixto'||instructor.practice_area===selectedVehicleType);
+    // REGLA PROTEGIDA: la especialidad normal y la de fin de semana son independientes.
+    // Benito sigue siendo mixto de lunes a viernes, pero su rotación intensiva es sólo Moto.
+    const rotationCandidates=cantonInstructors.filter(instructor=>{
+      const weekendArea=instructor.weekend_practice_area||instructor.practice_area;
+      return weekendArea==='mixto'||weekendArea===selectedVehicleType;
+    });
+    const eligibleWeekendIds=new Set(rotationCandidates.map(item=>String(item.id)));
+    const savedRotation=(data.rotation||[]).filter(item=>eligibleWeekendIds.has(String(item.instructor_id))),savedIds=new Set(savedRotation.map(item=>String(item.instructor_id)));
+    const baseRotationInstructors=[...savedRotation.map(item=>({id:item.instructor_id,name:item.instructor_name,observation:item.observation||''})),...rotationCandidates.filter(item=>!savedIds.has(String(item.id))).map(item=>({id:item.id,name:item.name,observation:''}))];
     const nextSaturday=()=>{const date=new Date();date.setHours(12,0,0,0);date.setDate(date.getDate()+((6-date.getDay()+7)%7));return date.toISOString().slice(0,10);};
-    const rotationAnchor=String(program.intensive_rotation_anchor_date||nextSaturday()).slice(0,10);
+    const intensiveSource=data.intensiveSource||{};
+    const rotationAnchor=String(intensiveSource.anchorDate||program.intensive_rotation_anchor_date||nextSaturday()).slice(0,10);
+    const weekendOverrides=data.weekendOverrides||[];
+    const anchorOverride=weekendOverrides.find(item=>String(item.start_date).slice(0,10)===rotationAnchor&&item.active!==false);
+    const forcedIds=(anchorOverride?.instructors||[]).map(item=>String(item.id));
+    const rotationInstructors=forcedIds.length?[
+      ...forcedIds.map(id=>baseRotationInstructors.find(item=>String(item.id)===id)).filter(Boolean),
+      ...(()=>{const lastIndex=baseRotationInstructors.findIndex(item=>String(item.id)===forcedIds[forcedIds.length-1]);return baseRotationInstructors
+        .map((_,offset)=>baseRotationInstructors[(lastIndex+1+offset)%baseRotationInstructors.length])
+        .filter(item=>!forcedIds.includes(String(item.id)));})(),
+    ]:baseRotationInstructors;
     const rotationRow=(item,index)=>`<tr data-instructor-id="${esc(item.id)}"><td class="rotation-position">${index+1}</td><td><strong>${esc(item.name)}</strong></td><td class="rotation-date">Se calculará automáticamente</td><td><input class="rotation-observation" maxlength="300" value="${esc(item.observation)}" placeholder="Observación opcional"></td><td><div class="rotation-actions"><button type="button" class="rotation-up" title="Subir instructor" aria-label="Subir ${esc(item.name)}">↑</button><button type="button" class="rotation-down" title="Bajar instructor" aria-label="Bajar ${esc(item.name)}">↓</button></div></td></tr>`;
+    const weekendCandidates=rotationCandidates.filter(item=>item.course_enabled);
+    const weekendInstructorOptions=(selected='')=>`<option value="">Seleccionar instructor</option>${weekendCandidates.map(item=>`<option value="${esc(item.id)}" ${String(item.id)===String(selected)?'selected':''}>${esc(item.name)}</option>`).join('')}`;
+    const weekendOverrideRow=(item={})=>{const selected=item.instructors||[],count=Number(item.instructor_count||2);return `<div class="weekend-capacity-row">
+      <label><span>Sábado de inicio</span><input type="date" class="weekend-start-date" value="${esc(String(item.start_date||'').slice(0,10))}" required></label>
+      <label><span>Instructores</span><select class="weekend-instructor-count"><option value="1" ${count===1?'selected':''}>1 instructor</option><option value="2" ${count===2?'selected':''}>2 instructores</option></select></label>
+      <label><span>Primer instructor</span><select class="weekend-instructor-1" required>${weekendInstructorOptions(selected[0]?.id)}</select></label>
+      <label class="weekend-second-instructor"><span>Segundo instructor</span><select class="weekend-instructor-2">${weekendInstructorOptions(selected[1]?.id)}</select></label>
+      <label class="weekend-capacity-reason"><span>Motivo</span><input class="weekend-reason" maxlength="300" value="${esc(item.reason||'')}" placeholder="Ej.: incremento de matrículas" required></label>
+      <button type="button" class="btn btn-light remove-weekend-capacity">Eliminar</button>
+    </div>`;};
     const areaLabel=area=>({carro:'Automóvil',moto:'Moto',mixto:'Automóvil y moto',teoria:'Teoría'})[area]||area;
-    const groupRow=(group={},index=0)=>`<fieldset class="course-instructor-group"><legend>Equipo ${index+1}</legend><label>Nombre<input name="groupName" value="${esc(group.name||`Equipo ${index+1}`)}" required></label><div class="course-group-sequence-note"><input type="hidden" name="groupNextStartDate" value=""><strong>Aplicación automática</strong><small>Los cambios de este equipo se aplicarán al próximo curso de su secuencia.</small></div><div class="course-group-members-title"><strong>Instructores prioritarios de la sucursal</strong><small>Los instructores de apoyo del cantón no forman parte de los grupos fijos.</small></div><div class="course-group-members">${priorityInstructors.map(instructor=>`<label><input type="checkbox" data-practice-area="${esc(instructor.practice_area)}" name="groupMember-${index}" value="${instructor.id}" ${(group.members||[]).some(member=>String(member.id)===String(instructor.id))?'checked':''}> <span>${esc(instructor.name)}<small>${esc(areaLabel(instructor.practice_area))} · Prioridad de esta sucursal</small></span></label>`).join('')||'<p>No hay instructores prioritarios compatibles configurados.</p>'}</div><button type="button" class="btn btn-light remove-instructor-group">Eliminar equipo</button></fieldset>`;
+    const instructorScopeLabel=instructor=>instructor.priority_branch?'Prioridad de esta sucursal':`Apoyo cantonal · ${instructor.home_branch||'otra sucursal'}`;
+    const groupRow=(group={},index=0)=>`<fieldset class="course-instructor-group"><legend>Equipo ${index+1}</legend><label>Nombre<input name="groupName" value="${esc(group.name||`Equipo ${index+1}`)}" required></label><div class="course-group-sequence-note"><input type="hidden" name="groupNextStartDate" value=""><strong>Aplicación automática</strong><small>Los cambios de este equipo se aplicarán al próximo curso de su secuencia.</small></div><div class="course-group-members-title"><strong>Instructores compatibles del cantón</strong><small>Incluye instructores de esta sede y de las demás sucursales del mismo cantón.</small></div><div class="course-group-members">${cantonInstructors.map(instructor=>`<label><input type="checkbox" data-practice-area="${esc(instructor.practice_area)}" name="groupMember-${index}" value="${instructor.id}" ${(group.members||[]).some(member=>String(member.id)===String(instructor.id))?'checked':''}> <span>${esc(instructor.name)}<small>${esc(areaLabel(instructor.practice_area))} · ${esc(instructorScopeLabel(instructor))}</small></span></label>`).join('')||'<p>No hay instructores activos compatibles en este cantón.</p>'}</div><button type="button" class="btn btn-light remove-instructor-group">Eliminar equipo</button></fieldset>`;
     const configuredGroups=(data.groups||[]).length?data.groups:[{}];
     const modal=page?body:document.getElementById('branch-modal');modal.innerHTML=`${page?'<div class="course-program-page__top"><button type="button" class="btn btn-light close-modal">← Volver a cursos</button></div>':'<div class="branch-modal-backdrop">'}<form class="${page?'course-program-page__form':'branch-modal course-program-modal'}" id="course-program-form" novalidate>
       <div class="course-program-header"><div><span>Configuración académica</span><h2>${esc(course.name)}</h2><p>Define la duración, capacidad y horarios disponibles para esta sucursal.</p></div><button type="button" class="permission-modal__close close-modal" aria-label="Cerrar">&times;</button></div>
@@ -785,7 +928,8 @@ export default class AdminBranchesView extends Component {
             <div class="course-program-slots"><span>Horarios disponibles</span><small>Configúralos una sola vez. Se repetirán automáticamente sábado y domingo.</small><div class="course-slot-columns"><span>#</span><span>Hora inicial</span><i></i><span>Hora final</span><i></i></div><div class="course-slot-list" data-slot-list="intensive">${slotRows('intensive',intensive)}</div><button type="button" class="course-slot-add" data-add-slot="intensive">+ Agregar horario</button></div>
           </section>
         </div>
-        <section class="course-program-section intensive-rotation-section"><div class="course-program-section__title"><div><strong>Orden de instructores para fines de semana</strong><small>La rotación se aplica a este curso y esta sucursal. Usa las flechas para subir o bajar un instructor.</small></div><label class="rotation-anchor"><span>Primer sábado de la rotación</span><input type="date" name="intensiveRotationAnchorDate" value="${esc(rotationAnchor)}" required></label></div><div class="intensive-rotation-table"><table><thead><tr><th>N.º</th><th>Instructor</th><th>Fecha tentativa del curso</th><th>Observación</th><th>Orden</th></tr></thead><tbody id="intensive-rotation-body">${rotationInstructors.map(rotationRow).join('')}</tbody></table></div>${rotationInstructors.length?'':'<p class="branch-empty">No hay instructores habilitados para este curso en la sucursal.</p>'}</section>
+        <section class="course-program-section intensive-rotation-section"><div class="course-program-section__title"><div><strong>Orden de instructores para fines de semana</strong><small>${intensiveSource.shared?`Rotación compartida con ${esc(intensiveSource.branchName||'Flavio Reyes')}. Los cursos normales de esta sucursal continúan independientes.`:'La rotación se aplica a este curso y esta sucursal.'} Usa las flechas para subir o bajar un instructor.</small></div><label class="rotation-anchor"><span>Primer sábado de la rotación</span><input type="date" name="intensiveRotationAnchorDate" value="${esc(rotationAnchor)}" required></label></div>${intensiveSource.shared?`<div class="weekend-shared-notice"><strong>Fin de semana centralizado</strong><span>Los cambios realizados aquí también se reflejan en ${esc(intensiveSource.branchName||'Flavio Reyes')}.</span></div>`:''}<div class="intensive-rotation-table"><table><thead><tr><th>N.º</th><th>Instructor</th><th>Fecha tentativa del curso</th><th>Observación</th><th>Orden</th></tr></thead><tbody id="intensive-rotation-body">${rotationInstructors.map(rotationRow).join('')}</tbody></table></div>${rotationInstructors.length?'':'<p class="branch-empty">No hay instructores habilitados para este curso en la sucursal.</p>'}</section>
+        <section class="course-program-section weekend-capacity-section"><div class="course-program-section__title"><div><strong>Capacidad especial por fin de semana</strong><small>Publica uno o dos instructores desde el inicio para una fecha concreta. Ambos turnos se consumen en la rotación.</small></div><button type="button" class="btn btn-light" id="add-weekend-capacity">+ Configurar fecha</button></div><div id="weekend-capacity-list">${weekendOverrides.map(weekendOverrideRow).join('')}</div><p class="branch-empty weekend-capacity-empty" ${weekendOverrides.length?'hidden':''}>No hay excepciones futuras. Se aplicará la rotación normal de un instructor.</p></section>
         <div class="course-program-day-guide"><strong>Aplicación automática</strong><span>Normal: lunes a viernes</span><span>Intensiva: sábado y domingo</span></div>
         <div id="program-status" class="branch-status"></div>
       </div>
@@ -802,10 +946,13 @@ export default class AdminBranchesView extends Component {
     const syncGroupMode=()=>{const enabled=modal.querySelector('[name="assignmentMode"]').value==='groups';modal.querySelector('.course-groups-editor').hidden=!enabled;groupsHost.querySelectorAll('input').forEach(input=>{input.disabled=!enabled;});if(enabled)syncCompatibility();};
     modal.querySelector('[name="assignmentMode"]').onchange=syncGroupMode;syncGroupMode();
     modal.querySelector('#add-instructor-group').onclick=()=>{const wrapper=document.createElement('div');wrapper.innerHTML=groupRow({},groupsHost.children.length);groupsHost.appendChild(wrapper.firstElementChild);bindGroupRemove();syncGroupMode();};
-    const rotationBody=modal.querySelector('#intensive-rotation-body'),anchorInput=modal.querySelector('[name="intensiveRotationAnchorDate"]');
-    const refreshRotation=()=>{const anchor=new Date(`${anchorInput.value}T12:00:00`),endOffset=selectedVehicleType==='moto'?7:8;[...rotationBody.rows].forEach((row,index)=>{const start=new Date(anchor),end=new Date(anchor);start.setDate(start.getDate()+index*7);end.setDate(end.getDate()+index*7+endOffset);row.querySelector('.rotation-position').textContent=index+1;row.querySelector('.rotation-date').textContent=`${start.toLocaleDateString('es-EC',{day:'numeric',month:'long'})} al ${end.toLocaleDateString('es-EC',{day:'numeric',month:'long',year:'numeric'})}`;row.querySelector('.rotation-up').disabled=index===0;row.querySelector('.rotation-down').disabled=index===rotationBody.rows.length-1;});};
+    const rotationBody=modal.querySelector('#intensive-rotation-body'),anchorInput=modal.querySelector('[name="intensiveRotationAnchorDate"]'),weekendList=modal.querySelector('#weekend-capacity-list'),weekendEmpty=modal.querySelector('.weekend-capacity-empty');
+    const refreshRotation=()=>{const anchor=new Date(`${anchorInput.value}T12:00:00`),endOffset=selectedVehicleType==='moto'?7:8,overrideDates=new Map();weekendList?.querySelectorAll('.weekend-capacity-row').forEach(item=>{const date=item.querySelector('.weekend-start-date').value,count=Number(item.querySelector('.weekend-instructor-count').value),ids=[item.querySelector('.weekend-instructor-1').value,...(count===2?[item.querySelector('.weekend-instructor-2').value]:[])];ids.filter(Boolean).forEach(id=>overrideDates.set(String(id),date));});let weekIndex=0;[...rotationBody.rows].forEach((row,index)=>{const forcedDate=overrideDates.get(String(row.dataset.instructorId)),start=forcedDate?new Date(`${forcedDate}T12:00:00`):new Date(anchor),end=new Date(start);if(!forcedDate)start.setDate(start.getDate()+weekIndex*7);if(forcedDate){const forcedWeek=Math.max(0,Math.round((start-anchor)/604800000));weekIndex=Math.max(weekIndex,forcedWeek+1);}else weekIndex+=1;end.setTime(start.getTime());end.setDate(end.getDate()+endOffset);row.querySelector('.rotation-position').textContent=index+1;row.querySelector('.rotation-date').textContent=`${start.toLocaleDateString('es-EC',{day:'numeric',month:'long'})} al ${end.toLocaleDateString('es-EC',{day:'numeric',month:'long',year:'numeric'})}`;row.querySelector('.rotation-up').disabled=index===0;row.querySelector('.rotation-down').disabled=index===rotationBody.rows.length-1;});};
     rotationBody?.addEventListener('click',event=>{const button=event.target.closest('.rotation-up,.rotation-down');if(!button)return;const row=button.closest('tr');if(button.classList.contains('rotation-up')&&row.previousElementSibling)rotationBody.insertBefore(row,row.previousElementSibling);if(button.classList.contains('rotation-down')&&row.nextElementSibling)rotationBody.insertBefore(row.nextElementSibling,row);refreshRotation();});anchorInput?.addEventListener('change',refreshRotation);if(rotationBody)refreshRotation();
-    modal.querySelector('form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,invalid=form.querySelector(':invalid');if(invalid){const field=invalid.closest('label')?.querySelector('span')?.textContent||invalid.closest('fieldset')?.querySelector('legend')?.textContent||'campo obligatorio';showProgramResult('error',`Revisa ${field}: falta completar un dato obligatorio.`);invalid.focus();return;}const fd=new FormData(form),expand=(modality,days)=>{const starts=fd.getAll(`${modality}Start`),ends=fd.getAll(`${modality}End`);return days.flatMap(day=>starts.map((start,index)=>({modality:modality==='intensive'?'intensivo':'normal',dayOfWeek:day,startTime:start,endTime:ends[index]})));};const groups=[...groupsHost.querySelectorAll('.course-instructor-group')].map(group=>({name:group.querySelector('[name="groupName"]').value,nextStartDate:group.querySelector('[name="groupNextStartDate"]').value,memberIds:[...group.querySelectorAll('.course-group-members input:checked')].map(input=>input.value)}));if(fd.get('assignmentMode')==='groups'&&groups.some(group=>!group.memberIds.length)){showProgramResult('error','Cada equipo debe tener al menos un instructor seleccionado.');return;}const intensiveRotation=[...(rotationBody?.rows||[])].map(row=>({instructorId:row.dataset.instructorId,observation:row.querySelector('.rotation-observation').value}));const payload={vehicleType:selectedVehicleType,assignmentMode:fd.get('assignmentMode'),automaticCycles:fd.has('automaticCycles'),normalStartDays:[1,2,3,4,5],intensiveStartDays:[6],groups,intensiveRotation,intensiveRotationAnchorDate:fd.get('intensiveRotationAnchorDate'),normalDurationDays:Number(fd.get('normalDurationDays')),intensiveDurationDays:Number(fd.get('intensiveDurationDays')),sessionMinutes:Number(fd.get('sessionMinutes')),capacityPerInstructor:Number(fd.get('capacityPerInstructor')),normalEnabled:fd.has('normalEnabled'),intensiveEnabled:fd.has('intensiveEnabled'),slots:[...(fd.has('normalEnabled')?expand('normal',[1,2,3,4,5]):[]),...(fd.has('intensiveEnabled')?expand('intensive',[6,0]):[])]};const submit=form.querySelector('button[type="submit"]');submit.disabled=true;submit.textContent='Guardando...';try{await AdminService.saveCourseProgram(this.branchId,course.id,payload);showProgramResult('success','La configuración académica, los horarios y la rotación se guardaron correctamente.',close);}catch(error){showProgramResult('error',error.message||'Ocurrió un error inesperado al guardar el programa.');}finally{submit.disabled=false;submit.textContent='Guardar programa';}};
+    const syncWeekendRow=row=>{const double=Number(row.querySelector('.weekend-instructor-count').value)===2,second=row.querySelector('.weekend-second-instructor'),select=second.querySelector('select');second.hidden=!double;select.required=double;if(!double)select.value='';};
+    const bindWeekendRows=()=>weekendList.querySelectorAll('.weekend-capacity-row').forEach(row=>{row.querySelector('.weekend-instructor-count').onchange=()=>{syncWeekendRow(row);refreshRotation();};row.querySelectorAll('.weekend-start-date,.weekend-instructor-1,.weekend-instructor-2').forEach(control=>control.onchange=refreshRotation);row.querySelector('.remove-weekend-capacity').onclick=()=>{row.remove();weekendEmpty.hidden=weekendList.children.length>0;refreshRotation();};syncWeekendRow(row);});
+    modal.querySelector('#add-weekend-capacity').onclick=()=>{const wrapper=document.createElement('div');wrapper.innerHTML=weekendOverrideRow({start_date:nextSaturday(),instructor_count:2});weekendList.appendChild(wrapper.firstElementChild);weekendEmpty.hidden=true;bindWeekendRows();};bindWeekendRows();
+    modal.querySelector('form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,invalid=form.querySelector(':invalid');if(invalid){const field=invalid.closest('label')?.querySelector('span')?.textContent||invalid.closest('fieldset')?.querySelector('legend')?.textContent||'campo obligatorio';showProgramResult('error',`Revisa ${field}: falta completar un dato obligatorio.`);invalid.focus();return;}const fd=new FormData(form),expand=(modality,days)=>{const starts=fd.getAll(`${modality}Start`),ends=fd.getAll(`${modality}End`);return days.flatMap(day=>starts.map((start,index)=>({modality:modality==='intensive'?'intensivo':'normal',dayOfWeek:day,startTime:start,endTime:ends[index]})));};const groups=[...groupsHost.querySelectorAll('.course-instructor-group')].map(group=>({name:group.querySelector('[name="groupName"]').value,nextStartDate:group.querySelector('[name="groupNextStartDate"]').value,memberIds:[...group.querySelectorAll('.course-group-members input:checked')].map(input=>input.value)}));if(fd.get('assignmentMode')==='groups'&&groups.some(group=>!group.memberIds.length)){showProgramResult('error','Cada equipo debe tener al menos un instructor seleccionado.');return;}const intensiveRotation=[...(rotationBody?.rows||[])].map(row=>({instructorId:row.dataset.instructorId,observation:row.querySelector('.rotation-observation').value}));const weekendOverrides=[...weekendList.querySelectorAll('.weekend-capacity-row')].map(row=>{const instructorCount=Number(row.querySelector('.weekend-instructor-count').value);return{startDate:row.querySelector('.weekend-start-date').value,instructorCount,instructorIds:[row.querySelector('.weekend-instructor-1').value,...(instructorCount===2?[row.querySelector('.weekend-instructor-2').value]:[])],reason:row.querySelector('.weekend-reason').value};});const duplicateWeekend=weekendOverrides.find((item,index)=>weekendOverrides.findIndex(other=>other.startDate===item.startDate)!==index);if(duplicateWeekend){showProgramResult('error',`La fecha ${duplicateWeekend.startDate} está configurada más de una vez.`);return;}const payload={vehicleType:selectedVehicleType,assignmentMode:fd.get('assignmentMode'),automaticCycles:fd.has('automaticCycles'),normalStartDays:[1,2,3,4,5],intensiveStartDays:[6],groups,intensiveRotation,intensiveRotationAnchorDate:fd.get('intensiveRotationAnchorDate'),weekendOverrides,normalDurationDays:Number(fd.get('normalDurationDays')),intensiveDurationDays:Number(fd.get('intensiveDurationDays')),sessionMinutes:Number(fd.get('sessionMinutes')),capacityPerInstructor:Number(fd.get('capacityPerInstructor')),normalEnabled:fd.has('normalEnabled'),intensiveEnabled:fd.has('intensiveEnabled'),slots:[...(fd.has('normalEnabled')?expand('normal',[1,2,3,4,5]):[]),...(fd.has('intensiveEnabled')?expand('intensive',[6,0]):[])]};const submit=form.querySelector('button[type="submit"]');submit.disabled=true;submit.textContent='Guardando...';try{await AdminService.saveCourseProgram(this.branchId,course.id,payload);showProgramResult('success','La configuración académica, los horarios y la capacidad de fin de semana se guardaron correctamente.',close);}catch(error){const apiError=error.data?.error;if(apiError?.code==='WEEKEND_REASSIGNMENT_CONFIRMATION_REQUIRED'&&window.confirm(apiError.message)){try{await AdminService.saveCourseProgram(this.branchId,course.id,{...payload,confirmWeekendReassignment:true});showProgramResult('success','La programación de fin de semana y las asignaciones relacionadas se actualizaron correctamente.',close);}catch(confirmError){showProgramResult('error',confirmError.data?.error?.message||confirmError.message||'No se pudo completar la reagendación.');}}else if(apiError?.code!=='WEEKEND_REASSIGNMENT_CONFIRMATION_REQUIRED'){showProgramResult('error',apiError?.message||error.message||'Ocurrió un error inesperado al guardar el programa.');}}finally{submit.disabled=false;submit.textContent='Guardar programa';}};
   }
 
   openCourseForm(body, course = null) {

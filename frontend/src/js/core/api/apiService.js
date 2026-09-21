@@ -88,6 +88,19 @@ class ApiService {
     return apiClient.get('/students/branches/all');
   }
 
+  static async getMissedPracticalClasses(params = {}) {
+    const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== '' && value != null));
+    return apiClient.get(`/schedules/missed-practical-classes?${query}`);
+  }
+
+  static async getMissedClassAvailability(sessionId, params) {
+    return apiClient.get(`/schedules/missed-practical-classes/${encodeURIComponent(sessionId)}/availability?${new URLSearchParams(params)}`);
+  }
+
+  static async rescheduleMissedClass(sessionId, data) {
+    return apiClient.post(`/schedules/missed-practical-classes/${encodeURIComponent(sessionId)}/reschedule`, data);
+  }
+
   // ── DOCUMENTS ──
   static async getStudentDocuments(studentId) {
     return apiClient.get(`/students/${studentId}/documents`);

@@ -16,6 +16,7 @@ import StudentsView from "./views/students/StudentsView.js?v=eliminar-reserva-20
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=inicio-clases-expediente-20260910";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=ocultar-cursos-sin-filas-20260911";
+import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";
 import NotificationsView from "./views/notifications/NotificationsView.js";
 import HistoryView from "./views/history/HistoryView.js";
 import ProfileView from "./views/profile/ProfileView.js";
@@ -34,12 +35,12 @@ import InstructorEvaluationsView from "./views/instructor/InstructorEvaluationsV
 import InstructorIncidentsView from "./views/instructor/InstructorIncidentsView.js";
 import InstructorProfileView from "./views/instructor/InstructorProfileView.js";
 import MobileDocumentUploadView from "./views/mobile-upload/MobileDocumentUploadView.js?v=certificado-orientacion-20260824";
-import SidebarLayout from "./layouts/SidebarLayout.js?v=aviso-cambio-horario-20260910";
+import SidebarLayout from "./layouts/SidebarLayout.js?v=avisos-instructor-20260918-3";
 import AdminDashboardView from "./views/admin/AdminDashboardView.js";
 import AdminResourceMonitorView from "./views/admin/AdminResourceMonitorView.js?v=resource-actions-20260911";
 import AdminSecurityView from "./views/admin/AdminSecurityView.js?v=tipo-instructor-20260819";
 import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js";
-import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=rotacion-fin-semana-20260911";
+import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=capacidad-fin-semana-20260917";
 import ManagerReportsView from "./views/manager/ManagerReportsView.js?v=modal-ciclo-ancho-completo-20260812";
 import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=permiso-sin-filtro-pago-20260820";
 import AdminSettingsView from "./views/admin/AdminSettingsView.js";
@@ -91,6 +92,7 @@ class App {
 
     // Schedule
     this.router.register("/schedule", ScheduleView, "schedule");
+    this.router.register("/schedule/recoveries", MissedPracticalClassesView, "schedule-recoveries");
 
     // Notifications
     this.router.register("/notifications", NotificationsView, "notifications");
@@ -259,6 +261,7 @@ class App {
         "student-profile": "STUDENT_VIEW",
         documents: "DOCUMENT_VIEW",
         schedule: "SCHEDULE_VIEW",
+        "schedule-recoveries": "SCHEDULE_VIEW",
         cash: "PAYMENT_VIEW",
         "cash-register": "PAYMENT_CREATE",
         "cash-pending": "PAYMENT_VIEW",

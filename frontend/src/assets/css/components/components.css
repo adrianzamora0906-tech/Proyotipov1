@@ -403,45 +403,76 @@
 .profile-schedule-observation small { color: #667085; font-weight: 400; }
 
 .instructor-schedule-change-modal {
-  width: min(520px, calc(100vw - 2rem));
-  padding: 1.75rem;
-  text-align: center;
+  width: min(430px, calc(100vw - 1.5rem));
+  max-width: 430px;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
 }
 
 .instructor-schedule-change-icon {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 58px;
-  height: 58px;
-  margin-bottom: 1rem;
-  border-radius: 18px;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
   color: #4f46e5;
   background: #eef2ff;
 }
 
+.instructor-schedule-change-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.instructor-schedule-change-content {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 0.85rem;
+  padding: 1.15rem 1.2rem 1rem;
+}
+
 .instructor-schedule-change-eyebrow {
   color: #4f46e5;
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.instructor-schedule-change-content h3 { margin: 0.45rem 0 0.75rem; }
+.instructor-schedule-change-text {
+  min-width: 0;
+}
+
+.instructor-schedule-change-content h3 {
+  margin: 0.25rem 0 0.45rem;
+  color: #17233e;
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
 .instructor-schedule-change-message {
   margin: 0;
   color: #475467;
-  line-height: 1.65;
+  font-size: 0.9rem;
+  line-height: 1.45;
   white-space: pre-line;
 }
 
 .instructor-schedule-change-actions {
-  justify-content: center;
-  margin: 1.5rem -1.75rem -1.75rem;
+  justify-content: flex-end;
+  margin: 0;
+  padding: 0.85rem 1.2rem;
+  border-top: 1px solid #eef2f7;
+  background: #f8fafc;
 }
 
-.instructor-schedule-change-actions .btn { min-width: 150px; }
+.instructor-schedule-change-actions .btn {
+  min-width: 118px;
+  padding: 0.65rem 1rem;
+}
 
 /* Un modal abierto desde otro modal debe vivir en una capa superior. */
 .modal-overlay.modal-overlay-secondary {

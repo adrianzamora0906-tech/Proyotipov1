@@ -27,3 +27,30 @@ test('las notificaciones locales no pueden impedir el cierre del modal', () => {
   const scheduleFlow = source.slice(selectStart, selectEnd);
   assert.match(scheduleFlow, /try\s*\{\s*NotificationService\.notifyScheduleSelected\(studentId\);\s*\}\s*catch/s);
 });
+
+test('el filtro de estudiantes inicia con todas las sucursales del cantón', () => {
+  assert.match(source, /else if \(!queryParams\.get\('branch_id'\)\) listParams\.scope = 'all'/);
+  assert.match(source, /const activeStudentFilter = !queryParams\.get\('branch_id'\)/);
+});
+
+test('la sucursal de la sesión se ordena primero sin limitar el alcance cantonal', () => {
+  assert.match(source, /cantonBranches\.sort/);
+  assert.match(source, /String\(first\.id\) === String\(currentBranchRecord\?\.id\)/);
+  assert.match(source, /const belongsToCurrentBranch = student/);
+  assert.match(source, /student\.branchId/);
+});
+
+test('cerrar el modal descarta todos los datos y horarios seleccionados', () => {
+  const closeStart = source.indexOf('\n  closeStudentModal() {');
+  const closeEnd = source.indexOf('scheduleReferralStaffSearch', closeStart);
+  const closeFlow = source.slice(closeStart, closeEnd);
+
+  assert.notEqual(closeStart, -1, 'No se encontró closeStudentModal');
+  assert.match(closeFlow, /REGLA PROTEGIDA: cerrar el modal siempre descarta el borrador completo/);
+  assert.match(closeFlow, /form\?\.reset\(\)/);
+  assert.match(closeFlow, /querySelectorAll\('select'\)/);
+  assert.match(closeFlow, /form\.elements\.scheduleId\.value = ''/);
+  assert.match(closeFlow, /form\.elements\.schedulePlan\.value = ''/);
+  assert.match(closeFlow, /this\.resetCalendarSelection\(calendar\)/);
+  assert.match(closeFlow, /set\.dataset\.activeCycleIndex = '0'/);
+});

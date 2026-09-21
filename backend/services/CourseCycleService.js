@@ -3,6 +3,7 @@ const { createError } = require('../middleware/errorHandler');
 const CycleInstructorAssignmentService = require('./CycleInstructorAssignmentService');
 const AutomaticCycleService = require('./AutomaticCycleService');
 const TheoryCourseService = require('./TheoryCourseService');
+const NotificationService = require('./NotificationService');
 
 const NORMAL_PRACTICAL_SLOTS = [
   ['06:00', '07:40'],
@@ -37,6 +38,37 @@ function toDateString(value) {
 
 function normalizeTime(value) {
   return String(value || '').slice(0, 5);
+}
+
+async function resolveEnrollmentBranchId(branchId) {
+  if (!branchId) return null;
+  const result = await db.query(`
+    SELECT COALESCE(reference.id, current.id) AS enrollment_branch_id
+    FROM branches current
+    LEFT JOIN branches reference
+      ON current.code = 'SP_IC2'
+     AND reference.code = 'SP_IC1'
+     AND reference.city_id = current.city_id
+     AND reference.active = TRUE
+    WHERE current.id = $1
+    LIMIT 1
+  `, [branchId]);
+  return result.rows[0]?.enrollment_branch_id || branchId;
+}
+
+async function resolveIntensiveBranchId(branchId, queryable = db) {
+  if (!branchId) return null;
+  const result = await queryable.query(`
+    SELECT COALESCE(reference.id,current.id) intensive_branch_id
+    FROM branches current
+    LEFT JOIN branches reference
+      ON current.code='SP_IC'
+     AND reference.code='SP_IC1'
+     AND reference.city_id=current.city_id
+     AND reference.active=TRUE
+    WHERE current.id=$1 LIMIT 1
+  `,[branchId]);
+  return result.rows[0]?.intensive_branch_id||branchId;
 }
 
 function parseTimeRange(time) {
@@ -162,18 +194,21 @@ function intensiveEndDate(startDate, vehicleType) {
 
 class CourseCycleService {
   static async ensureIntensiveRotation(user, filters = {}) {
-    const branchId = filters.branch_id || user.branch_id;
+    let branchId = filters.branch_id || user.branch_id;
     const vehicleType = filters.vehicle_type;
     if (!branchId || !['carro', 'moto'].includes(vehicleType)) return null;
 
     const client = await db.getClient();
     try {
       await client.query('BEGIN');
+      // REGLA PROTEGIDA: Manta 2000 conserva ciclos normales propios, pero los
+      // intensivos de fin de semana consumen la rotacion central de Flavio Reyes.
+      branchId = await resolveIntensiveBranchId(branchId, client);
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         `intensive-rotation:${branchId}:${vehicleType}`,
       ]);
       const program = (await client.query(`
-        SELECT p.course_id,GREATEST(p.capacity_per_instructor,1)::int capacity_per_instructor
+        SELECT p.id,p.course_id,GREATEST(p.capacity_per_instructor,1)::int capacity_per_instructor
         FROM branch_course_programs p
         JOIN courses c ON c.id=p.course_id AND c.active=TRUE
         WHERE p.branch_id=$1 AND p.vehicle_type=$2 AND p.intensive_enabled=TRUE
@@ -182,22 +217,6 @@ class CourseCycleService {
       if (!program) {
         await client.query('COMMIT');
         return null;
-      }
-
-      if (String(filters.extend || '').toLowerCase() === 'true') {
-        const published = await client.query(`
-          SELECT cc.id
-          FROM course_cycles cc
-          WHERE cc.branch_id=$1 AND cc.vehicle_type=$2 AND cc.modality='intensivo'
-            AND cc.active=TRUE AND cc.deleted_at IS NULL
-            AND cc.status IN ('activo','proximo') AND cc.end_date>=CURRENT_DATE
-          ORDER BY cc.start_date
-          LIMIT 6
-        `, [branchId, vehicleType]);
-        if (published.rows.length >= 6) {
-          await client.query('COMMIT');
-          return { cycleIds: published.rows.map(row => row.id) };
-        }
       }
 
       const pool = (await client.query(`
@@ -216,12 +235,20 @@ class CourseCycleService {
             AND (priority.effective_until IS NULL OR priority.effective_until>=CURRENT_DATE)
           LIMIT 1
         ) scoped ON TRUE
+        LEFT JOIN branch_course_intensive_rotation configured_rotation
+          ON configured_rotation.program_id=$4 AND configured_rotation.instructor_id=ip.id AND configured_rotation.active=TRUE
         WHERE ip.status='activo' AND ip.deleted_at IS NULL
-          AND COALESCE(scoped.practice_area,ip.practice_area)=$2
+          AND COALESCE(ip.weekend_practice_area,scoped.practice_area,ip.practice_area)=$2
           AND (u.branch_id=$1 OR scoped.practice_area IS NOT NULL)
         ORDER BY LOWER(translate(COALESCE(u.first_name,''),'ÁÉÍÓÚÑáéíóúñ','AEIOUNaeioun')),
           LOWER(translate(COALESCE(u.last_name,''),'ÁÉÍÓÚÑáéíóúñ','AEIOUNaeioun')),ip.id
-      `, [branchId, vehicleType, program.course_id])).rows;
+      `, [branchId, vehicleType, program.course_id, program.id])).rows;
+      const configuredRotation = (await client.query(`SELECT instructor_id,position_order
+        FROM branch_course_intensive_rotation WHERE program_id=$1 AND active=TRUE ORDER BY position_order`,[program.id])).rows;
+      if(configuredRotation.length){
+        const configuredOrder=new Map(configuredRotation.map(item=>[String(item.instructor_id),Number(item.position_order)]));
+        pool.sort((left,right)=>(configuredOrder.get(String(left.id))??Number.MAX_SAFE_INTEGER)-(configuredOrder.get(String(right.id))??Number.MAX_SAFE_INTEGER));
+      }
       if (!pool.length) {
         await client.query('COMMIT');
         return null;
@@ -250,6 +277,15 @@ class CourseCycleService {
         }
       }
       for (let weekendGuard = 0; weekendGuard < 12; weekendGuard += 1) {
+        const weekendOverride = (await client.query(`
+          SELECT override.id,override.instructor_count,
+            COALESCE(json_agg(json_build_object('instructor_id',selected.instructor_id,'position_order',selected.position_order)
+              ORDER BY selected.position_order) FILTER (WHERE selected.instructor_id IS NOT NULL),'[]') instructors
+          FROM branch_course_weekend_overrides override
+          LEFT JOIN branch_course_weekend_override_instructors selected ON selected.override_id=override.id
+          WHERE override.program_id=$1 AND override.start_date=$2::date AND override.active=TRUE
+          GROUP BY override.id
+        `, [program.id, startDate])).rows[0];
         let assignments = (await client.query(`
           SELECT rotation.id,rotation.position_order,rotation.instructor_id,rotation.cycle_id,
             TRIM(CONCAT(u.first_name,' ',u.last_name)) instructor_name
@@ -262,6 +298,7 @@ class CourseCycleService {
         `, [branchId, vehicleType, startDate])).rows;
 
         const ensureAssignment = async (positionOrder) => {
+          const forcedInstructorId = weekendOverride?.instructors?.find(item => Number(item.position_order) === positionOrder)?.instructor_id;
           const lastUsed = previousInstructorId || (await client.query(`
             SELECT instructor_id FROM intensive_instructor_rotation_assignments
             WHERE branch_id=$1 AND vehicle_type=$2 AND active=TRUE
@@ -269,20 +306,35 @@ class CourseCycleService {
             ORDER BY start_date DESC,position_order DESC LIMIT 1
           `, [branchId, vehicleType, startDate, positionOrder])).rows[0]?.instructor_id;
           const lastIndex = pool.findIndex(item => String(item.id) === String(lastUsed));
-          const selected = pool[(lastIndex + 1 + pool.length) % pool.length];
+          const selected = forcedInstructorId
+            ? pool.find(item => String(item.id) === String(forcedInstructorId))
+            : pool[(lastIndex + 1 + pool.length) % pool.length];
+          if (!selected) throw createError(422, `El instructor configurado para ${startDate} ya no está habilitado`);
           const inserted = (await client.query(`
             INSERT INTO intensive_instructor_rotation_assignments(
               branch_id,vehicle_type,start_date,position_order,instructor_id,created_by
             ) VALUES($1,$2,$3,$4,$5,$6)
             ON CONFLICT(branch_id,vehicle_type,start_date,position_order)
-            DO UPDATE SET active=TRUE,updated_at=NOW()
+            DO UPDATE SET instructor_id=EXCLUDED.instructor_id,active=TRUE,updated_at=NOW()
             RETURNING *
           `, [branchId, vehicleType, startDate, positionOrder, selected.id, user.id || null])).rows[0];
           previousInstructorId = selected.id;
           return { ...inserted, instructor_name: selected.name };
         };
 
+        const targetInstructorCount = weekendOverride ? Number(weekendOverride.instructor_count) : 1;
+        if (weekendOverride) assignments = assignments.filter(item => Number(item.position_order) <= targetInstructorCount);
+        for (let position = 1; position <= targetInstructorCount; position += 1) {
+          const expectedInstructorId = weekendOverride?.instructors?.find(item => Number(item.position_order) === position)?.instructor_id;
+          const current = assignments.find(item => Number(item.position_order) === position);
+          if (!current || (expectedInstructorId && String(current.instructor_id) !== String(expectedInstructorId))) {
+            const replacement = await ensureAssignment(position);
+            assignments = assignments.filter(item => Number(item.position_order) !== position).concat(replacement)
+              .sort((a, b) => Number(a.position_order) - Number(b.position_order));
+          }
+        }
         if (!assignments.length) assignments = [await ensureAssignment(1)];
+        const usableCycleIds = [];
         for (let index = 0; index < assignments.length; index += 1) {
           const assignment = assignments[index];
           let cycleId = assignment.cycle_id;
@@ -324,13 +376,15 @@ class CourseCycleService {
           `, [cycleId])).rows[0].used);
           const full = used >= program.capacity_per_instructor * slotCount;
           if (!full) {
+            usableCycleIds.push(cycleId);
+            if (weekendOverride && index < assignments.length - 1) continue;
             await client.query('COMMIT');
-            return { cycleIds: [cycleId], startDate };
+            return { cycleIds: usableCycleIds, startDate };
           }
           previousInstructorId = assignment.instructor_id;
         }
 
-        if (assignments.length < 2) {
+        if (!weekendOverride && assignments.length < 2) {
           assignments.push(await ensureAssignment(2));
           continue;
         }
@@ -638,6 +692,14 @@ class CourseCycleService {
 
   static async getEnrollmentOptions(user, filters = {}) {
     await db.query('SELECT expire_course_cycle_seat_reservations()');
+    // REGLA PROTEGIDA: las matrículas atendidas desde Shopin consumen la oferta
+    // académica, ciclos y cupos de Flavio Reyes, sin cambiar la sede de registro.
+    const requestedBranchId = filters.branch_id || user.branch_id;
+    const enrollmentBranchId = await resolveEnrollmentBranchId(requestedBranchId);
+    const operationalBranchId = filters.modality === 'intensivo'
+      ? await resolveIntensiveBranchId(enrollmentBranchId)
+      : enrollmentBranchId;
+    filters = { ...filters, branch_id: operationalBranchId };
     const intensiveRotation = filters.modality === 'intensivo'
       ? await this.ensureIntensiveRotation(user, filters)
       : null;
@@ -655,7 +717,7 @@ class CourseCycleService {
         WHERE rotation.branch_id=$1 AND rotation.vehicle_type=$2
           AND rotation.active=TRUE AND rotation.cycle_id IS NOT NULL
           AND cc.active=TRUE AND cc.deleted_at IS NULL
-          AND cc.status IN ('activo','proximo') AND cc.start_date>=CURRENT_DATE
+          AND cc.status IN ('activo','proximo') AND CURRENT_DATE<=cc.start_date+2
         ORDER BY cc.start_date,rotation.position_order
       `, [branchId, filters.vehicle_type]);
       intensiveRotation.cycleIds = [...new Set([
@@ -669,7 +731,9 @@ class CourseCycleService {
       cc.active = true
       AND cc.deleted_at IS NULL
       AND cc.status IN ('activo', 'proximo')
-      AND CURRENT_DATE <= cc.end_date
+      -- REGLA PROTEGIDA: una matricula nueva admite como maximo los dos dias
+      -- posteriores al inicio. No reemplazar esta condicion por end_date.
+      AND CURRENT_DATE <= cc.start_date + 2
       AND EXISTS (SELECT 1 FROM branch_courses bc WHERE bc.branch_id=cc.branch_id AND bc.course_id=cc.course_id AND bc.active=TRUE)
     `;
 
@@ -1069,7 +1133,7 @@ class CourseCycleService {
         vehicleType: row.vehicle_type,
         startDate: toDateString(row.start_date),
         endDate: toDateString(row.end_date),
-        enrollmentDeadline: toDateString(row.end_date),
+        enrollmentDeadline: toDateString(new Date(new Date(row.start_date).setDate(new Date(row.start_date).getDate() + 2))),
         enrollmentStarted: toDateString(row.start_date) <= toDateString(new Date()),
         practicalStartDate: practicalDates[0] || toDateString(row.start_date),
         practicalEndDate: practicalDates[practicalDates.length - 1] || toDateString(row.end_date),
@@ -1178,7 +1242,12 @@ class CourseCycleService {
       };
     });
 
-    if (!selectedInstructorShowsFullSchedule) return options;
+    // REGLA GLOBAL PROTEGIDA: no publicar en matrícula un instructor/ciclo
+    // que no tenga al menos una franja utilizable durante todo el curso.
+    const bookableOptions = options.filter(option =>
+      (option.slots || []).some(slot => Number(slot.available || 0) > 0));
+
+    if (!selectedInstructorShowsFullSchedule) return bookableOptions;
 
     // Benito trabaja sobre una sola secuencia semanal, cuyo inicio base es el
     // lunes 14/09/2026. Moto ocupa cinco dias y Automovil ocho, pero los ciclos
@@ -1186,7 +1255,7 @@ class CourseCycleService {
     // Conservamos un ciclo tecnico por tipo/modalidad y semana para registrar
     // la matricula, mientras la agenda global sigue evitando cruces entre ambos.
     const weeklyOptions = new Map();
-    options.forEach(option => {
+    bookableOptions.forEach(option => {
       if (option.modality === 'intensivo') {
         weeklyOptions.set(`intensivo:${option.id}`, option);
         return;
@@ -1715,7 +1784,9 @@ class CourseCycleService {
           AND cc.active = true
           AND cc.deleted_at IS NULL
           AND cc.status IN ('activo', 'proximo')
-          AND cc.end_date >= CURRENT_DATE
+          -- REGLA PROTEGIDA: incluso por llamada directa, solo se admiten los
+          -- dos primeros dias posteriores al inicio del ciclo.
+          AND CURRENT_DATE <= cc.start_date + 2
         FOR UPDATE
       `, [cycleId]);
 
@@ -2158,6 +2229,22 @@ class CourseCycleService {
         enrollmentId,
         user.id
       );
+      if (instructorAssignment?.instructor_id) {
+        const instructorUser = (await client.query('SELECT user_id FROM instructor_profiles WHERE id=$1', [instructorAssignment.instructor_id])).rows[0];
+        const student = (await client.query(`SELECT TRIM(CONCAT(first_name,' ',last_name)) name FROM students WHERE id=$1`, [studentId])).rows[0];
+        if (instructorUser?.user_id) {
+          await NotificationService.createInstructorEvent(client, {
+            studentId, userId: instructorUser.user_id, branchId: cycle.branch_id,
+            title: rescheduleFromCycleId ? 'Estudiante trasladado de curso' : 'Nuevo estudiante asignado',
+            type: rescheduleFromCycleId ? 'warning' : 'info',
+            referenceType: rescheduleFromCycleId ? 'COURSE_RESCHEDULED' : 'COURSE_ASSIGNMENT',
+            referenceId: cycle.id,
+            message: rescheduleFromCycleId
+              ? `${student?.name || 'Un estudiante'} fue trasladado al curso ${cycle.code}, que inicia el ${officialStart}. Motivo: ${rescheduleReason}. Cambio realizado por ${user.name || user.username || 'Secretaría'}.`
+              : `${student?.name || 'Un estudiante'} fue asignado a tu curso ${cycle.code}, que inicia el ${officialStart}.`,
+          });
+        }
+      }
 
       await client.query(`UPDATE course_cycle_seat_reservations
         SET status='convertido',converted_at=NOW(),updated_at=NOW()

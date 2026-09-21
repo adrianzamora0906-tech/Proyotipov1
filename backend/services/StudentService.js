@@ -68,7 +68,8 @@ class StudentService {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`temporary-seat:${cycleId}:${instructorId}`]);
       const cycle=(await client.query(`SELECT cc.id,cc.branch_id,cc.course_id,cc.start_date,cc.end_date,cc.modality
         FROM course_cycles cc WHERE cc.id=$1 AND cc.branch_id=$2 AND cc.course_id=$3 AND cc.active=TRUE
-          AND cc.deleted_at IS NULL AND cc.status IN('activo','proximo') AND CURRENT_DATE<=cc.start_date+2`,[cycleId,branchId,courseId])).rows[0];
+          AND cc.deleted_at IS NULL AND cc.status IN('activo','proximo')
+          AND CURRENT_DATE<=cc.start_date+2`,[cycleId,branchId,courseId])).rows[0];
       if(!cycle)throw createError(409,'El curso seleccionado ya no admite reservas');
       if(!access.global&&String(user.branch_id)!==String(branchId)){
         const allowed=await client.query(`SELECT 1 FROM branches requested JOIN branches own ON own.id=$2

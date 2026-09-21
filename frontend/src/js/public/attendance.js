@@ -1,8 +1,12 @@
+import { OfflineAttendanceQueue, registerAttendanceOfflineSupport } from '../lib/offlineAttendanceQueue.js';
+
 const content = document.getElementById('attendance-content');
 const token = new URLSearchParams(window.location.search).get('token');
 const apiBases = [window.__SPORTMANCAR_CONFIG__?.API_BASE_URL || 'http://localhost:5000/api'];
 let authorizedLocation = null;
 let attendancePhase = 'ENTRY';
+
+registerAttendanceOfflineSupport();
 
 function isExitPhase() {
   return attendancePhase === 'EXIT';
@@ -78,7 +82,7 @@ async function loadChallenge() {
 }
 
 async function validateLocationBeforeIdentification() {
-  content.innerHTML = `<div class="attendance-location-step"><div class="attendance-location-spinner"></div><h1>Validando ubicación</h1><p>Comprobaremos que estés dentro de una zona autorizada antes de solicitar tu cédula.</p></div>`;
+  content.innerHTML = `<div class="attendance-location-step"><div class="attendance-location-spinner"></div><h1>Capturando ubicación</h1><p>Necesitamos tu GPS como evidencia para la asistencia; la geocerca se usará como referencia y no bloquea el registro.</p></div>`;
   try {
     const location = await getCurrentLocation();
     const response = await request(`/attendance/${encodeURIComponent(token)}/location`, {
@@ -94,16 +98,23 @@ async function validateLocationBeforeIdentification() {
     renderIdentificationForm(response.data);
   } catch (error) {
     authorizedLocation = null;
-    const outsideGeofence = /fuera de una zona|no corresponde/i.test(error.message);
-    const title = outsideGeofence ? 'Ubicación no autorizada' : 'No pudimos validar tu ubicación';
-    content.innerHTML = `<div class="attendance-icon attendance-icon-error">!</div><h1>${title}</h1><p>${escapeHtml(error.message)}</p><button type="button" class="attendance-retry" id="retry-location">Reintentar ubicación</button><small>Activa el GPS y la ubicación precisa. El campo de cédula aparecerá después de validar tu posición.</small>`;
+    content.innerHTML = `<div class="attendance-icon attendance-icon-error">!</div><h1>Ubicación no disponible</h1><p>${escapeHtml(error.message)}</p><button type="button" class="attendance-retry" id="retry-location">Reintentar ubicación</button><small>Si el GPS no entrega coordenadas, el sistema lo dejará en contingencia y requerirá revisión administrativa.</small>`;
     document.getElementById('retry-location')?.addEventListener('click', validateLocationBeforeIdentification);
   }
 }
 
 function renderIdentificationForm(locationData = {}) {
+  const locationStatus = locationData.locationStatus || 'UBICACION_HABITUAL';
+  const distanceText = Number.isFinite(locationData.distanceMeters) ? ` · ${Math.round(locationData.distanceMeters)} m` : '';
+  const statusLabel = {
+    UBICACION_HABITUAL: 'Ubicación habitual',
+    UBICACION_DIFERENTE: 'Ubicación diferente',
+    UBICACION_IMPRECISA: 'Ubicación imprecisa',
+    UBICACION_NO_DISPONIBLE: 'Ubicación no disponible',
+  }[locationStatus] || 'Ubicación registrada';
+
   content.innerHTML = `
-    <div class="attendance-location-ok">✓ Ubicación autorizada${locationData.geofence ? ` · ${escapeHtml(locationData.geofence)}` : ''}</div>
+    <div class="attendance-location-ok">✓ ${statusLabel}${locationData.geofence ? ` · ${escapeHtml(locationData.geofence)}${distanceText}` : ''}</div>
     <h1>${isExitPhase() ? 'Registrar salida' : 'Registrar entrada'}</h1>
     <p>Ingresa los últimos 4 dígitos de tu cédula para ${isExitPhase() ? 'confirmar la salida' : 'iniciar la clase'}.</p>
     <form id="attendance-form">
@@ -112,7 +123,7 @@ function renderIdentificationForm(locationData = {}) {
       <div class="attendance-error" id="attendance-error" aria-live="polite"></div>
       <button type="submit">${isExitPhase() ? 'Confirmar salida' : 'Confirmar entrada'}</button>
     </form>
-    <small>Este código es temporal y funciona una sola vez.</small>`;
+    <small>La ubicación se guarda como evidencia de auditoría; no bloquea la asistencia.</small>`;
   const form = document.getElementById('attendance-form');
   const input = document.getElementById('last-four');
   input.focus();
@@ -135,11 +146,30 @@ async function confirmAttendance(event) {
     button.textContent = 'Confirmando…';
     errorElement.textContent = '';
     const location = authorizedLocation || await getCurrentLocation();
-    await request(`/attendance/${encodeURIComponent(token)}/confirm`, {
-      method: 'POST',
-      body: JSON.stringify({ lastFour: input.value, latitude: location.coords.latitude, longitude: location.coords.longitude, accuracy: location.coords.accuracy }),
-    });
-    renderCompleted();
+    const payload = { lastFour: input.value, latitude: location.coords.latitude, longitude: location.coords.longitude, accuracy: location.coords.accuracy };
+
+    try {
+      await request(`/attendance/${encodeURIComponent(token)}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      renderCompleted();
+      return;
+    } catch (error) {
+      if (!navigator.onLine) {
+        await OfflineAttendanceQueue.add({
+          action: 'confirm',
+          token,
+          phase: attendancePhase,
+          studentId: JSON.parse(sessionStorage.getItem('erp_session') || '{}').user_id || 'unknown',
+          payload,
+          createdAt: new Date().toISOString(),
+        });
+        renderCompleted();
+        return;
+      }
+      throw error;
+    }
   } catch (error) {
     errorElement.textContent = error.message;
     button.disabled = false;
@@ -165,10 +195,10 @@ function getCurrentLocation() {
     watchId = navigator.geolocation.watchPosition(
       position => {
         if (!bestPosition || position.coords.accuracy < bestPosition.coords.accuracy) bestPosition = position;
-        if (position.coords.accuracy > 0 && position.coords.accuracy <= 150) finish(resolve, position);
+        if (position.coords.accuracy > 0) finish(resolve, position);
       },
       error => {
-        if (error.code === 1) finish(reject, new Error('Debes permitir la ubicación precisa para registrar tu asistencia.'));
+        if (error.code === 1) finish(reject, new Error('Debes permitir la ubicación para registrar tu asistencia. Si la niegas, el sistema pasará a contingencia.'));
       },
       { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 },
     );

@@ -1,4 +1,15 @@
+import '../../lib/qrcodeLocal.js';
 import PracticalSessionService from '../../services/practicalSessionService.js';
+
+function generateQrDataUrl(value) {
+  return new Promise((resolve, reject) => {
+    if (!window.QRCode) return reject(new Error('El generador QR local no está disponible'));
+    window.QRCode.toDataURL(value, { width: 280, margin: 12 }, (error, url) => {
+      if (error) return reject(error);
+      resolve(url);
+    });
+  });
+}
 
 export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENTRY') {
   const isExit = phase === 'EXIT';
@@ -56,9 +67,8 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       const attendanceUrl = localOrigin && challenge.localAttendanceUrl
         ? challenge.localAttendanceUrl
         : `${window.location.origin}/attendance.html?token=${encodeURIComponent(challenge.token)}`;
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=12&data=${encodeURIComponent(attendanceUrl)}`;
       const image = overlay.querySelector('[data-attendance-qr]');
-      image.src = qrUrl;
+      image.src = await generateQrDataUrl(attendanceUrl);
       image.hidden = false;
       overlay.querySelector('[data-attendance-loading]')?.remove();
       overlay.querySelector('[data-attendance-title]').hidden = false;

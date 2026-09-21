@@ -59,6 +59,7 @@ class App {
     this.router = new Router();
     this.registerRoutes();
     this.setupMiddleware();
+    this.registerOfflineSupport();
   }
 
   /**
@@ -456,6 +457,14 @@ class App {
   /**
    * Inicia la aplicación
    */
+  registerOfflineSupport() {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch((error) => {
+        console.warn('No se pudo registrar el service worker:', error?.message || error);
+      });
+    }
+  }
+
   start() {
     // El interceptor SPA debe existir para todas las vistas, incluidas las administrativas.
     SidebarLayout.attachEventListeners();

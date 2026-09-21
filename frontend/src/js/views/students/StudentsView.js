@@ -2306,7 +2306,7 @@ class StudentsView extends Component {
       '<label class="enrollment-modality-button active"><input type="radio" name="theorySchedule" value="por_confirmar" checked><strong>Por confirmar</strong><span>La modalidad de teor&iacute;a se definir&aacute; despu&eacute;s</span></label>',
     ];
     const groups=this.modalTheoryGroups||[];
-    const renderGroup=(value,title,fallback)=>{const group=groups.find(item=>item.value===value),shortDate=value=>String(value||'').split('-').reverse().join('/');const full=Boolean(group?.full),available=Number(group?.available);const detail=group?.unavailable?(group.message||'No configurado'):group?(full?`Sin cupos · próximo ${shortDate(group.nextAvailableStartDate)}`:`${group.startTime}–${group.endTime} · ${group.available} cupos`):fallback;const capacityClass=group?.unavailable?'theory-capacity-unavailable':available>20?'theory-capacity-green':available>=5?'theory-capacity-yellow':'theory-capacity-red';return `<label class="enrollment-modality-button ${capacityClass} ${full?'theory-option-full':''}"><input type="radio" name="theorySchedule" value="${value}" ${group?.unavailable?'disabled':''}><strong>${title}</strong><span>${detail}</span></label>`;};
+    const renderGroup=(value,title,fallback)=>{const group=groups.find(item=>item.value===value),shortDate=value=>String(value||'').split('-').reverse().join('/'),rangeStart=group?.startDate||group?.nextAvailableStartDate,rangeEnd=group?.endDate||group?.nextAvailableEndDate,dateRange=rangeStart&&rangeEnd?`Inicio: ${shortDate(rangeStart)} · fin: ${shortDate(rangeEnd)}`:'';const full=Boolean(group?.full),available=Number(group?.available);const detail=group?.unavailable?(group.message||'No configurado'):group?(full?`Sin cupos · próximo ${dateRange||shortDate(group.nextAvailableStartDate)}`:`${dateRange}${dateRange?' · ':''}${group.startTime}–${group.endTime} · ${group.available} cupos`):fallback;const capacityClass=group?.unavailable?'theory-capacity-unavailable':available>20?'theory-capacity-green':available>=5?'theory-capacity-yellow':'theory-capacity-red';return `<label class="enrollment-modality-button ${capacityClass} ${full?'theory-option-full':''}"><input type="radio" name="theorySchedule" value="${value}" ${group?.unavailable?'disabled':''}><strong>${title}</strong><span>${detail}</span></label>`;};
     if(options.regular!==false)items.push(renderGroup('presencial_regular','Presencial · lunes a viernes','18:00 a 20:00 · 5 días'));
     if(options.saturday!==false){items.push(renderGroup('presencial_intensivo_08','Intensivo · turno de mañana','08:00 a 12:30 · 2 sábados'));items.push(renderGroup('presencial_intensivo_13','Intensivo · turno de tarde','13:00 a 17:30 · 2 sábados'));}
     if(options.virtual!==false)items.push('<label class="enrollment-modality-button"><input type="radio" name="theorySchedule" value="virtual"><strong>Teoría virtual</strong><span>Sin horario fijo</span></label>');
@@ -2557,8 +2557,37 @@ class StudentsView extends Component {
     modal.style.display = '';
     document.body.style.overflow = 'hidden';
     this.goToModalStep(1);
+    this.restoreSessionModalBranch().catch(error => console.error('No se pudo restaurar la sucursal del registro:', error));
     this.syncScheduleOptions();
     modal.querySelector('[name="province"]')?.focus();
+  }
+
+  async restoreSessionModalBranch() {
+    const form = document.getElementById('student-modal-form');
+    const catalog = this.modalLocationCatalog;
+    if (!form || !catalog || this.studentModalScheduleContext) return;
+    const sessionBranchId = String(authService.getCurrentUser()?.branch_id || '');
+    const sessionBranch = catalog.branches.find(branch => String(branch.id) === sessionBranchId);
+    const sessionCity = sessionBranch
+      ? catalog.cities.find(city => String(city.id) === String(sessionBranch.city_id))
+      : null;
+    if (!sessionBranch || !sessionCity || !this.renderModalCities || !this.renderModalBranches) return;
+
+    const provinceSelect = form.querySelector('[name="province"]');
+    const citySelect = form.querySelector('[name="city_id"]');
+    const branchSelect = form.querySelector('[name="branch"]');
+    provinceSelect.value = sessionCity.province;
+    await this.renderModalCities();
+    citySelect.value = String(sessionCity.id);
+    await this.renderModalBranches();
+    const branchOption = [...branchSelect.options].find(option => String(option.dataset.branchId || '') === sessionBranchId);
+    if (branchOption) {
+      branchOption.selected = true;
+      await this.loadModalBranchCourses(branchSelect);
+      await this.loadModalReferredInstructors(sessionBranchId);
+      await this.reloadModalSchedules(sessionBranchId);
+    }
+    this.showSessionBranchSummary(sessionBranch);
   }
 
   captureStudentModalScheduleContext() {

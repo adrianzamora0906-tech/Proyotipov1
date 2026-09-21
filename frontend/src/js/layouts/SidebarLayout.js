@@ -19,6 +19,8 @@ class SidebarLayout {
     const canViewPayments = user?.permissions?.includes('PAYMENT_VIEW');
     const isAdminSystem = user?.roles?.includes('ADMIN_SYSTEM');
     const isGeneralManager = user?.roles?.includes('GENERAL_MANAGER');
+    const isManagerNavigationRoute = currentPath === '/manager' || currentPath.startsWith('/manager/');
+    const managerMobileLayoutClass = isGeneralManager && isManagerNavigationRoute ? 'manager-mobile-layout' : '';
     const adminIcons = {
       '/admin-system': '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
       '/admin-system/branches': '<path d="M3 21h18"/><path d="M6 21V7l6-4 6 4v14"/><path d="M9 10h1M14 10h1M9 14h1M14 14h1"/>',
@@ -40,7 +42,7 @@ class SidebarLayout {
     ];
 
     return `
-      <div class="layout ${isInstructor ? 'instructor-layout' : ''} ${isTheoryInstructor ? 'theory-instructor-layout' : ''} ${isGeneralManager ? 'manager-mobile-layout' : ''}">
+      <div class="layout ${isInstructor ? 'instructor-layout' : ''} ${isTheoryInstructor ? 'theory-instructor-layout' : ''} ${managerMobileLayoutClass}">
         <!-- Sidebar -->
         <aside class="sidebar">
           <div class="sidebar-header">
@@ -66,7 +68,7 @@ class SidebarLayout {
                   </svg>
                   <span class="nav-text">${label}</span>
                 </a>`).join('')}
-            ` : isGeneralManager ? `
+            ` : isGeneralManager && isManagerNavigationRoute ? `
               ${managerItems.map(([href, label, icon]) => `
                 <a href="${href}" class="nav-item ${currentPath === href ? 'active' : ''}" title="${label}" ${currentPath === href ? 'aria-current="page"' : ''}>
                   <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icon}</svg>

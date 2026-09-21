@@ -32,7 +32,20 @@ class AuthService {
     this.authorizationPromise=apiClient.get(`/auth/authorization${q}`).then(r=>{
       if(!r?.success||!r.data)throw new Error(r?.error||'No se pudieron actualizar los permisos');
       const current=this.getCurrentUser()||user;
-      const session={...current,roles:r.data.roles||[],permissions:r.data.permissions||[],scope:r.data.scope||'BRANCH',instructorType:r.data.instructorType||null,practiceArea:r.data.practiceArea||null,mustChangePassword:Boolean(r.data.mustChangePassword)};
+      const hasFreshAuthorization = Array.isArray(r.data.roles) && r.data.roles.length > 0
+        && Array.isArray(r.data.permissions) && r.data.permissions.length > 0;
+      const nextRoles = hasFreshAuthorization ? r.data.roles : (Array.isArray(current.roles) ? current.roles : []);
+      const nextPermissions = hasFreshAuthorization ? r.data.permissions : (Array.isArray(current.permissions) ? current.permissions : []);
+      const nextScope = hasFreshAuthorization ? (r.data.scope || current.scope || 'BRANCH') : (current.scope || 'BRANCH');
+      const session={
+        ...current,
+        roles: nextRoles,
+        permissions: nextPermissions,
+        scope: nextScope,
+        instructorType: hasFreshAuthorization ? (r.data.instructorType ?? current.instructorType ?? null) : (current.instructorType ?? null),
+        practiceArea: hasFreshAuthorization ? (r.data.practiceArea ?? current.practiceArea ?? null) : (current.practiceArea ?? null),
+        mustChangePassword: r.data.mustChangePassword ?? current.mustChangePassword ?? false,
+      };
       sessionStorage.setItem(this.sessionKey,JSON.stringify(session));
       this.authorizationCheckedAt=Date.now();
       return session;

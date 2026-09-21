@@ -97,7 +97,25 @@ class ApiClient {
     const data = (await response.json()).data;
     if (!data?.token || !data?.refreshToken) return false;
     this.setToken(data.token);
-    sessionStorage.setItem('erp_session', JSON.stringify({ ...session, apiToken: data.token, refreshToken: data.refreshToken, sessionId: data.sessionId, roles: data.roles, permissions: data.permissions, scope: data.scope }));
+    const currentRoles = Array.isArray(session.roles) ? session.roles : [];
+    const currentPermissions = Array.isArray(session.permissions) ? session.permissions : [];
+    const hasFreshAuthorization = Array.isArray(data.roles) && data.roles.length > 0
+      && Array.isArray(data.permissions) && data.permissions.length > 0;
+    const nextRoles = hasFreshAuthorization ? data.roles : currentRoles;
+    const nextPermissions = hasFreshAuthorization ? data.permissions : currentPermissions;
+    const nextScope = hasFreshAuthorization ? (data.scope || session.scope || 'BRANCH') : (session.scope || 'BRANCH');
+    sessionStorage.setItem('erp_session', JSON.stringify({
+      ...session,
+      apiToken: data.token,
+      refreshToken: data.refreshToken,
+      sessionId: data.sessionId || session.sessionId,
+      roles: nextRoles,
+      permissions: nextPermissions,
+      scope: nextScope,
+      instructorType: hasFreshAuthorization ? (data.instructorType ?? session.instructorType ?? null) : (session.instructorType ?? null),
+      practiceArea: hasFreshAuthorization ? (data.practiceArea ?? session.practiceArea ?? null) : (session.practiceArea ?? null),
+      mustChangePassword: data.mustChangePassword ?? session.mustChangePassword ?? false,
+    }));
     return true;
   }
   async tryRefresh() { if (this.refreshPromise) return this.refreshPromise; this.refreshPromise = this.performRefresh().finally(() => { this.refreshPromise = null; }); return this.refreshPromise; }

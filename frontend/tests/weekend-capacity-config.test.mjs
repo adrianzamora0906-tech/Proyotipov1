@@ -7,9 +7,11 @@ const cycleService = fs.readFileSync(new URL('../../backend/services/CourseCycle
 const branchService = fs.readFileSync(new URL('../../backend/services/BranchAdminService.js', import.meta.url), 'utf8');
 const migration = fs.readFileSync(new URL('../../backend/migrations/enterprise/087_weekend_instructor_overrides.sql', import.meta.url), 'utf8');
 
-test('el administrador puede configurar uno o dos instructores por fecha', () => {
+test('el administrador puede configurar uno, dos o tres instructores por fecha', () => {
   assert.match(adminView, /Capacidad especial por fin de semana/);
   assert.match(adminView, /weekend-instructor-count/);
+  assert.match(adminView, /3 instructores/);
+  assert.match(adminView, /weekend-third-instructor/);
   assert.match(adminView, /weekendOverrides/);
   assert.match(branchService, /Solo el Administrador del Sistema puede configurar la capacidad especial/);
   assert.match(branchService, /instructor_count SMALLINT|instructorCount/);
@@ -30,7 +32,7 @@ test('la tabla de rotacion comparte fecha cuando una excepcion consume dos turno
   assert.match(adminView, /forcedIds/);
   assert.match(adminView, /overrideDates/);
   assert.match(adminView, /weekIndex=Math\.max\(weekIndex,forcedWeek\+1\)/);
-  assert.match(adminView, /\.weekend-start-date,\.weekend-instructor-1,\.weekend-instructor-2/);
+  assert.match(adminView, /\.weekend-start-date,\.weekend-instructor-1,\.weekend-instructor-2,\.weekend-instructor-3/);
 });
 
 test('la especialidad intensiva puede excluir a un instructor mixto sin afectar lunes a viernes', () => {
@@ -50,7 +52,7 @@ test('la generación publica todos los instructores de la excepción', () => {
 });
 
 test('la configuración conserva posiciones únicas y trazabilidad', () => {
-  assert.match(migration, /CHECK \(instructor_count IN \(1,2\)\)/);
+  assert.match(migration, /CHECK \(instructor_count IN \(1,2,3\)\)/);
   assert.match(migration, /PRIMARY KEY\(override_id,position_order\)/);
   assert.match(migration, /created_by UUID REFERENCES users/);
   assert.match(branchService, /capacidad de fin de semana actualizadas/);

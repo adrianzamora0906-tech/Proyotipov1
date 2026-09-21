@@ -527,6 +527,15 @@ El catalogo actual debe tratar como nombres operativos principales:
 
 Tambien pueden existir nombres historicos o aliases inactivos en la base, como `Motocicleta` y `Automovil`. Estos se conservan para compatibilidad o registros antiguos, pero las pantallas nuevas de registro, horarios y ciclos deben priorizar los cursos activos anteriores.
 
+### Regla institucional para codigos de ciclos
+
+Todos los ciclos, sin importar si son normales, intensivos, automaticos o referidos, usan un unico formato:
+
+- Automovil: `SP_IC{sufijoSucursal}_{secuencia}_{aa}`.
+- Moto: `SP_IM{sufijoSucursal}_{secuencia}_{aa}`.
+
+La secuencia es consecutiva por sucursal, tipo de vehiculo y anio, ordenada por fecha de inicio. El sufijo se deriva del codigo de la sucursal: Manta 2000 no usa sufijo (`SP_IC_1_26`), Flavio Reyes usa `1` (`SP_IC1_1_26`) y Jipijapa usa `J` (`SP_IMJ_1_26`). El codigo no debe incluir instructor, grupo, modalidad ni fecha; esos datos permanecen en sus campos propios.
+
 ### Reglas de disponibilidad mostrada
 
 - La disponibilidad se presenta separada por curso, modalidad (`Normal` o `Intensivo`) y tipo de vehiculo (`Automovil` o `Moto`).

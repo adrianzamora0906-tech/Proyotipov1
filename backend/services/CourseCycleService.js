@@ -4,6 +4,7 @@ const CycleInstructorAssignmentService = require('./CycleInstructorAssignmentSer
 const AutomaticCycleService = require('./AutomaticCycleService');
 const TheoryCourseService = require('./TheoryCourseService');
 const NotificationService = require('./NotificationService');
+const CourseCycleCodeService = require('./CourseCycleCodeService');
 
 const NORMAL_PRACTICAL_SLOTS = [
   ['06:00', '07:40'],
@@ -339,7 +340,11 @@ class CourseCycleService {
           const assignment = assignments[index];
           let cycleId = assignment.cycle_id;
           if (!cycleId) {
-            const code = `ROT-INT-${vehicleType.toUpperCase()}-${startDate}-${assignment.position_order}`;
+            const code = await CourseCycleCodeService.nextCode(client, {
+              branchId,
+              vehicleType,
+              startDate,
+            });
             const cycle = (await client.query(`
               INSERT INTO course_cycles(
                 branch_id,course_id,group_id,code,modality,vehicle_type,start_date,end_date,
@@ -441,8 +446,24 @@ class CourseCycleService {
       const end = new Date(`${startDate}T00:00:00`);
       end.setDate(end.getDate() + (vehicleType === 'carro' ? 7 : 14));
       const endDate = toDateString(end);
-      const instructorSuffix = String(instructorId).replace(/-/g, '').slice(0, 8).toUpperCase();
-      const code = `REF-INT-${vehicleType.toUpperCase()}-${instructorSuffix}-${startDate}`;
+      const existingCycle = await client.query(`
+        SELECT cycle.id
+        FROM course_cycles cycle
+        JOIN course_cycle_instructors instructor ON instructor.cycle_id=cycle.id
+          AND instructor.instructor_id=$4 AND instructor.active=TRUE
+        WHERE cycle.branch_id=$1 AND cycle.vehicle_type=$2 AND cycle.modality='intensivo'
+          AND cycle.start_date=$3 AND cycle.active=TRUE AND cycle.deleted_at IS NULL
+        LIMIT 1
+      `, [branchId, vehicleType, startDate, instructorId]);
+      if (existingCycle.rows.length) {
+        await client.query('COMMIT');
+        return;
+      }
+      const code = await CourseCycleCodeService.nextCode(client, {
+        branchId,
+        vehicleType,
+        startDate,
+      });
       const cycle = await client.query(`INSERT INTO course_cycles(
           branch_id,course_id,group_id,code,modality,vehicle_type,start_date,end_date,
           duration_business_days,capacity_per_instructor,published_capacity,status,notes,active,created_by)
@@ -561,10 +582,11 @@ class CourseCycleService {
       } else {
         endDate = addBusinessDays(startDate, duration - 1);
       }
-      const codePrefix = vehicleType === 'moto'
-        ? 'MOTO'
-        : (template.group_id ? String(template.code).split('-').slice(0, 2).join('-') : 'CAR');
-      const code = `${codePrefix}-${modality === 'intensivo' ? 'INT-' : ''}${startDate}`;
+      const code = await CourseCycleCodeService.nextCode(client, {
+        branchId,
+        vehicleType,
+        startDate,
+      });
       const inserted = await client.query(`
         INSERT INTO course_cycles (
           branch_id, course_id, group_id, code, modality, vehicle_type,

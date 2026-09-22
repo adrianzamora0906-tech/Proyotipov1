@@ -1,10 +1,13 @@
 import { OfflineAttendanceQueue, registerAttendanceOfflineSupport } from '../lib/offlineAttendanceQueue.js';
 
 const content = document.getElementById('attendance-content');
-const token = new URLSearchParams(window.location.search).get('token');
+const params = new URLSearchParams(window.location.search);
+const token = params.get('token');
+const offlinePayloadValue = params.get('offline');
 const apiBases = [window.__SPORTMANCAR_CONFIG__?.API_BASE_URL || 'http://localhost:5000/api'];
 let authorizedLocation = null;
 let attendancePhase = 'ENTRY';
+let offlinePayload = null;
 
 registerAttendanceOfflineSupport();
 
@@ -14,6 +17,10 @@ function isExitPhase() {
 
 function renderCompleted() {
   content.innerHTML = `<div class="attendance-icon attendance-icon-success">✓</div><h1>${isExitPhase() ? 'Salida registrada' : 'Entrada registrada'}</h1><p>${isExitPhase() ? 'La salida de la clase fue confirmada correctamente.' : 'La clase fue iniciada correctamente.'}</p>`;
+}
+
+function renderOfflineQueued() {
+  content.innerHTML = '<div class="attendance-icon attendance-icon-success">✓</div><h1>Asistencia capturada sin conexion</h1><p>La evidencia quedo guardada en este dispositivo y se sincronizara al recuperar Internet.</p><small>No borres los datos de la PWA hasta que la sincronizacion termine.</small>';
 }
 
 function getAuthToken() {
@@ -33,6 +40,18 @@ function escapeHtml(value) {
 
 function renderError(message) {
   content.innerHTML = `<div class="attendance-icon attendance-icon-error">!</div><h1>No se pudo registrar</h1><p>${escapeHtml(message)}</p><small>Solicita al instructor que genere un nuevo código.</small>`;
+}
+
+function decodeOfflinePayload(value) {
+  try {
+    const base64 = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
 }
 
 async function request(path, options = {}) {
@@ -56,6 +75,7 @@ async function request(path, options = {}) {
 }
 
 async function loadChallenge() {
+  if (offlinePayloadValue) return loadOfflineChallenge();
   if (!token) return renderError('El enlace no contiene un código válido.');
   try {
     if (!getAuthToken()) {
@@ -76,6 +96,30 @@ async function loadChallenge() {
       return;
     }
     await validateLocationBeforeIdentification();
+  } catch (error) {
+    renderError(error.message);
+  }
+}
+
+async function loadOfflineChallenge() {
+  offlinePayload = decodeOfflinePayload(offlinePayloadValue);
+  if (!offlinePayload || offlinePayload.type !== 'sportmancar-attendance-offline' || !offlinePayload.sessionId) {
+    renderError('El QR offline no es valido.');
+    return;
+  }
+  if (new Date(offlinePayload.expiresAt) < new Date()) {
+    renderError('El QR offline expiro. Solicita al instructor generar uno nuevo.');
+    return;
+  }
+  attendancePhase = offlinePayload.phase === 'EXIT' ? 'EXIT' : 'ENTRY';
+  if (!getAuthToken()) {
+    content.innerHTML = `<div class="attendance-icon attendance-icon-error">!</div><h1>Abre tu sesion primero</h1><p>Para capturar asistencia offline debes haber iniciado sesion previamente en esta PWA.</p><a class="attendance-login" href="/?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}">Ir a iniciar sesion</a>`;
+    return;
+  }
+  content.innerHTML = '<div class="attendance-location-step"><div class="attendance-location-spinner"></div><h1>Capturando ubicacion offline</h1><p>La ubicacion se guardara como evidencia y se validara al sincronizar.</p></div>';
+  try {
+    authorizedLocation = await getCurrentLocation();
+    renderIdentificationForm({ locationStatus: 'UBICACION_HABITUAL' });
   } catch (error) {
     renderError(error.message);
   }
@@ -147,6 +191,33 @@ async function confirmAttendance(event) {
     errorElement.textContent = '';
     const location = authorizedLocation || await getCurrentLocation();
     const payload = { lastFour: input.value, latitude: location.coords.latitude, longitude: location.coords.longitude, accuracy: location.coords.accuracy };
+
+    if (offlinePayload) {
+      const evidenceId = crypto.randomUUID?.() || `offline-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const offlineEvidence = {
+        evidenceId,
+        sessionId: offlinePayload.sessionId,
+        phase: attendancePhase,
+        lastFour: input.value,
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        accuracy: location.coords.accuracy,
+        issuedAt: offlinePayload.issuedAt,
+        deviceCapturedAt: new Date().toISOString(),
+      };
+      await OfflineAttendanceQueue.add({
+        action: 'offline-sync',
+        evidenceId,
+        sessionId: offlinePayload.sessionId,
+        phase: attendancePhase,
+        studentId: JSON.parse(sessionStorage.getItem('erp_session') || '{}').user_id || 'unknown',
+        payload: offlineEvidence,
+        createdAt: new Date().toISOString(),
+      });
+      if (navigator.onLine) window.dispatchEvent(new Event('online'));
+      renderOfflineQueued();
+      return;
+    }
 
     try {
       await request(`/attendance/${encodeURIComponent(token)}/confirm`, {

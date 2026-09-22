@@ -11,6 +11,18 @@ function generateQrDataUrl(value) {
   });
 }
 
+function isNetworkError(error) {
+  return !navigator.onLine || /Failed to fetch|NetworkError|No se pudo conectar|conexi/i.test(String(error?.message || ''));
+}
+
+function encodeOfflinePayload(payload) {
+  const json = JSON.stringify(payload);
+  const bytes = new TextEncoder().encode(json);
+  let binary = '';
+  bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
 export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENTRY') {
   const isExit = phase === 'EXIT';
   const overlay = document.createElement('div');
@@ -89,6 +101,36 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       rotationTimer = window.setTimeout(refreshChallenge, (Number(challenge.expiresInSeconds) || 10) * 1000);
     } catch (error) {
       const status = overlay.querySelector('[data-attendance-status]');
+      if (isNetworkError(error)) {
+        clearTimers();
+        const issuedAt = new Date();
+        const expiresAt = new Date(issuedAt.getTime() + 15 * 60 * 1000);
+        const payload = {
+          type: 'sportmancar-attendance-offline',
+          version: 1,
+          sessionId,
+          phase,
+          issuedAt: issuedAt.toISOString(),
+          expiresAt: expiresAt.toISOString(),
+          nonce: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        };
+        const attendanceUrl = `${window.location.origin}/attendance.html?offline=${encodeURIComponent(encodeOfflinePayload(payload))}`;
+        const image = overlay.querySelector('[data-attendance-qr]');
+        image.src = await generateQrDataUrl(attendanceUrl);
+        image.hidden = false;
+        overlay.querySelector('[data-attendance-loading]')?.remove();
+        overlay.querySelector('[data-attendance-title]').hidden = false;
+        overlay.querySelector('[data-attendance-title]').textContent = 'QR offline pendiente';
+        overlay.querySelector('[data-attendance-help]').hidden = false;
+        overlay.querySelector('[data-attendance-help]').textContent = 'El estudiante debe escanearlo desde su PWA. La asistencia quedara pendiente y se sincronizara cuando vuelva Internet.';
+        overlay.querySelector('[data-attendance-countdown]').hidden = false;
+        overlay.querySelector('[data-attendance-countdown]').innerHTML = 'Valido offline por <strong>15</strong> minutos';
+        if (status) {
+          status.className = 'attendance-waiting';
+          status.textContent = 'Modo offline: evidencia pendiente de sincronizacion.';
+        }
+        return;
+      }
       if (status) {
         status.className = 'attendance-waiting attendance-expired';
         status.textContent = error.message || 'No se pudo renovar el QR. Reintentando...';
@@ -121,7 +163,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       }, 1200);
     } catch (error) {
       const status = overlay.querySelector('[data-attendance-status]');
-      if (status) status.textContent = error.message || 'No se pudo consultar la asistencia.';
+      if (status && !isNetworkError(error)) status.textContent = error.message || 'No se pudo consultar la asistencia.';
     }
   }, 1500);
 

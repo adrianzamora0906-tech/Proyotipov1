@@ -27,7 +27,7 @@ function generateId() {
 }
 
 function buildDedupKey(entry) {
-  return [entry.token, entry.phase, entry.studentId, entry.action].filter(Boolean).join(':');
+  return [entry.evidenceId, entry.token, entry.sessionId, entry.phase, entry.studentId, entry.action].filter(Boolean).join(':');
 }
 
 function openDb() {
@@ -122,8 +122,11 @@ export const OfflineAttendanceQueue = {
     const pending = await this.getPending();
     for (const item of pending) {
       try {
+        const path = item.action === 'offline-sync'
+          ? '/attendance/offline/sync'
+          : `/attendance/${encodeURIComponent(item.token)}/${item.action}`;
         const response = await request({
-          path: `/attendance/${encodeURIComponent(item.token)}/${item.action}`,
+          path,
           method: 'POST',
           body: JSON.stringify(item.payload || {}),
         });

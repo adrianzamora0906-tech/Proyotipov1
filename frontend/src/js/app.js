@@ -15,7 +15,7 @@ import DashboardView from "./views/dashboard/DashboardView.js?v=consultas-optimi
 import StudentsView from "./views/students/StudentsView.js?v=eliminar-reserva-20260914";
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=inicio-clases-expediente-20260910";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
-import ScheduleView from "./views/schedule/ScheduleView.js?v=ocultar-cursos-sin-filas-20260911";
+import ScheduleView from "./views/schedule/ScheduleView.js?v=tooltip-instructores-disponibles-20260921";
 import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";
 import NotificationsView from "./views/notifications/NotificationsView.js";
 import HistoryView from "./views/history/HistoryView.js";

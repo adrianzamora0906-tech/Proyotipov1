@@ -6,6 +6,10 @@ const APP_SHELL = [
   '/manifest.webmanifest',
   '/src/js/app.js',
   '/src/js/public/attendance.js',
+  '/src/js/lib/offlineAttendanceQueue.js',
+  '/src/js/lib/qrcode.browser.js',
+  '/src/js/views/instructor/AttendanceQrModal.js',
+  '/src/js/services/practicalSessionService.js',
 ];
 
 self.addEventListener('install', (event) => {

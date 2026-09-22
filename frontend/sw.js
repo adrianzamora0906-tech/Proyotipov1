@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v3';
+const CACHE_NAME = 'sportmancar-offline-v4';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -33,6 +33,12 @@ self.addEventListener('fetch', (event) => {
 
   const requestUrl = new URL(event.request.url);
   if (requestUrl.origin === self.location.origin && requestUrl.pathname === '/env.js') {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+    return;
+  }
+
+  // Los estados de agenda y asistencia deben reflejar siempre el backend.
+  if (requestUrl.pathname === '/api' || requestUrl.pathname.startsWith('/api/')) {
     event.respondWith(fetch(event.request, { cache: 'no-store' }));
     return;
   }

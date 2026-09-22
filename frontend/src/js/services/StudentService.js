@@ -214,6 +214,16 @@ class StudentService {
     }
   }
 
+  static async disableStudent(id) {
+    try {
+      const result = await ApiService.disableStudent(id);
+      if (result.success) this.recordHistory('Estudiante inhabilitado', id);
+      return result;
+    } catch (error) {
+      return { success: false, error: error.data?.error?.message || error.data?.error || error.message || 'No se pudo inhabilitar el estudiante' };
+    }
+  }
+
   static async resolveAdditionalPracticeStudent(identification) {
     try {
       const result = await ApiService.resolveAdditionalPracticeStudent(identification);
@@ -376,8 +386,15 @@ class StudentService {
     }
   }
 
-  static deleteStudent(id) {
-    return storageService.delete('students', id);
+  static async deleteStudent(id) {
+    if (this.useApi) {
+      try {
+        return await ApiService.deleteStudent(id);
+      } catch (error) {
+        return { success: false, error: error.data?.error?.message || error.data?.error || error.message || 'No se pudo eliminar el estudiante' };
+      }
+    }
+    return { success: storageService.delete('students', id) };
   }
 
   static async getBranches() {

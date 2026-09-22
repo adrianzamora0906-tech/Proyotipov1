@@ -50,6 +50,10 @@ class ApiService {
     return apiClient.post(`/students/${id}/reset-access`, {});
   }
 
+  static async disableStudent(id) {
+    return apiClient.post(`/students/${id}/disable`, {});
+  }
+
   static async searchStudents(query, params = {}) {
     const qs = new URLSearchParams({ query, ...params }).toString();
     return apiClient.get(`/students/search?${qs}`);
@@ -78,6 +82,10 @@ class ApiService {
 
   static async updateStudentStatus(id, status) {
     return apiClient.put(`/students/${id}/status`, { status });
+  }
+
+  static async deleteStudent(id) {
+    return apiClient.delete(`/students/${id}`);
   }
 
   static async getStudentHistory(id) {

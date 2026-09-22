@@ -83,6 +83,7 @@ class StudentProfileView extends Component {
       || ((student.additionalPractices || []).length > 0 && !(student.enrollments || []).length);
     const accessAccount = student.accessAccount;
     const canResetStudentAccess = authService.can('STUDENT_UPDATE');
+    const canManageStudentRecord = authService.can('STUDENT_UPDATE');
 
     const profileContent = `
       <div class="student-profile">
@@ -104,6 +105,10 @@ class StudentProfileView extends Component {
           </div>
           <div class="profile-header-actions">
             <button class="btn btn-secondary" id="edit-student-btn">Editar</button>
+            ${canManageStudentRecord ? `
+              <button type="button" class="btn btn-secondary" id="disable-student-btn">Inhabilitar</button>
+              <button type="button" class="btn btn-danger" id="delete-student-btn">Eliminar</button>
+            ` : ''}
           </div>
         </div>
 
@@ -504,6 +509,14 @@ class StudentProfileView extends Component {
       this.openResetStudentAccessModal(studentId);
     });
 
+    document.getElementById('disable-student-btn')?.addEventListener('click', () => {
+      this.openDisableStudentModal(studentId);
+    });
+
+    document.getElementById('delete-student-btn')?.addEventListener('click', () => {
+      this.openDeleteStudentModal(studentId);
+    });
+
     document.getElementById('record-payment-btn')?.addEventListener('click', event => {
       this.openPaymentModal({
         studentId,
@@ -649,6 +662,98 @@ class StudentProfileView extends Component {
       }));
       window.dispatchEvent(new PopStateEvent('popstate'));
     }
+  }
+
+  openDisableStudentModal(studentId) {
+    const modal = document.getElementById('profile-action-modal');
+    if (!modal) return;
+    const studentName = `${this.student?.firstName || ''} ${this.student?.lastName || ''}`.trim() || 'este estudiante';
+    modal.innerHTML = `
+      <div class="modal student-danger-modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div><h2>Inhabilitar estudiante</h2><p>${studentName}</p></div>
+          <button type="button" class="modal-close" data-close-student-action>&times;</button>
+        </div>
+        <div class="modal-body">
+          <p>El expediente se conserva, pero el estudiante queda marcado como inhabilitado y su cuenta de portal se desactiva.</p>
+          <div class="credential-error" id="student-action-error" hidden></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-student-action>Cancelar</button>
+          <button type="button" class="btn btn-warning" id="confirm-disable-student">Inhabilitar estudiante</button>
+        </div>
+      </div>`;
+    modal.classList.add('active');
+    modal.querySelectorAll('[data-close-student-action]').forEach(button => button.addEventListener('click', () => this.closeProfileModal(false)));
+    modal.querySelector('#confirm-disable-student')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const errorBox = modal.querySelector('#student-action-error');
+      button.disabled = true;
+      button.textContent = 'Inhabilitando...';
+      const result = await StudentService.disableStudent(studentId);
+      if (!result.success) {
+        button.disabled = false;
+        button.textContent = 'Inhabilitar estudiante';
+        if (errorBox) {
+          errorBox.hidden = false;
+          errorBox.textContent = result.error || 'No se pudo inhabilitar el estudiante.';
+        }
+        return;
+      }
+      this.closeProfileModal(true);
+    });
+  }
+
+  openDeleteStudentModal(studentId) {
+    const modal = document.getElementById('profile-action-modal');
+    if (!modal) return;
+    const studentName = `${this.student?.firstName || ''} ${this.student?.lastName || ''}`.trim() || 'este estudiante';
+    const cedula = this.student?.cedula || this.student?.identification || '';
+    modal.innerHTML = `
+      <div class="modal student-danger-modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div><h2>Eliminar estudiante</h2><p>${studentName}</p></div>
+          <button type="button" class="modal-close" data-close-student-action>&times;</button>
+        </div>
+        <div class="modal-body">
+          <p>Esta accion elimina el expediente, matriculas, pagos, horarios, sesiones practicas y cuenta de portal asociada.</p>
+          <label class="form-group">
+            <span>Para confirmar escribe la cedula del estudiante</span>
+            <input class="form-input" id="delete-student-confirmation" autocomplete="off" placeholder="${cedula}">
+          </label>
+          <div class="credential-error" id="student-action-error" hidden></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-student-action>Cancelar</button>
+          <button type="button" class="btn btn-danger" id="confirm-delete-student" disabled>Eliminar definitivamente</button>
+        </div>
+      </div>`;
+    modal.classList.add('active');
+    modal.querySelectorAll('[data-close-student-action]').forEach(button => button.addEventListener('click', () => this.closeProfileModal(false)));
+    const input = modal.querySelector('#delete-student-confirmation');
+    const confirmButton = modal.querySelector('#confirm-delete-student');
+    input?.addEventListener('input', () => {
+      confirmButton.disabled = String(input.value || '').replace(/\D/g, '') !== String(cedula || '').replace(/\D/g, '');
+    });
+    confirmButton?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const errorBox = modal.querySelector('#student-action-error');
+      button.disabled = true;
+      button.textContent = 'Eliminando...';
+      const result = await StudentService.deleteStudent(studentId);
+      if (!result.success) {
+        button.disabled = false;
+        button.textContent = 'Eliminar definitivamente';
+        if (errorBox) {
+          errorBox.hidden = false;
+          errorBox.textContent = result.error || 'No se pudo eliminar el estudiante.';
+        }
+        return;
+      }
+      window.history.pushState(null, null, '/students');
+      window.dispatchEvent(new CustomEvent('erp:dataChanged', { detail: { collection: 'students', action: 'deleted' } }));
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
   }
 
   async openResetStudentAccessModal(studentId) {
@@ -1980,6 +2085,7 @@ class StudentProfileView extends Component {
       horario_seleccionado: 'Horario Seleccionado',
       matriculado: 'Matriculado',
       en_curso: 'En Curso',
+      inhabilitado: 'Inhabilitado',
     };
     return labels[status] || status;
   }
@@ -1993,6 +2099,7 @@ class StudentProfileView extends Component {
       horario_seleccionado: 'badge-info',
       matriculado: 'badge-success',
       en_curso: 'badge-success',
+      inhabilitado: 'badge-danger',
     };
     return classes[status] || 'badge-primary';
   }

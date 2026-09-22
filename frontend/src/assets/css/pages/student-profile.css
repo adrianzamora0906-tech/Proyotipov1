@@ -32,6 +32,8 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .profile-back-btn span {
@@ -175,6 +177,9 @@
 .credential-result strong { overflow-wrap: anywhere; }
 .credential-result button { grid-column: 1 / -1; margin-top: .35rem; }
 .credential-error { margin-top: 1rem; padding: .85rem 1rem; border-radius: var(--radius-md); background: #fef2f2; color: #b91c1c; }
+.student-danger-modal { max-width: 560px; }
+.student-danger-modal .modal-body { display: grid; gap: 1rem; }
+.student-danger-modal .form-group { display: grid; gap: .45rem; margin: 0; }
 
 @media (max-width: 800px) {
   .student-access-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -3,6 +3,7 @@ import SidebarLayout from '../../layouts/SidebarLayout.js';
 import EvaluationService from '../../services/evaluationService.js';
 import InstructorStudentService from '../../services/instructorStudentService.js';
 import InstructorAgendaService from '../../services/instructorAgendaService.js';
+import PracticalSessionService from '../../services/practicalSessionService.js';
 import { badgeClass, escapeHtml, stateMessage } from './InstructorHelpers.js';
 
 class InstructorEvaluationsView extends Component {
@@ -12,10 +13,17 @@ class InstructorEvaluationsView extends Component {
       this.selectedEnrollmentId = params.get('enrollment') || '';
       this.practicalSessionId = params.get('session') || '';
       this.isExoneration = params.get('mode') === 'exoneration';
-      const [evaluations, students] = await Promise.all([
+      const [evaluations, sessionResult] = await Promise.all([
         EvaluationService.getEvaluations(),
-        InstructorStudentService.getStudents({ limit: 100 }),
+        this.isExoneration && this.practicalSessionId
+          ? PracticalSessionService.getSession(this.practicalSessionId)
+          : Promise.resolve(null),
       ]);
+      const currentCourse = sessionResult?.data?.course || '';
+      const students = await InstructorStudentService.getStudents({
+        limit: 100,
+        ...(currentCourse ? { course: currentCourse } : {}),
+      });
       this.criteria = evaluations.criteria || [];
       this.evaluations = evaluations.data || [];
       const evaluationStudents = [...(students.data || [])];

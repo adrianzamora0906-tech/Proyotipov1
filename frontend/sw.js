@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v2';
+const CACHE_NAME = 'sportmancar-offline-v3';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -6,7 +6,6 @@ const APP_SHELL = [
   '/manifest.webmanifest',
   '/src/js/app.js',
   '/src/js/public/attendance.js',
-  '/env.js',
 ];
 
 self.addEventListener('install', (event) => {
@@ -27,6 +26,12 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin === self.location.origin && requestUrl.pathname === '/env.js') {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+    return;
+  }
 
   const networkFirst = event.request.destination === 'document'
     || event.request.destination === 'script'

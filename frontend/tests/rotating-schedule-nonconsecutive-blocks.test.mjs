@@ -17,4 +17,5 @@ test('el horario rotativo permite dos bloques no consecutivos el mismo dia', () 
   assert.notEqual(start, -1, 'No se encontro reserveSchedule');
   assert.match(reservationFlow, /daySelections\.length > 2/);
   assert.doesNotMatch(reservationFlow, /los dos bloques del dia deben ser consecutivos/);
+  assert.doesNotMatch(reservationFlow, /Los dias con horario doble deben ser consecutivos/);
 });

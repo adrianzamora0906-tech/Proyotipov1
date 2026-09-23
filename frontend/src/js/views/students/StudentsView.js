@@ -3006,7 +3006,19 @@ class StudentsView extends Component {
 
   toggleTemporaryReservationMode() {
     const form=document.getElementById('student-modal-form'),button=document.getElementById('temporary-reservation-toggle');
-    if(!form?.elements.preferredInstructorId?.value){this.showModalAlert('error','Selecciona primero al instructor que reservará el cupo.');return;}
+    const preferredSelect=form?.elements.preferredInstructorId;
+    if(preferredSelect&&!preferredSelect.value){
+      const preview=document.querySelector('#student-schedule-calendar .schedule-instructor-preview.available:not([hidden])');
+      const previewInstructorId=preview?.dataset.instructorId||'';
+      if(previewInstructorId){
+        if(![...preferredSelect.options].some(option=>option.value===previewInstructorId)){
+          preferredSelect.add(new Option(preview.dataset.instructorName||'Instructor previsto',previewInstructorId));
+        }
+        preferredSelect.value=previewInstructorId;
+        this.scheduleInstructorFilterId=previewInstructorId;
+      }
+    }
+    if(!preferredSelect?.value){this.showModalAlert('error','No se encontró un instructor disponible para reservar el cupo.');return;}
     if(!form?.elements.scheduleId?.value){this.showModalAlert('error','Selecciona primero un horario disponible.');return;}
     this.temporaryReservationMode=!this.temporaryReservationMode;
     button?.classList.toggle('active',this.temporaryReservationMode);
@@ -3489,6 +3501,8 @@ class StudentsView extends Component {
     if (!plan.length) {
       preview.hidden = true;
       preview.innerHTML = '';
+      delete preview.dataset.instructorId;
+      delete preview.dataset.instructorName;
       return;
     }
 
@@ -3517,12 +3531,22 @@ class StudentsView extends Component {
       });
       if (preview.dataset.requestId !== requestId) return;
       const instructorName = response.data?.instructorName || preferredName;
+      const instructorId = response.data?.instructorId || preferredInstructorId || '';
+      if (instructorId) {
+        preview.dataset.instructorId = instructorId;
+        preview.dataset.instructorName = instructorName || preferredName || 'Instructor previsto';
+      } else {
+        delete preview.dataset.instructorId;
+        delete preview.dataset.instructorName;
+      }
       preview.className = `schedule-instructor-preview ${instructorName ? 'available' : 'unavailable'}`;
       preview.innerHTML = instructorName
         ? `<span>Instructor previsto</span><strong>${escapeHtml(instructorName)}</strong><small>Se confirmar&aacute; al completar el registro.</small>`
         : '<strong>No hay un instructor disponible para toda la selecci&oacute;n.</strong>';
     } catch (error) {
       if (preview.dataset.requestId !== requestId) return;
+      delete preview.dataset.instructorId;
+      delete preview.dataset.instructorName;
       preview.className = 'schedule-instructor-preview unavailable';
       preview.innerHTML = `<strong>${escapeHtml(error.message || 'No se pudo comprobar el instructor.')}</strong>`;
     }
@@ -3971,7 +3995,7 @@ class StudentsView extends Component {
 
   async handleTemporaryReservationSubmit(form, formData, submitBtn) {
     const schedulePlan=this.parseSchedulePlan(formData.get('schedulePlan'));
-    const instructorId=formData.get('preferredInstructorId');
+    const instructorId=formData.get('preferredInstructorId')||document.querySelector('#student-schedule-calendar .schedule-instructor-preview.available:not([hidden])')?.dataset.instructorId||'';
     const branchId=form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId||null;
     const theorySchedule=formData.get('theorySchedule');
     if(!instructorId){this.showModalAlert('error','Selecciona el instructor que reservará el cupo.');this.goToModalStep(1);return;}

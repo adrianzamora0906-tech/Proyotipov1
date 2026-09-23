@@ -465,16 +465,16 @@ export default class ManagerReportsView extends Component {
   paintBranchInstructorTable() {
     const rows = this.result.rows || [];
     document.getElementById("report-table-head").innerHTML =
-      `<tr><th>Instructor</th><th>Sucursal</th><th>Cursos</th><th>Estudiantes</th><th>Clases programadas</th><th>Horas impartidas</th><th>Área</th></tr>`;
+      `<tr><th>Instructor</th><th>Sucursal</th><th>Cursos</th><th>Estudiantes</th><th>Clases programadas</th><th>Horas impartidas</th><th>Clases prácticas</th><th>Área</th></tr>`;
     document.getElementById("report-table-body").innerHTML =
       rows.length
         ? rows
             .map(
               (row) =>
-                `<tr><td><strong>${esc(row.name)}</strong><small>${esc(row.email || "")}</small></td><td>${esc(row.branch_name)}</td><td>${number(row.courses)}</td><td>${number(row.students)}</td><td>${number(row.scheduled_classes)}</td><td>${number(row.taught_hours)} h</td><td>${esc(row.practice_area || "")}</td></tr>`,
+                `<tr><td><strong>${esc(row.name)}</strong><small>${esc(row.email || "")}</small></td><td>${esc(row.branch_name)}</td><td>${number(row.courses)}</td><td>${number(row.students)}</td><td>${number(row.scheduled_classes)}</td><td>${number(row.taught_hours)} h</td><td>${number(row.practical_classes)}</td><td>${esc(row.practice_area || "")}</td></tr>`,
             )
             .join("")
-        : `<tr><td colspan="7" class="report-empty">No existen instructores para esta consulta.</td></tr>`;
+        : `<tr><td colspan="8" class="report-empty">No existen instructores para esta consulta.</td></tr>`;
     document.getElementById("report-pagination").innerHTML = "";
   }
   async openCycleStudents(cycleId) {

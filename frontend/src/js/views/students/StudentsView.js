@@ -1795,7 +1795,7 @@ class StudentsView extends Component {
           </div>
         ` : ''}
         <div class="schedule-instructor-preview" aria-live="polite" hidden></div>
-        <div class="schedule-rotation-message" hidden>Puedes variar el horario por día y tomar dos bloques consecutivos. Para guardar ahora selecciona mínimo <strong>${Math.ceil((Number(cycle.durationBusinessDays) || days.length) / 2)} clases</strong>; podrás completar hasta ${Number(cycle.durationBusinessDays) || days.length}. Se permiten máximo cuatro días con horario doble. <span class="schedule-selection-count">0/${Number(cycle.durationBusinessDays) || days.length} seleccionadas</span></div>
+        <div class="schedule-rotation-message" hidden>Puedes variar el horario por día y tomar hasta dos bloques. Para guardar ahora selecciona mínimo <strong>${Math.ceil((Number(cycle.durationBusinessDays) || days.length) / 2)} clases</strong>; podrás completar hasta ${Number(cycle.durationBusinessDays) || days.length}. Se permiten máximo cuatro días con horario doble. <span class="schedule-selection-count">0/${Number(cycle.durationBusinessDays) || days.length} seleccionadas</span></div>
         <nav class="calendar-window-controls" aria-label="Navegar entre los días del curso">
           <button type="button" class="calendar-window-btn" data-direction="-1" aria-label="Mostrar días anteriores">
             <span aria-hidden="true">&#8592;</span><span>D&iacute;as anteriores</span>
@@ -3304,10 +3304,6 @@ class StudentsView extends Component {
       if (error) error.textContent = 'Solo puedes escoger dos bloques por día.';
       return;
     }
-    if (selectedForDay.length === 1 && !this.areConsecutiveScheduleOptions(calendar, selectedForDay[0], option)) {
-      if (error) error.textContent = 'Para doblar horas, los dos bloques del día deben ser consecutivos.';
-      return;
-    }
     const requiredClasses = Number(calendar.dataset.requiredClasses || calendar.dataset.dayCount || 8);
     const selectedCount = calendar.querySelectorAll('.schedule-option.selected').length;
     if (selectedCount >= requiredClasses) {
@@ -3357,12 +3353,6 @@ class StudentsView extends Component {
     });
     this.storeSchedulePlan(refreshed);
     this.updateCalendarWindow(refreshed);
-  }
-
-  areConsecutiveScheduleOptions(calendar, first, second) {
-    const orderedTimes = [...new Set([...calendar.querySelectorAll('.schedule-option')].map(cell => cell.dataset.time))]
-      .sort((left, right) => left.localeCompare(right));
-    return Math.abs(orderedTimes.indexOf(first.dataset.time) - orderedTimes.indexOf(second.dataset.time)) === 1;
   }
 
   hasValidConsecutiveDoubleDays(calendar) {

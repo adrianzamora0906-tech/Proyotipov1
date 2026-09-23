@@ -386,11 +386,27 @@ export default class AdminBranchesView extends Component {
     const roles = rolesResponse.data || [];
     const vacations = vacationResponse.data || [];
     const canUpdateUsers = permissionService.can('USER_UPDATE');
+    const activeLoad = user => (Number(user.active_assigned_student_count) || 0)
+      + (Number(user.future_schedule_student_count) || 0)
+      + (Number(user.active_session_count) || 0);
+    const staffLoadNote = user => {
+      const students = Number(user.future_schedule_student_count) || Number(user.active_assigned_student_count) || 0;
+      const sessions = Number(user.active_session_count) || 0;
+      if (!students && !sessions) return '';
+      return `<span class="staff-load-note">${students} alumno${students===1?'':'s'} · ${sessions} clase${sessions===1?'':'s'}</span>`;
+    };
+    const toggleStaffButton = user => {
+      if (!permissionService.can('USER_DISABLE') || String(user.id) === String(authService.getCurrentUser()?.userId)) return '';
+      const wantsActive = user.active ? 'false' : 'true';
+      const blockedByLoad = user.active && activeLoad(user) > 0 && (user.roles || []).some(role => role.code === 'INSTRUCTOR');
+      const title = blockedByLoad ? 'Reasigna o finaliza sus estudiantes activos antes de bloquear' : '';
+      return `<button class="btn btn-small toggle-branch-user" data-user-id="${esc(user.id)}" data-active="${wantsActive}" ${blockedByLoad?`disabled title="${title}"`:''}>${user.active?'Bloquear':'Desbloquear'}</button>`;
+    };
     body.innerHTML = `
       <section class="branch-card">
         <div class="branch-section-title"><h2>Personal y Accesos</h2>${permissionService.can('USER_CREATE') ? '<button class="btn btn-primary" id="new-user-from-branch">Nuevo usuario</button>' : ''}</div>
         <div class="branch-table-wrap"><table><thead><tr><th>Persona</th><th><button type="button" class="branch-table-sort" id="sort-staff-role" aria-label="Ordenar por jerarquía del rol" aria-sort="none">Rol/es <span>↕</span></button></th><th>Usuario</th><th>Estado</th><th>Último acceso</th><th>Acciones</th></tr></thead><tbody id="branch-staff-rows">
-          ${staff.map(user => `<tr class="${user.active?'':'user-blocked'}" data-role-rank="${staffRoleRank(user)}" data-person-name="${esc(`${user.first_name || ''} ${user.last_name || ''}`.trim().toLocaleLowerCase('es'))}"><td class="${canUpdateUsers?'editable-person':''}" ${canUpdateUsers?`data-user-id="${esc(user.id)}" role="button" tabindex="0" title="Editar perfil"`:''}><strong>${esc(`${user.first_name || ''} ${user.last_name || ''}`.trim())}</strong><small>${esc(user.email || '')}</small>${canUpdateUsers?'<span class="editable-person__hint">Ver y editar perfil</span>':''}</td><td>${(user.roles || []).map(role => `<span class="branch-role">${esc(staffRoleLabel(role,user))}</span>`).join('') || 'Sin rol'}</td><td>${esc(user.username)}</td><td><span class="branch-pill ${user.active?'active':'inactive'}">${user.active ? 'Activo' : 'Bloqueado'}</span></td><td>${dateTime(user.last_login_at)}</td><td class="branch-actions"><button class="btn btn-small view-user-access" data-user-id="${esc(user.id)}">Accesos</button><button class="btn btn-small view-user-sessions" data-user-id="${esc(user.id)}">Sesiones</button>${permissionService.can('USER_DISABLE')&&String(user.id)!==String(authService.getCurrentUser()?.userId)?`<button class="btn btn-small toggle-branch-user" data-user-id="${esc(user.id)}" data-active="${user.active?'false':'true'}">${user.active?'Bloquear':'Desbloquear'}</button>`:''}${permissionService.can('USER_RESET_ACCESS')?`<button class="btn btn-small reset-user-access" data-user-id="${esc(user.id)}">Restablecer acceso</button>`:''}</td></tr>`).join('') || '<tr><td colspan="6">No hay personal en esta sucursal.</td></tr>'}
+          ${staff.map(user => `<tr class="${user.active?'':'user-blocked'}" data-role-rank="${staffRoleRank(user)}" data-person-name="${esc(`${user.first_name || ''} ${user.last_name || ''}`.trim().toLocaleLowerCase('es'))}"><td class="${canUpdateUsers?'editable-person':''}" ${canUpdateUsers?`data-user-id="${esc(user.id)}" role="button" tabindex="0" title="Editar perfil"`:''}><strong>${esc(`${user.first_name || ''} ${user.last_name || ''}`.trim())}</strong><small>${esc(user.email || '')}</small>${staffLoadNote(user)}${canUpdateUsers?'<span class="editable-person__hint">Ver y editar perfil</span>':''}</td><td>${(user.roles || []).map(role => `<span class="branch-role">${esc(staffRoleLabel(role,user))}</span>`).join('') || 'Sin rol'}</td><td>${esc(user.username)}</td><td><span class="branch-pill ${user.active?'active':'inactive'}">${user.active ? 'Activo' : 'Bloqueado'}</span></td><td>${dateTime(user.last_login_at)}</td><td class="branch-actions"><button class="btn btn-small view-user-access" data-user-id="${esc(user.id)}">Accesos</button><button class="btn btn-small view-user-sessions" data-user-id="${esc(user.id)}">Sesiones</button>${toggleStaffButton(user)}${permissionService.can('USER_RESET_ACCESS')?`<button class="btn btn-small reset-user-access" data-user-id="${esc(user.id)}">Restablecer acceso</button>`:''}</td></tr>`).join('') || '<tr><td colspan="6">No hay personal en esta sucursal.</td></tr>'}
         </tbody></table></div>
       </section>
       ${this.branchAccess ? '' : `<section class="branch-card"><h2>Roles disponibles</h2><div class="branch-role-list">${roles.map(role => `<span>${esc(role.code)} · ${esc(role.name)}</span>`).join('')}</div></section>`}

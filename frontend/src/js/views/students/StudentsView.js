@@ -524,7 +524,7 @@ class StudentsView extends Component {
       || String(method.name || '').toLowerCase().includes('transferencia')
     ));
     const observationsField = (extraClass = '') => `
-      <div class="form-group registration-observations-field ${extraClass}"${extraClass.includes('renewal-observations-field') ? ' hidden' : ''}>
+      <div class="form-group registration-observations-field ${extraClass}"${/(renewal|additional-practice)-observations-field/.test(extraClass) ? ' hidden' : ''}>
         <label class="form-label">Observaciones <small>(opcional)</small></label>
         <textarea class="form-textarea" name="notes" rows="3" maxlength="500" placeholder="Ejemplo: detalle especial, referencia interna o novedad del registro."></textarea>
         <div class="form-error"></div>
@@ -816,6 +816,7 @@ class StudentsView extends Component {
                 </div>
                 <div class="form-error" id="theory-schedule-error"></div>
                 </section>
+                ${observationsField('regular-enrollment-observations-field')}
                 </div>
                 <div class="additional-practice-only additional-practice-schedule" hidden>
                   <div class="student-modal-section-title"><h3>Programar prácticas adicionales</h3></div>
@@ -832,7 +833,7 @@ class StudentsView extends Component {
                   </div>
                   <div id="additional-practice-availability" class="additional-practice-availability" hidden></div>
                 </div>
-                ${canRegisterPayment ? '' : observationsField()}
+                ${observationsField('additional-practice-only additional-practice-observations-field')}
               </section>
 
               ${canRegisterPayment ? `
@@ -879,7 +880,6 @@ class StudentsView extends Component {
                       <div class="form-error" id="payment-reference-error"></div>
                     </div>
                   </div>
-                  ${observationsField()}
                 </section>
               ` : ''}
 
@@ -1358,7 +1358,8 @@ class StudentsView extends Component {
     document.querySelectorAll('.student-registration-type').forEach(card => card.classList.toggle('is-selected', card.querySelector('input')?.checked));
     document.querySelectorAll('.renewal-hidden').forEach(element => { element.hidden = isRenewal || isAdditionalPractice; });
     document.querySelectorAll('.renewal-observations-field').forEach(element => { element.hidden = !isRenewal; });
-    document.querySelectorAll('.registration-observations-field:not(.renewal-observations-field)').forEach(element => { element.hidden = isRenewal; });
+    document.querySelectorAll('.regular-enrollment-observations-field').forEach(element => { element.hidden = isRenewal || isAdditionalPractice; });
+    document.querySelectorAll('.additional-practice-observations-field').forEach(element => { element.hidden = isRenewal || !isAdditionalPractice; });
     document.querySelectorAll('.student-modal-step-tab').forEach(tab => { tab.hidden = isRenewal && Number(tab.dataset.step) !== 2; });
     form?.querySelectorAll('.renewal-hidden input, .renewal-hidden select, .renewal-hidden textarea').forEach(field => { field.disabled = isRenewal || isAdditionalPractice; });
     const title = document.getElementById('student-modal-title');

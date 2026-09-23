@@ -14,6 +14,10 @@ import DateHelper from '../../helpers/DateHelper.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
 
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+})[character]);
+
 class StudentProfileView extends Component {
   async render() {
     const studentId = this.props.studentId;
@@ -1257,6 +1261,10 @@ class StudentProfileView extends Component {
               <label class="form-label">Horario de teoría *</label>
               <div class="theory-schedule-selector" id="profile-theory-options"></div>
             </div>
+            <div class="form-group" style="margin-top:1rem;">
+              <label class="form-label" for="profile-initial-schedule-notes">Observaciones <small>(opcional)</small></label>
+              <textarea class="form-textarea" id="profile-initial-schedule-notes" rows="3" maxlength="500" placeholder="Ejemplo: detalle especial, referencia interna o novedad del horario.">${escapeHtml(student.notes || '')}</textarea>
+            </div>
           ` : '<div class="student-empty">No hay un próximo curso disponible para esta sucursal.</div>'}
           <div class="form-error" id="profile-schedule-error"></div>
         </div>
@@ -1331,6 +1339,12 @@ class StudentProfileView extends Component {
         };
         button.disabled = true;
         button.textContent = 'Asignando...';
+        const notes = modal.querySelector('#profile-initial-schedule-notes')?.value.trim() || '';
+        if (notes !== String(student.notes || '').trim()) {
+          const notesResponse = await ApiService.updateStudent(studentId, { notes });
+          if (!notesResponse.success) throw new Error(notesResponse.error || 'No se pudo guardar la observación.');
+          this.student.notes = notes;
+        }
         const response = await ApiService.reserveCourseCycleSchedule({ studentId, schedulePlan });
         if (!response.success) throw new Error(response.error || 'No se pudo asignar el horario.');
         this.closeProfileModal(true);

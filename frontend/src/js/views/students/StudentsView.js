@@ -2789,6 +2789,7 @@ class StudentsView extends Component {
     
     this.activatingReservation = null;
     this.temporaryReservationMode = false;
+    this.setTemporaryReservationFieldsOptional(false);
     const reservationToggle = document.getElementById('temporary-reservation-toggle');
     reservationToggle?.classList.remove('active');
     if (reservationToggle) reservationToggle.textContent = 'Reservar este cupo por 2 días';
@@ -3029,6 +3030,16 @@ class StudentsView extends Component {
     if(submit)submit.textContent=this.temporaryReservationMode?'Reservar cupo':(authService.can('PAYMENT_CREATE')?'Completar registro':'Registrar Estudiante');
     const alert=document.getElementById('student-modal-alert');
     if(alert){alert.className='alert alert-info';alert.innerHTML=`<div class="alert-content">${this.temporaryReservationMode?'Completa los datos. Al finalizar se reservará el cupo durante 2 días sin crear al estudiante.':'Se continuará con el registro normal del estudiante.'}</div>`;alert.style.display='flex';}
+  }
+
+  setTemporaryReservationFieldsOptional(optional) {
+    const form = document.getElementById('student-modal-form');
+    if (!form) return;
+    ['birthDate', 'bloodType'].forEach(name => {
+      const input = form.querySelector(`[name="${name}"]`);
+      if (input) input.required = !optional;
+      input?.closest('.form-group')?.querySelector('.form-label')?.classList.toggle('required', !optional);
+    });
   }
 
   getStudentModalLastStep() {
@@ -3658,6 +3669,7 @@ class StudentsView extends Component {
     const formData = new FormData(form);
     const additionalPractice = formData.get('additionalPractice') === 'on';
     const renewal = formData.get('registrationMode') === 'license-renewal';
+    const temporaryReservation = this.temporaryReservationMode;
     form.querySelectorAll('.form-error').forEach(el => el.textContent = '');
 
     const validations = {
@@ -3667,10 +3679,10 @@ class StudentsView extends Component {
         { type: 'required', message: 'La cédula es requerida' },
         { type: 'cedula', message: 'Formato de cédula inválido' },
       ],
-      birthDate: [{ type: 'birthDate', message: 'Debes ser mayor de 16 años' }],
+      birthDate: temporaryReservation ? [] : [{ type: 'birthDate', message: 'Debes ser mayor de 16 años' }],
       email: formData.get('email') ? [{ type: 'email', message: 'Email inválido' }] : [],
       phone: formData.get('phone') ? [{ type: 'phone', message: 'Teléfono inválido' }] : [],
-      bloodType: additionalPractice || renewal ? [] : [{ type: 'required', message: 'Debes seleccionar el tipo de sangre' }],
+      bloodType: temporaryReservation || additionalPractice || renewal ? [] : [{ type: 'required', message: 'Debes seleccionar el tipo de sangre' }],
       course_id: additionalPractice || renewal ? [] : [{ type: 'required', message: 'Debes seleccionar un curso' }],
       city_id: [{ type: 'required', message: 'Debes seleccionar una ciudad' }],
       branch: [{ type: 'required', message: 'Debes seleccionar una sucursal' }],

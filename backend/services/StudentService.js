@@ -67,10 +67,18 @@ class StudentService {
       await client.query('SELECT expire_course_cycle_seat_reservations()');
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`temporary-seat:${cycleId}:${instructorId}`]);
       const cycle=(await client.query(`SELECT cc.id,cc.branch_id,cc.course_id,cc.start_date,cc.end_date,cc.modality
-        FROM course_cycles cc WHERE cc.id=$1 AND cc.branch_id=$2 AND cc.course_id=$3 AND cc.active=TRUE
+        FROM course_cycles cc WHERE cc.id=$1 AND cc.course_id=$2 AND cc.active=TRUE
           AND cc.deleted_at IS NULL AND cc.status IN('activo','proximo')
-          AND CURRENT_DATE<=cc.start_date+2`,[cycleId,branchId,courseId])).rows[0];
+          AND CURRENT_DATE<=cc.start_date+2`,[cycleId,courseId])).rows[0];
       if(!cycle)throw createError(409,'El curso seleccionado ya no admite reservas');
+      const effectiveBranch=(await client.query(`SELECT COALESCE(reference.id,requested.id) AS id
+        FROM branches requested
+        LEFT JOIN branches reference
+          ON requested.code='SP_IC2' AND reference.code='SP_IC1'
+         AND reference.city_id=requested.city_id AND reference.active=TRUE
+        WHERE requested.id=$1 LIMIT 1`,[branchId])).rows[0];
+      if(!effectiveBranch||String(effectiveBranch.id)!==String(cycle.branch_id))throw createError(409,'El curso seleccionado ya no admite reservas');
+      const reservationBranchId=cycle.branch_id;
       if(!access.global&&String(user.branch_id)!==String(branchId)){
         const allowed=await client.query(`SELECT 1 FROM branches requested JOIN branches own ON own.id=$2
           WHERE requested.id=$1 AND requested.city_id=own.city_id`,[branchId,user.branch_id]);
@@ -92,7 +100,7 @@ class StudentService {
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${cycleId}:${date}:${match[1]}:${match[2]}`]);
         const validTemplate=await client.query(`SELECT 1 FROM branch_course_programs p JOIN branch_course_schedule_templates t ON t.program_id=p.id AND t.active=TRUE
           WHERE p.branch_id=$1 AND p.course_id=$2 AND t.modality=$3 AND t.day_of_week=EXTRACT(DOW FROM $4::date)
-            AND t.start_time=$5::time AND t.end_time=$6::time`,[branchId,courseId,cycle.modality,date,match[1],match[2]]);
+            AND t.start_time=$5::time AND t.end_time=$6::time`,[reservationBranchId,courseId,cycle.modality,date,match[1],match[2]]);
         if(!validTemplate.rowCount)throw createError(422,'Uno de los horarios no pertenece al curso');
         const busy=await client.query(`SELECT 1 FROM (
           SELECT instructor_id,schedule_date,start_time,end_time FROM course_cycle_schedule_assignments WHERE status='activo'
@@ -106,7 +114,7 @@ class StudentService {
       const reservation=(await client.query(`INSERT INTO course_cycle_seat_reservations
         (cycle_id,instructor_id,referred_name,referred_phone,referred_identification,course_id,branch_id,reserved_start_time,reserved_end_time,notes,created_by,expires_at,reservation_kind,draft_data)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8::time,$9::time,$10,$11,NOW()+INTERVAL '2 days','temporary_enrollment',$12::jsonb) RETURNING *`,
-        [cycleId,instructorId,`${firstName} ${lastName}`,data.phone||null,identification,courseId,branchId,firstTime[1],firstTime[2],String(data.notes||'').slice(0,240)||null,user.id,JSON.stringify(safeDraft)])).rows[0];
+        [cycleId,instructorId,`${firstName} ${lastName}`,data.phone||null,identification,courseId,reservationBranchId,firstTime[1],firstTime[2],String(data.notes||'').slice(0,240)||null,user.id,JSON.stringify(safeDraft)])).rows[0];
       for(const selection of selections){const match=String(selection.time).match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);await client.query(`INSERT INTO instructor_availability_overrides
         (instructor_id,schedule_date,start_time,end_time,status,reason,active,created_by,updated_by)
         VALUES($1,$2::date,$3::time,$4::time,'reserved',$5,TRUE,$6,$6)
@@ -574,10 +582,10 @@ class StudentService {
       }
       await db.query(`
         INSERT INTO payments (enrollment_id, total, discount, final_amount, balance, status)
-        SELECT $1, c.price, $3, c.price - $3, c.price - $3,
+        SELECT $1::uuid, c.price, $3::numeric, c.price - $3::numeric, c.price - $3::numeric,
           CASE WHEN c.price - $3 <= 0 THEN 'pagado' ELSE 'pendiente' END
         FROM courses c
-        WHERE c.id = $2
+        WHERE c.id = $2::uuid
       `, [enrollmentId, courseId, discount]);
       if (discount > 0) {
         await db.query('INSERT INTO history (student_id, action) VALUES ($1, $2)', [
@@ -665,6 +673,141 @@ class StudentService {
     );
 
     return result.rows[0];
+  }
+
+  static async disable(id, user = {}) {
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`disable-student:${id}`]);
+      const student = (await client.query(`
+        UPDATE students
+        SET status = 'inhabilitado', updated_by = $2, updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `, [id, user.id || null])).rows[0];
+      if (!student) throw createError(404, 'Estudiante no encontrado');
+
+      const accounts = await client.query(`
+        UPDATE users
+        SET active = FALSE, updated_at = NOW()
+        WHERE student_id = $1 AND active = TRUE
+      `, [id]);
+
+      await client.query('INSERT INTO history (student_id, action) VALUES ($1, $2)', [id, 'Estudiante inhabilitado']);
+      await client.query(`INSERT INTO audit_logs(user_id,role,branch_id,action,entity,entity_id,metadata)
+        VALUES($1,$2,$3,'STUDENT_DISABLED','students',$4,$5::jsonb)`, [
+        user.id || null,
+        user.role || 'ADMIN_SYSTEM',
+        student.branch_id,
+        id,
+        JSON.stringify({ identification: student.identification, disabledAccounts: accounts.rowCount }),
+      ]);
+
+      await client.query('COMMIT');
+      return { ...student, disabled_accounts: accounts.rowCount };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  static async delete(id, user = {}) {
+    const client = await db.getClient();
+    const removed = {};
+    const del = async (label, sql, params = []) => {
+      const result = await client.query(sql, params);
+      removed[label] = result.rowCount;
+    };
+
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`delete-student:${id}`]);
+      await client.query(`
+        CREATE TEMP TABLE target_students ON COMMIT DROP AS
+        SELECT id, identification, first_name, last_name, branch_id
+        FROM students
+        WHERE id = $1
+        FOR UPDATE
+      `, [id]);
+      const target = (await client.query('SELECT * FROM target_students')).rows[0];
+      if (!target) throw createError(404, 'Estudiante no encontrado');
+
+      await client.query('CREATE TEMP TABLE target_enrollments ON COMMIT DROP AS SELECT id FROM enrollments WHERE student_id IN (SELECT id FROM target_students)');
+      await client.query('CREATE TEMP TABLE target_payments ON COMMIT DROP AS SELECT id FROM payments WHERE enrollment_id IN (SELECT id FROM target_enrollments)');
+      await client.query('CREATE TEMP TABLE target_payment_details ON COMMIT DROP AS SELECT id FROM payment_details WHERE payment_id IN (SELECT id FROM target_payments)');
+      await client.query('CREATE TEMP TABLE target_users ON COMMIT DROP AS SELECT id FROM users WHERE student_id IN (SELECT id FROM target_students)');
+
+      const before = (await client.query(`
+        SELECT
+          (SELECT COUNT(*)::int FROM users) AS users,
+          (SELECT COUNT(*)::int FROM target_users) AS student_accounts,
+          (SELECT COUNT(*)::int FROM target_enrollments) AS enrollments,
+          (SELECT COUNT(*)::int FROM target_payments) AS payments,
+          (SELECT COUNT(*)::int FROM course_cycle_schedule_assignments WHERE student_id IN (SELECT id FROM target_students) OR enrollment_id IN (SELECT id FROM target_enrollments)) AS schedules,
+          (SELECT COUNT(*)::int FROM practical_sessions WHERE enrollment_id IN (SELECT id FROM target_enrollments)) AS practical_sessions
+      `)).rows[0];
+
+      await client.query(`INSERT INTO audit_logs(user_id,role,branch_id,action,entity,entity_id,metadata)
+        VALUES($1,$2,$3,'STUDENT_DELETED','students',$4,$5::jsonb)`, [
+        user.id || null,
+        user.role || 'ADMIN_SYSTEM',
+        target.branch_id,
+        target.id,
+        JSON.stringify({ identification: target.identification, name: `${target.first_name} ${target.last_name}`, before }),
+      ]);
+
+      await del('practical_evaluation_scores', `DELETE FROM practical_evaluation_scores WHERE evaluation_id IN (
+        SELECT id FROM practical_evaluations WHERE enrollment_id IN (SELECT id FROM target_enrollments))`);
+      await del('practical_session_topic_records', `DELETE FROM practical_session_topic_records WHERE practical_session_id IN (
+        SELECT id FROM practical_sessions WHERE enrollment_id IN (SELECT id FROM target_enrollments))`);
+      await del('incidents', `DELETE FROM incidents WHERE enrollment_id IN (SELECT id FROM target_enrollments)
+        OR practical_session_id IN (SELECT id FROM practical_sessions WHERE enrollment_id IN (SELECT id FROM target_enrollments))`);
+      await del('practical_evaluations', 'DELETE FROM practical_evaluations WHERE enrollment_id IN (SELECT id FROM target_enrollments)');
+      await del('practical_sessions', 'DELETE FROM practical_sessions WHERE enrollment_id IN (SELECT id FROM target_enrollments)');
+      await del('payment_correction_requests', 'DELETE FROM payment_correction_requests WHERE payment_detail_id IN (SELECT id FROM target_payment_details)');
+      await del('payment_void_requests', 'DELETE FROM payment_void_requests WHERE payment_detail_id IN (SELECT id FROM target_payment_details)');
+      await del('transfer_payment_verifications', 'DELETE FROM transfer_payment_verifications WHERE student_id IN (SELECT id FROM target_students)');
+      await del('course_cycle_schedule_assignments', `DELETE FROM course_cycle_schedule_assignments
+        WHERE student_id IN (SELECT id FROM target_students) OR enrollment_id IN (SELECT id FROM target_enrollments)`);
+      await del('course_cycle_seat_reservations', `DELETE FROM course_cycle_seat_reservations
+        WHERE student_id IN (SELECT id FROM target_students)
+           OR enrollment_id IN (SELECT id FROM target_enrollments)
+           OR referred_identification = $1`, [target.identification]);
+      await del('referred_instructor_schedule_blocks', `DELETE FROM referred_instructor_schedule_blocks
+        WHERE student_id IN (SELECT id FROM target_students) OR enrollment_id IN (SELECT id FROM target_enrollments)`);
+      await del('enrollment_instructor_assignments', 'DELETE FROM enrollment_instructor_assignments WHERE enrollment_id IN (SELECT id FROM target_enrollments)');
+      await del('additional_driving_practices', 'DELETE FROM additional_driving_practices WHERE student_id IN (SELECT id FROM target_students)');
+      await del('service_transactions', `DELETE FROM service_transactions
+        WHERE student_id IN (SELECT id FROM target_students) OR enrollment_id IN (SELECT id FROM target_enrollments)`);
+      await del('payment_details', 'DELETE FROM payment_details WHERE id IN (SELECT id FROM target_payment_details)');
+      await del('payments', 'DELETE FROM payments WHERE id IN (SELECT id FROM target_payments)');
+      await del('enrollments', 'DELETE FROM enrollments WHERE id IN (SELECT id FROM target_enrollments)');
+
+      await client.query('UPDATE users SET student_id = NULL, updated_at = NOW() WHERE id IN (SELECT id FROM target_users)');
+      await del('students', 'DELETE FROM students WHERE id IN (SELECT id FROM target_students)');
+      await del('user_permissions', 'DELETE FROM user_permissions WHERE user_id IN (SELECT id FROM target_users)');
+      await del('user_roles', 'DELETE FROM user_roles WHERE user_id IN (SELECT id FROM target_users)');
+      await del('student_users', 'DELETE FROM users WHERE id IN (SELECT id FROM target_users)');
+
+      const after = (await client.query(`
+        SELECT
+          (SELECT COUNT(*)::int FROM users) AS users,
+          (SELECT COUNT(*)::int FROM students WHERE id = $1) AS target_students
+      `, [id])).rows[0];
+      if (after.target_students !== 0) throw createError(500, 'La verificacion final encontro el estudiante eliminado');
+      if (after.users !== before.users - removed.student_users) throw createError(500, 'El conteo de usuarios cambio de forma inesperada');
+
+      await client.query('COMMIT');
+      return { student: target, before, removed, after };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /**

@@ -3009,7 +3009,8 @@ class StudentsView extends Component {
     const form=document.getElementById('student-modal-form'),button=document.getElementById('temporary-reservation-toggle');
     const preferredSelect=form?.elements.preferredInstructorId;
     if(preferredSelect&&!preferredSelect.value){
-      const preview=document.querySelector('#student-schedule-calendar .schedule-instructor-preview.available:not([hidden])');
+      const preview=[...document.querySelectorAll('#student-schedule-calendar .schedule-instructor-preview.available:not([hidden])')]
+        .find(item => item.closest('.enrollment-calendar')?.style.display !== 'none' && item.dataset.instructorId);
       const previewInstructorId=preview?.dataset.instructorId||'';
       if(previewInstructorId){
         if(![...preferredSelect.options].some(option=>option.value===previewInstructorId)){

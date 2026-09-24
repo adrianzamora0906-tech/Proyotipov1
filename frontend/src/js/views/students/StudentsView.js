@@ -591,20 +591,20 @@ class StudentsView extends Component {
 
                 <div class="form-row">
                   <div class="form-group">
-                    <label class="form-label">Email</label>
-                    <input type="email" class="form-input" name="email" placeholder="juan@example.com">
+                    <label class="form-label required">Email</label>
+                    <input type="email" class="form-input" name="email" placeholder="juan@example.com" required>
                     <div class="form-error"></div>
                   </div>
                   <div class="form-group">
-                    <label class="form-label">Teléfono</label>
-                    <input type="tel" class="form-input" name="phone" placeholder="+1234567890">
+                    <label class="form-label required">Teléfono</label>
+                    <input type="tel" class="form-input" name="phone" placeholder="+1234567890" required>
                     <div class="form-error"></div>
                   </div>
                 </div>
 
                 <div class="form-group">
-                  <label class="form-label">Dirección</label>
-                  <textarea class="form-textarea" name="address" placeholder="Calle, número, ciudad..."></textarea>
+                  <label class="form-label required">Dirección</label>
+                  <textarea class="form-textarea" name="address" placeholder="Calle, número, ciudad..." required></textarea>
                   <div class="form-error"></div>
                 </div>
 
@@ -1338,6 +1338,8 @@ class StudentsView extends Component {
     document.querySelectorAll('.additional-practice-observations-field').forEach(element => { element.hidden = isRenewal || !isAdditionalPractice; });
     document.querySelectorAll('.student-modal-step-tab').forEach(tab => { tab.hidden = isRenewal && Number(tab.dataset.step) !== 2; });
     form?.querySelectorAll('.renewal-hidden input, .renewal-hidden select, .renewal-hidden textarea').forEach(field => { field.disabled = isRenewal || isAdditionalPractice; });
+    this.setNormalCourseRequiredFields(!isRenewal && !isAdditionalPractice);
+    this.setTemporaryReservationFieldsOptional(isRenewal || this.temporaryReservationMode);
     const title = document.getElementById('student-modal-title');
     if (title) title.textContent = isRenewal ? 'Registrar renovación de licencia' : (isAdditionalPractice ? 'Registrar prácticas adicionales' : 'Nuevo Estudiante');
     document.querySelector('.student-modal-steps')?.classList.toggle('renewal-mode', isRenewal);
@@ -3022,6 +3024,7 @@ class StudentsView extends Component {
     if(!preferredSelect?.value){this.showModalAlert('error','No se encontró un instructor disponible para reservar el cupo.');return;}
     if(!form?.elements.scheduleId?.value){this.showModalAlert('error','Selecciona primero un horario disponible.');return;}
     this.temporaryReservationMode=!this.temporaryReservationMode;
+    this.setTemporaryReservationFieldsOptional(this.temporaryReservationMode);
     button?.classList.toggle('active',this.temporaryReservationMode);
     if(button)button.textContent=this.temporaryReservationMode?'Reserva temporal activada · 2 días':'Reservar este cupo por 2 días';
     const submit=document.getElementById('student-modal-submit');
@@ -3037,6 +3040,16 @@ class StudentsView extends Component {
       const input = form.querySelector(`[name="${name}"]`);
       if (input) input.required = !optional;
       input?.closest('.form-group')?.querySelector('.form-label')?.classList.toggle('required', !optional);
+    });
+  }
+
+  setNormalCourseRequiredFields(required) {
+    const form = document.getElementById('student-modal-form');
+    if (!form) return;
+    ['email', 'phone', 'address'].forEach(name => {
+      const input = form.querySelector(`[name="${name}"]`);
+      if (input) input.required = required;
+      input?.closest('.form-group')?.querySelector('.form-label')?.classList.toggle('required', required);
     });
   }
 
@@ -3701,9 +3714,16 @@ class StudentsView extends Component {
         { type: 'required', message: 'La cédula es requerida' },
         { type: 'cedula', message: 'Formato de cédula inválido' },
       ],
-      birthDate: temporaryReservation ? [] : [{ type: 'birthDate', message: 'Debes ser mayor de 16 años' }],
-      email: formData.get('email') ? [{ type: 'email', message: 'Email inválido' }] : [],
-      phone: formData.get('phone') ? [{ type: 'phone', message: 'Teléfono inválido' }] : [],
+      birthDate: temporaryReservation || renewal ? [] : [{ type: 'birthDate', message: 'Debes ser mayor de 16 años' }],
+      email: additionalPractice || renewal ? [] : [
+        { type: 'required', message: 'El email es requerido' },
+        { type: 'email', message: 'Email inválido' },
+      ],
+      phone: additionalPractice || renewal ? [] : [
+        { type: 'required', message: 'El teléfono es requerido' },
+        { type: 'phone', message: 'Teléfono inválido' },
+      ],
+      address: additionalPractice || renewal ? [] : [{ type: 'required', message: 'La dirección es requerida' }],
       bloodType: temporaryReservation || additionalPractice || renewal ? [] : [{ type: 'required', message: 'Debes seleccionar el tipo de sangre' }],
       course_id: additionalPractice || renewal ? [] : [{ type: 'required', message: 'Debes seleccionar un curso' }],
       city_id: [{ type: 'required', message: 'Debes seleccionar una ciudad' }],

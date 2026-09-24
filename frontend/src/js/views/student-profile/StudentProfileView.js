@@ -67,6 +67,7 @@ class StudentProfileView extends Component {
     } catch (error) {
       console.warn('No se pudo cargar el horario desde la API:', error.message);
     }
+    this.studentSchedule = schedule;
     const history = await StudentService.getStudentHistory(studentId);
     const pendingBalance = Math.max(0, Number(balanceInfo?.balance || 0));
     const paidAmount = Number(balanceInfo?.paid ?? totalPaid);
@@ -410,6 +411,7 @@ class StudentProfileView extends Component {
                 ` : schedule ? `
                   <div class="schedule-info">
                     ${isExamOnly ? '<div class="student-exam-schedule-heading"><span class="badge badge-info">Formaci&oacute;n intensiva</span><strong>Jornada intensiva programada</strong></div>' : ''}
+                    <div class="student-profile-schedule-heading"><strong>Pr&aacute;cticas</strong></div>
                     <div class="info-grid">
                       <div class="info-item">
                         <span class="info-label">${isExamOnly ? 'Fecha de formación intensiva' : 'Día'}</span>
@@ -428,7 +430,8 @@ class StudentProfileView extends Component {
                         <span class="info-value">${schedule.course}</span>
                       </div>
                     </div>
-                  ${isExamOnly ? '' : '<button class="btn btn-secondary mt-4" id="change-schedule-btn">Cambiar Horario</button>'}
+                    ${isExamOnly ? '' : '<button class="btn btn-secondary" id="change-schedule-btn">Cambiar pr&aacute;cticas</button>'}
+                    ${this.renderTheorySchedule(schedule.theory)}
                   </div>
                 ` : `
                   <p style="color: var(--gray-500); margin-bottom: 1rem;">No tiene horario asignado</p>
@@ -483,6 +486,34 @@ class StudentProfileView extends Component {
     const layout = await SidebarLayout.render(profileContent);
     setTimeout(() => SidebarLayout.attachEventListeners(), 0);
     return layout;
+  }
+
+  renderTheorySchedule(theory) {
+    const modalityLabels = {
+      presencial_regular: 'Presencial · lunes a viernes',
+      presencial_intensivo: Number(String(theory?.startTime || '').slice(0, 2)) >= 13
+        ? 'Intensivo · turno de tarde'
+        : 'Intensivo · turno de mañana',
+      virtual: 'Teoría virtual',
+    };
+    const modality = modalityLabels[theory?.modality] || 'Por confirmar';
+    const period = theory?.startDate && theory?.endDate
+      ? `${DateHelper.format(theory.startDate, 'DD/MM/YYYY')} al ${DateHelper.format(theory.endDate, 'DD/MM/YYYY')}`
+      : theory?.modality === 'virtual' ? 'Sin fechas presenciales' : 'Pendiente de asignación';
+    const time = theory?.startTime && theory?.endTime
+      ? `${theory.startTime}–${theory.endTime}`
+      : theory?.modality === 'virtual' ? 'Sin horario fijo' : 'Por confirmar';
+    return `
+      <section class="student-profile-theory-schedule">
+        <div class="student-profile-schedule-heading"><strong>Teor&iacute;a</strong></div>
+        <div class="info-grid">
+          <div class="info-item"><span class="info-label">Modalidad</span><span class="info-value">${modality}</span></div>
+          <div class="info-item"><span class="info-label">Fechas</span><span class="info-value">${period}</span></div>
+          <div class="info-item"><span class="info-label">Hora</span><span class="info-value">${time}</span></div>
+          <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${theory?.instructor || 'Por asignar'}</span></div>
+        </div>
+        <button type="button" class="btn btn-secondary" id="change-theory-schedule-btn">Cambiar teor&iacute;a</button>
+      </section>`;
   }
 
   async mount() {
@@ -651,6 +682,7 @@ class StudentProfileView extends Component {
     const openScheduleModal = () => this.openScheduleModal(studentId);
     document.getElementById('select-schedule-btn')?.addEventListener('click', openScheduleModal);
     document.getElementById('change-schedule-btn')?.addEventListener('click', openScheduleModal);
+    document.getElementById('change-theory-schedule-btn')?.addEventListener('click', () => this.openTheoryScheduleModal(studentId));
 
     this.updateNotificationBadge();
   }
@@ -940,8 +972,12 @@ class StudentProfileView extends Component {
         modality: current.modality || 'normal',
       });
       const today = new Date().toISOString().slice(0, 10);
+      const currentInstructorIds = new Set((current.currentAssignments || []).map(assignment => String(assignment.instructorId)));
       const cycles = (optionsResult.success ? optionsResult.data : [])
-        .filter(cycle => String(cycle.id) !== String(current.id) && cycle.startDate > current.startDate && cycle.startDate > today)
+        .filter(cycle => cycle.startDate >= current.startDate
+          && cycle.startDate >= today
+          && (String(cycle.id) !== String(current.id)
+            || (cycle.instructors || []).some(instructor => !currentInstructorIds.has(String(instructor.id)))))
         .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)));
       modal.innerHTML = `
         <div class="modal profile-reschedule-modal">
@@ -1158,6 +1194,75 @@ class StudentProfileView extends Component {
     modal.onclick = event => {
       if (event.target === modal) this.closeProfileModal(refreshOnClose);
     };
+  }
+
+  async openTheoryScheduleModal(studentId) {
+    const modal = document.getElementById('profile-action-modal');
+    if (!modal) return;
+    modal.innerHTML = '<div class="modal"><div class="modal-body">Consultando horarios de teor&iacute;a...</div></div>';
+    modal.classList.add('active');
+    try {
+      const student = this.student || {};
+      const enrollment = (student.enrollments || []).find(item => item.status === 'activo')
+        || (student.enrollments || [])[0];
+      if (!enrollment || !student.branchId) throw new Error('El estudiante no tiene una matrícula activa.');
+      const response = await ApiService.getTheoryEnrollmentOptions({
+        branch_id: student.branchId,
+        course_id: enrollment.course_id,
+      });
+      const options = response.success ? response.data || [] : [];
+      const current = this.studentSchedule?.theory || {};
+      const currentSelection = current.modality === 'presencial_intensivo'
+        ? (String(current.startTime || '').slice(0, 5) >= '13:00' ? 'presencial_intensivo_13' : 'presencial_intensivo_08')
+        : current.modality || 'por_confirmar';
+      const dateLabel = value => value ? DateHelper.format(`${String(value).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY') : '';
+      const renderOption = option => {
+        const startDate = option.full ? option.nextAvailableStartDate : option.startDate;
+        const endDate = option.full ? option.nextAvailableEndDate : option.endDate;
+        const available = Number(option.full ? option.nextAvailable : option.available);
+        return `<label class="enrollment-modality-button ${option.unavailable ? 'theory-capacity-unavailable' : ''}">
+          <input type="radio" name="profileTheoryChange" value="${escapeHtml(option.value)}"
+            ${option.value === currentSelection ? 'checked' : ''} ${option.unavailable ? 'disabled' : ''}>
+          <strong>${escapeHtml(option.value === 'presencial_regular' ? 'Presencial · lunes a viernes' : option.startTime >= '13:00' ? 'Intensivo · turno de tarde' : 'Intensivo · turno de mañana')}</strong>
+          <span>${option.unavailable ? escapeHtml(option.message || 'No disponible') : `${dateLabel(startDate)} al ${dateLabel(endDate)} · ${option.startTime}–${option.endTime} · ${available} cupos`}</span>
+        </label>`;
+      };
+      modal.innerHTML = `
+        <div class="modal profile-schedule-modal" role="dialog" aria-modal="true">
+          <div class="modal-header"><h3 class="modal-title">Cambiar horario de teor&iacute;a</h3><button class="modal-close" data-close-modal>&times;</button></div>
+          <div class="modal-body">
+            <div class="theory-schedule-selector" id="profile-theory-change-options">
+              <label class="enrollment-modality-button"><input type="radio" name="profileTheoryChange" value="por_confirmar" ${currentSelection === 'por_confirmar' ? 'checked' : ''}><strong>Por confirmar</strong><span>La modalidad se definir&aacute; despu&eacute;s</span></label>
+              ${options.map(renderOption).join('')}
+              <label class="enrollment-modality-button"><input type="radio" name="profileTheoryChange" value="virtual" ${currentSelection === 'virtual' ? 'checked' : ''}><strong>Teor&iacute;a virtual</strong><span>Sin horario fijo</span></label>
+            </div>
+            <div class="form-error" id="profile-theory-change-error"></div>
+          </div>
+          <div class="modal-footer"><button class="btn btn-secondary" data-close-modal>Cancelar</button><button class="btn btn-primary" id="confirm-profile-theory-change">Guardar teor&iacute;a</button></div>
+        </div>`;
+      this.bindProfileModalClose(modal);
+      const host = modal.querySelector('#profile-theory-change-options');
+      host.querySelectorAll('input').forEach(input => input.addEventListener('change', () => {
+        host.querySelectorAll('.enrollment-modality-button').forEach(label => label.classList.toggle('active', label.contains(input)));
+      }));
+      host.querySelector('input:checked')?.closest('.enrollment-modality-button')?.classList.add('active');
+      modal.querySelector('#confirm-profile-theory-change')?.addEventListener('click', async event => {
+        const selection = modal.querySelector('[name="profileTheoryChange"]:checked')?.value;
+        const errorHost = modal.querySelector('#profile-theory-change-error');
+        if (!selection) { errorHost.textContent = 'Selecciona un horario de teoría.'; return; }
+        try {
+          event.currentTarget.disabled = true;
+          await ApiService.changeStudentTheory(studentId, selection);
+          this.closeProfileModal(true);
+        } catch (error) {
+          event.currentTarget.disabled = false;
+          errorHost.textContent = error.message || 'No se pudo cambiar el horario de teoría.';
+        }
+      });
+    } catch (error) {
+      modal.innerHTML = `<div class="modal"><div class="modal-header"><h3 class="modal-title">Cambiar horario de teor&iacute;a</h3><button class="modal-close" data-close-modal>&times;</button></div><div class="modal-body"><div class="form-error">${escapeHtml(error.message || 'No se pudieron cargar los horarios.')}</div></div></div>`;
+      this.bindProfileModalClose(modal);
+    }
   }
 
   async openScheduleModal(studentId) {

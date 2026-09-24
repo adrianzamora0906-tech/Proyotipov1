@@ -1717,6 +1717,10 @@
   font-family: inherit;
 }
 
+.enrollment-calendar .schedule-option.enrollment-calendar-unavailable-cell {
+  background: rgba(239, 68, 68, 0.035);
+}
+
 .enrollment-calendar .schedule-option.has-exam {
   padding-top: .72rem;
 }

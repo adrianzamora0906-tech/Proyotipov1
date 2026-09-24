@@ -722,6 +722,15 @@ class CourseCycleService {
       ? await resolveIntensiveBranchId(enrollmentBranchId)
       : enrollmentBranchId;
     filters = { ...filters, branch_id: operationalBranchId };
+    const requestedReservationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      .test(String(filters.reservation_id || '')) ? String(filters.reservation_id) : null;
+    const activationReservation = requestedReservationId && filters.instructor_id
+      ? (await db.query(`SELECT id FROM course_cycle_seat_reservations
+          WHERE id=$1 AND branch_id=$2 AND instructor_id=$3 AND status='activo'
+            AND (expires_at IS NULL OR expires_at>NOW())`,
+        [requestedReservationId, operationalBranchId, filters.instructor_id])).rows[0]
+      : null;
+    const activationReservationId = activationReservation?.id || null;
     const intensiveRotation = filters.modality === 'intensivo'
       ? await this.ensureIntensiveRotation(user, filters)
       : null;
@@ -879,7 +888,9 @@ class CourseCycleService {
 
     const cycleIds = result.rows.map(row => row.id);
     const instructorRulesResult = cycleIds.length ? await db.query(`
-      SELECT DISTINCT cc.id cycle_id,member.instructor_id,priority_rule.branch_id priority_branch_id,
+      SELECT DISTINCT cc.id cycle_id,member.instructor_id,
+        TRIM(CONCAT(u.first_name,' ',u.last_name)) AS instructor_name,
+        priority_rule.branch_id priority_branch_id,
         COALESCE(priority_rule.allowed_slots,'[]'::jsonb) allowed_slots
       FROM course_cycles cc
       LEFT JOIN LATERAL (
@@ -892,6 +903,8 @@ class CourseCycleService {
             WHERE selected_igm.group_id=cc.group_id AND selected_igm.active=TRUE
               AND selected_igm.ended_at IS NULL)
       ) member ON TRUE
+      LEFT JOIN instructor_profiles ip ON ip.id=member.instructor_id
+      LEFT JOIN users u ON u.id=ip.user_id
       LEFT JOIN LATERAL (SELECT rule.branch_id,rule.allowed_slots FROM instructor_branch_priorities rule
         WHERE rule.instructor_id=member.instructor_id AND rule.assignment_type='priority' AND rule.active=TRUE
           AND rule.effective_from<=CURRENT_DATE AND (rule.effective_until IS NULL OR rule.effective_until>=CURRENT_DATE)
@@ -939,8 +952,10 @@ class CourseCycleService {
       ? (instructorRules.get(cycleIds[0]) || []).find(rule =>
         String(rule.instructor_id) === String(filters.instructor_id))
       : null;
-    const selectedInstructorShowsFullSchedule = String(selectedInstructorRule?.instructor_name || '')
+    const selectedInstructorIsBenito = String(selectedInstructorRule?.instructor_name || '')
       .trim().toLowerCase() === 'benito alonzo';
+    const fullScheduleRequested = filters.full_schedule === true || filters.full_schedule === 'true';
+    const selectedInstructorShowsFullSchedule = selectedInstructorIsBenito || fullScheduleRequested;
     const requestedStartAppliesToRow = row => Boolean(filters.practical_start_date
       && (!filters.practical_cycle_id || String(filters.practical_cycle_id) === String(row.id)));
     const practicalDatesForRow = row => {
@@ -948,7 +963,7 @@ class CourseCycleService {
       return practicalCycleDates(
         row,
         (requestedStartApplies ? filters.practical_start_date : null)
-          || (selectedInstructorShowsFullSchedule ? benitoWeeklyStartDate(row.start_date) : null),
+          || (selectedInstructorIsBenito ? benitoWeeklyStartDate(row.start_date) : null),
       );
     };
     const displayedDatesForRow = row => [...new Set([
@@ -978,10 +993,11 @@ class CourseCycleService {
       JOIN instructor_availability_overrides o
         ON o.schedule_date BETWEEN cc.start_date AND cc.end_date AND o.active=TRUE
       WHERE cc.id=ANY($1::uuid[])
+        AND ($3::uuid IS NULL OR o.reason NOT LIKE CONCAT('RESERVA_CURSO:',$3::text,':%'))
         AND (EXISTS (SELECT 1 FROM course_cycle_instructors cci WHERE cci.cycle_id=cc.id AND cci.instructor_id=o.instructor_id AND cci.active=TRUE)
           OR EXISTS (SELECT 1 FROM instructor_group_members igm WHERE igm.group_id=cc.group_id AND igm.instructor_id=o.instructor_id AND igm.active=TRUE AND igm.ended_at IS NULL)
           OR ($2::uuid IS NOT NULL AND o.instructor_id=$2::uuid))
-    `, [cycleIds, filters.instructor_id || null]) : { rows: [] };
+    `, [cycleIds, filters.instructor_id || null, activationReservationId]) : { rows: [] };
     const availabilityOverrides = new Map(availabilityOverridesResult.rows.map(item => [
       `${item.cycle_id}:${item.instructor_id}:${toDateString(item.schedule_date)}:${normalizeTime(item.start_time)}:${normalizeTime(item.end_time)}`,
       item.status,
@@ -1049,9 +1065,10 @@ class CourseCycleService {
         SELECT cycle_id, COALESCE(enrollment_id::text,id::text) seat_key
         FROM course_cycle_seat_reservations
         WHERE cycle_id=ANY($1::uuid[]) AND status='activo'
+          AND ($2::uuid IS NULL OR id<>$2::uuid)
       ) occupied_cycle_seats
       GROUP BY cycle_id
-    `,[cycleIds]) : {rows:[]};
+    `,[cycleIds, activationReservationId]) : {rows:[]};
     const cycleSeatUsage = new Map(cycleSeatUsageResult.rows.map(row=>[String(row.cycle_id),Number(row.used)]));
     const instructorBusyResult = filters.instructor_id ? await db.query(`
       SELECT schedule_date,start_time,end_time FROM course_cycle_schedule_assignments
@@ -1219,6 +1236,13 @@ class CourseCycleService {
               && normalizeTime(item.start_time) < endTime
               && normalizeTime(item.end_time) > startTime);
           });
+          const availableInstructorRulesByDate = date => eligibleRules.filter(rule => {
+            if (availabilityOverrides.has(`${row.id}:${rule.instructor_id}:${date}:${startTime}:${endTime}`)) return false;
+            return !instructorOccupancyResult.rows.some(item => String(item.instructor_id) === String(rule.instructor_id)
+              && toDateString(item.schedule_date) === date
+              && normalizeTime(item.start_time) < endTime
+              && normalizeTime(item.end_time) > startTime);
+          });
           const availableRules = availableRulesByDate(eligibleDates[0] || '');
           const resourceCapacity=(hasInstructorConflict?0:availableRules.length)*instructorCapacityUnit;
           const publishedCapacity=filters.instructor_id?Number.MAX_SAFE_INTEGER:configuredPublishedCapacity;
@@ -1242,6 +1266,8 @@ class CourseCycleService {
             return [date, {
               occupied,
               capacity: dailyCapacity,
+              availableInstructors: availableInstructorRulesByDate(date).map(rule => rule.instructor_name
+                || row.instructors?.find(instructor => String(instructor.id) === String(rule.instructor_id))?.name).filter(Boolean),
               examCount: examAppointments.get(`${date}:${startTime}`) || 0,
               // En la vista agregada "Todos" también se debe advertir que la
               // franja ya está reservada, aunque aún queden otros instructores.
@@ -1270,6 +1296,7 @@ class CourseCycleService {
       (option.slots || []).some(slot => Number(slot.available || 0) > 0));
 
     if (!selectedInstructorShowsFullSchedule) return bookableOptions;
+    if (!selectedInstructorIsBenito) return options;
 
     // Benito trabaja sobre una sola secuencia semanal, cuyo inicio base es el
     // lunes 14/09/2026. Moto ocupa cinco dias y Automovil ocho, pero los ciclos
@@ -1340,7 +1367,10 @@ class CourseCycleService {
     let branchFilter = '';
     if (user.branch_id) {
       params.push(user.branch_id);
-      branchFilter = `AND cc.branch_id = $${params.length}`;
+      branchFilter = `AND EXISTS (
+        SELECT 1 FROM branches scope_branch
+        WHERE scope_branch.id=$${params.length} AND scope_branch.city_id=b.city_id
+      )`;
     }
 
     const cycleResult = await db.query(`
@@ -1760,29 +1790,13 @@ class CourseCycleService {
       if (timeSet.size > 2) {
         throw createError(409, 'En horario rotativo solo puedes escoger maximo dos horas distintas');
       }
-      const orderedDates = [...selectionsByDate.keys()].sort((left, right) => left.localeCompare(right));
-      const doubledDates = orderedDates.filter(date => selectionsByDate.get(date).length === 2);
+      const doubledDates = [...selectionsByDate.keys()]
+        .filter(date => selectionsByDate.get(date).length === 2);
       if (doubledDates.length > 4) {
         throw createError(409, 'Solo puedes doblar horas en un maximo de cuatro dias');
       }
-      const doubledPositions = doubledDates.map(date => orderedDates.indexOf(date));
-      if (doubledPositions.some((position, index) => index > 0 && position !== doubledPositions[index - 1] + 1)) {
-        throw createError(409, 'Los dias con horario doble deben ser consecutivos y no pueden alternarse');
-      }
       for (const daySelections of selectionsByDate.values()) {
         if (daySelections.length > 2) throw createError(409, 'Solo puedes escoger dos bloques por dia');
-        if (daySelections.length === 2) {
-          const first = parseTimeRange(daySelections[0].time);
-          const second = parseTimeRange(daySelections[1].time);
-          const orderedSlots = NORMAL_PRACTICAL_SLOTS.map(([start, end]) => `${start}-${end}`);
-          const indexes = [
-            orderedSlots.indexOf(`${first.startTime}-${first.endTime}`),
-            orderedSlots.indexOf(`${second.startTime}-${second.endTime}`),
-          ];
-          if (indexes.includes(-1) || Math.abs(indexes[0] - indexes[1]) !== 1) {
-            throw createError(409, 'Para doblar horas, los dos bloques del dia deben ser consecutivos');
-          }
-        }
       }
     }
     if (!schedulePlan.rotation && timeSet.size !== 1) {
@@ -1816,7 +1830,7 @@ class CourseCycleService {
       const cycle = cycleResult.rows[0];
       if (rescheduleFromCycleId) {
         const sourceResult = await client.query(`
-          SELECT source.id,source.branch_id,source.course_id,source.start_date
+          SELECT source.id,source.branch_id,source.course_id,source.start_date,assignment.instructor_id
           FROM course_cycle_schedule_assignments assignment
           JOIN course_cycles source ON source.id=assignment.cycle_id
           WHERE assignment.student_id=$1 AND assignment.cycle_id=$2::uuid
@@ -1828,10 +1842,12 @@ class CourseCycleService {
         if (toDateString(source.start_date) <= toDateString(new Date())) {
           throw createError(409, 'No se puede reagendar porque el curso ya inició');
         }
-        if (String(source.id) === String(cycle.id)
+        const sameCycle = String(source.id) === String(cycle.id);
+        const sameInstructor = preferredInstructorId && String(source.instructor_id) === String(preferredInstructorId);
+        if ((sameCycle && (!preferredInstructorId || sameInstructor))
           || String(source.branch_id) !== String(cycle.branch_id)
           || String(source.course_id) !== String(cycle.course_id)
-          || toDateString(cycle.start_date) <= toDateString(source.start_date)) {
+          || (!sameCycle && toDateString(cycle.start_date) <= toDateString(source.start_date))) {
           throw createError(422, 'Selecciona otro curso próximo de la misma sucursal y tipo de curso');
         }
       }
@@ -1890,11 +1906,21 @@ class CourseCycleService {
                 AND priority.assignment_type='priority' AND priority.active=TRUE
                 AND priority.effective_from<=CURRENT_DATE
                 AND (priority.effective_until IS NULL OR priority.effective_until>=CURRENT_DATE)) AS priority_in_branch
-          FROM course_cycle_instructors cci
-          JOIN course_cycles cc ON cc.id=cci.cycle_id
-          JOIN instructor_profiles ip ON ip.id=cci.instructor_id
+          FROM course_cycles cc
+          JOIN instructor_profiles ip ON ip.id=$2::uuid
           JOIN users u ON u.id=ip.user_id
-          WHERE cci.cycle_id=$1 AND cci.instructor_id=$2::uuid AND cci.active=TRUE
+          WHERE cc.id=$1
+            AND (
+              EXISTS (
+                SELECT 1 FROM course_cycle_instructors cci
+                WHERE cci.cycle_id=cc.id AND cci.instructor_id=ip.id AND cci.active=TRUE
+              )
+              OR EXISTS (
+                SELECT 1 FROM instructor_group_members igm
+                WHERE igm.group_id=cc.group_id AND igm.instructor_id=ip.id
+                  AND igm.active=TRUE AND igm.ended_at IS NULL
+              )
+            )
             AND ip.status='activo' AND ip.deleted_at IS NULL AND u.active=TRUE
           LIMIT 1
         `,[cycleId,preferredInstructorId]);
@@ -1922,8 +1948,8 @@ class CourseCycleService {
             'Solo examen práctico']);
         const appointment = (await client.query(`INSERT INTO practical_sessions
           (enrollment_id,instructor_id,branch_id,scheduled_start,scheduled_end,session_number,status,observations,appointment_type,created_by)
-          VALUES($1,$2,$3,$4::date+$5::time,$4::date+$5::time+INTERVAL '40 minutes',1,'PROGRAMADA',
-            'Examen práctico; el bloque es referencial y no consume cupo de clase','EXAM_ONLY',$6) RETURNING *`,
+          VALUES($1,$2,$3,$4::date+$5::time,$4::date+$5::time+INTERVAL '20 minutes',1,'PROGRAMADA',
+            'Examen práctico en los 20 minutos posteriores a la clase; no consume cupo de clase','EXAM_ONLY',$6) RETURNING *`,
         [enrollment.id,instructor.id,cycle.branch_id,selection.date,startTime,user.id])).rows[0];
         await client.query('INSERT INTO history(student_id,action) VALUES($1,$2)',[studentId,
           `Solo examen práctico asignado con ${instructor.first_name} ${instructor.last_name} el ${selection.date} a las ${startTime}`]);

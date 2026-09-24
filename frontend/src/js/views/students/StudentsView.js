@@ -1277,7 +1277,8 @@ class StudentsView extends Component {
   }
 
   async toggleInstructorAvailabilityStart() {
-    // Simplemente toggle el estado para mostrar/ocultar la disponibilidad
+    // Este control amplía el calendario sin cambiar la fecha real del curso.
+    // Las celdas ocupadas solo se habilitan al escoger la modalidad Solo examen.
     this.useInstructorFirstAvailability = !this.useInstructorFirstAvailability;
     
     const instructorId = this.scheduleInstructorFilterId || document.getElementById('preferred-instructor-select')?.value;
@@ -1288,32 +1289,7 @@ class StudentsView extends Component {
       return;
     }
     
-    const toggle = document.getElementById('advanced-practical-start-enabled');
-    const dateInput = document.getElementById('practical-start-date');
-    
-    if (!this.useInstructorFirstAvailability) {
-      this.instructorFirstAvailabilityDate = null;
-      if (toggle) toggle.checked = false;
-      if (dateInput) dateInput.value = '';
-      await this.reloadModalSchedules(branchId, instructorId, null);
-      return;
-    }
-    
-    const availability = await this.prepareInstructorAvailabilityWindow(instructorId);
-    if (!availability?.available) {
-      this.useInstructorFirstAvailability = false;
-      this.instructorFirstAvailabilityDate = null;
-      if (toggle) toggle.checked = false;
-      if (dateInput) dateInput.value = '';
-      const error = document.getElementById('schedule-error');
-      if (error) error.textContent = 'Este instructor no tiene una fecha libre anterior al inicio oficial del curso.';
-      await this.reloadModalSchedules(branchId, instructorId, null);
-      return;
-    }
-    this.instructorFirstAvailabilityDate = availability?.date || null;
-    if (toggle) toggle.checked = Boolean(availability?.date);
-    if (dateInput) dateInput.value = availability?.date || '';
-    await this.reloadModalSchedules(branchId, instructorId, availability?.date || null);
+    await this.reloadModalSchedules(branchId, instructorId, null);
   }
 
   async toggleAdditionalPracticeMode(enabled) {
@@ -1586,21 +1562,6 @@ class StudentsView extends Component {
     const capacity = Number(dateCapacity.capacity ?? schedule.capacity);
     const examCount = Number(dateCapacity.examCount || 0);
     const disabled = available <= 0;
-    if (disabled && schedule.fullNormalSchedule) {
-      const occupied = Number(dateCapacity.occupied || 0) > 0
-        || dateCapacity.status === 'reserved';
-      const statusLabel = occupied ? 'Ocupado' : 'No disponible';
-      return `
-        <div class="enrollment-calendar-unavailable-cell" data-day-index="${schedule.dayIndex ?? ''}" aria-label="${statusLabel}">
-          <span class="schedule-option-status ${occupied ? 'reserved' : 'full'}">${statusLabel}</span>
-          <span class="schedule-option-capacity">0 cupos disponibles</span>
-        </div>
-      `;
-    }
-    // En el registro solo se presentan opciones utilizables. Las horas sin
-    // cupo permanecen fuera de la vista para reducir ruido y errores.
-    if (disabled) return `<div class="enrollment-calendar-empty-cell" data-day-index="${schedule.dayIndex ?? ''}" aria-label="Horario no disponible"></div>`;
-    const normalDisabled = normalAvailable <= 0;
     const courseKey = this.getScheduleCourseKey(schedule.course);
     const schedulePayload = JSON.stringify({
       id: schedule.id,
@@ -1613,6 +1574,32 @@ class StudentsView extends Component {
       practicalStartDate: schedule.practicalStartDate,
       instructorBaseStart: schedule.instructorBaseStart,
     }).replace(/"/g, '&quot;');
+    if (disabled && schedule.fullNormalSchedule) {
+      const occupied = Number(dateCapacity.occupied || 0) > 0
+        || dateCapacity.status === 'reserved';
+      const statusLabel = occupied ? 'Ocupado' : 'No disponible';
+      return `
+        <button type="button"
+          class="schedule-option enrollment-calendar-unavailable-cell disabled"
+          data-course="${courseKey}"
+          data-schedule="${schedulePayload}"
+          data-schedule-id="${schedule.id}"
+          data-time="${schedule.time}"
+          data-date="${schedule.date || ''}"
+          data-day-index="${schedule.dayIndex ?? ''}"
+          data-normal-available="0"
+          data-daily-available="0"
+          data-normal-disabled="true"
+          aria-disabled="true" aria-label="${statusLabel}">
+          <span class="schedule-option-status ${occupied ? 'reserved' : 'full'}">${statusLabel}</span>
+          <span class="schedule-option-capacity">0 cupos disponibles</span>
+        </button>
+      `;
+    }
+    // En el registro solo se presentan opciones utilizables. Las horas sin
+    // cupo permanecen fuera de la vista para reducir ruido y errores.
+    if (disabled) return `<div class="enrollment-calendar-empty-cell" data-day-index="${schedule.dayIndex ?? ''}" aria-label="Horario no disponible"></div>`;
+    const normalDisabled = normalAvailable <= 0;
     return `
       <button type="button"
         class="schedule-option ${examCount ? 'has-exam' : ''} ${normalDisabled ? 'normal-slot-unavailable' : ''}"
@@ -1790,7 +1777,7 @@ class StudentsView extends Component {
               ${cycle.instructors.map((instructor, index) => `<button type="button" class="course-instructor-chip ${(String(this.scheduleInstructorFilterId || '') === String(instructor.id) || (!cycle.instructors.some(item => String(item.id) === String(this.scheduleInstructorFilterId || '')) && index === 0)) ? 'active' : ''}" data-course-instructor-id="${escapeHtml(instructor.id)}"${instructor.home_branch ? ` title="${escapeHtml(instructor.home_branch.trim())}"` : ''}>${escapeHtml(instructor.name)}</button>`).join('')}
               <button type="button" class="instructor-availability-start-toggle ${this.useInstructorFirstAvailability ? 'active' : ''}" data-instructor-availability-toggle aria-pressed="${Boolean(this.useInstructorFirstAvailability)}">
                 <span class="instructor-availability-dot"></span>
-                ${this.useInstructorFirstAvailability ? `Desde disponibilidad${this.instructorFirstAvailabilityDate ? ` · ${DateHelper.format(this.instructorFirstAvailabilityDate, 'DD/MM/YYYY')}` : ''}` : 'Cuando inicia el curso'}
+                ${this.useInstructorFirstAvailability ? 'Ocultar horario completo' : 'Ver horario completo'}
               </button>
             </div>
           </div>
@@ -2041,6 +2028,7 @@ class StudentsView extends Component {
       const branchFilter = {
         ...(branchId ? { branch_id: branchId } : {}),
         ...(instructorId ? { instructor_id: instructorId } : {}),
+        ...(instructorId && this.useInstructorFirstAvailability ? { full_schedule: 'true' } : {}),
         ...(practicalStartDate ? { practical_start_date: practicalStartDate } : {}),
         ...(practicalCycleId ? { practical_cycle_id: practicalCycleId } : {}),
       };
@@ -2086,6 +2074,7 @@ class StudentsView extends Component {
     try {
     const forceAllSchedulesRefresh = Boolean(options.forceAllSchedulesRefresh);
     const selectedPracticalCycleId = options.practicalCycleId || null;
+    const activationReservationId = options.reservationId || this.activatingReservation?.id || null;
     let selectedInstructorId = instructorId ?? document.getElementById('preferred-instructor-select')?.value ?? null;
     let shouldFilterByInstructor = Boolean(selectedInstructorId);
     const advancedEnabled = document.getElementById('advanced-practical-start-enabled')?.checked;
@@ -2105,6 +2094,8 @@ class StudentsView extends Component {
         vehicle_type: selectedCourse,
         modality: selectedModality,
         instructor_id: selectedInstructorId,
+        ...(activationReservationId ? { reservation_id: activationReservationId } : {}),
+        ...(this.useInstructorFirstAvailability ? { full_schedule: 'true' } : {}),
         ...(selectedPracticalStart ? { practical_start_date: selectedPracticalStart } : {}),
         ...(selectedPracticalCycleId ? { practical_cycle_id: selectedPracticalCycleId } : {}),
       });
@@ -2123,8 +2114,12 @@ class StudentsView extends Component {
         && Number(schedule.available || 0) > 0);
       selectedInstructorId = firstCycleSchedule?.instructors?.[0]?.id || null;
       const preferredSelect = document.getElementById('preferred-instructor-select');
-      if (preferredSelect && selectedInstructorId
-        && [...preferredSelect.options].some(option => option.value === String(selectedInstructorId))) {
+      if (preferredSelect && selectedInstructorId) {
+        const instructorRecord = firstCycleSchedule?.instructors?.find(instructor =>
+          String(instructor.id) === String(selectedInstructorId));
+        if (![...preferredSelect.options].some(option => option.value === String(selectedInstructorId))) {
+          preferredSelect.add(new Option(instructorRecord?.name || 'Instructor seleccionado', String(selectedInstructorId)));
+        }
         preferredSelect.value = String(selectedInstructorId);
       }
       // Si el primer instructor queda seleccionado automáticamente, consultar
@@ -2136,6 +2131,7 @@ class StudentsView extends Component {
           vehicle_type: selectedCourse,
           modality: selectedModality,
           instructor_id: selectedInstructorId,
+          ...(activationReservationId ? { reservation_id: activationReservationId } : {}),
           ...(selectedPracticalStart ? { practical_start_date: selectedPracticalStart } : {}),
           ...(selectedPracticalCycleId ? { practical_cycle_id: selectedPracticalCycleId } : {}),
         });
@@ -2215,8 +2211,8 @@ class StudentsView extends Component {
         button.classList.toggle('active', enabled);
         button.setAttribute('aria-pressed', String(enabled));
         button.innerHTML = `<span class="instructor-availability-dot"></span>${enabled
-          ? `Desde disponibilidad${this.instructorFirstAvailabilityDate ? ` · ${DateHelper.format(this.instructorFirstAvailabilityDate, 'DD/MM/YYYY')}` : ''}`
-          : 'Cuando inicia el curso'}`;
+          ? 'Ocultar horario completo'
+          : 'Ver horario completo'}`;
       });
     } else {
       // Si cambia la estructura real de los cursos, se reconstruye únicamente
@@ -2307,7 +2303,7 @@ class StudentsView extends Component {
       '<label class="enrollment-modality-button active"><input type="radio" name="theorySchedule" value="por_confirmar" checked><strong>Por confirmar</strong><span>La modalidad de teor&iacute;a se definir&aacute; despu&eacute;s</span></label>',
     ];
     const groups=this.modalTheoryGroups||[];
-    const renderGroup=(value,title,fallback)=>{const group=groups.find(item=>item.value===value),shortDate=value=>String(value||'').split('-').reverse().join('/'),rangeStart=group?.startDate||group?.nextAvailableStartDate,rangeEnd=group?.endDate||group?.nextAvailableEndDate,dateRange=rangeStart&&rangeEnd?`Inicio: ${shortDate(rangeStart)} · fin: ${shortDate(rangeEnd)}`:'';const full=Boolean(group?.full),available=Number(group?.available);const detail=group?.unavailable?(group.message||'No configurado'):group?(full?`Sin cupos · próximo ${dateRange||shortDate(group.nextAvailableStartDate)}`:`${dateRange}${dateRange?' · ':''}${group.startTime}–${group.endTime} · ${group.available} cupos`):fallback;const capacityClass=group?.unavailable?'theory-capacity-unavailable':available>20?'theory-capacity-green':available>=5?'theory-capacity-yellow':'theory-capacity-red';return `<label class="enrollment-modality-button ${capacityClass} ${full?'theory-option-full':''}"><input type="radio" name="theorySchedule" value="${value}" ${group?.unavailable?'disabled':''}><strong>${title}</strong><span>${detail}</span></label>`;};
+    const renderGroup=(value,title,fallback)=>{const group=groups.find(item=>item.value===value),shortDate=value=>String(value||'').split('-').reverse().join('/'),full=Boolean(group?.full),rangeStart=full?group?.nextAvailableStartDate:group?.startDate,rangeEnd=full?group?.nextAvailableEndDate:group?.endDate,dateRange=rangeStart&&rangeEnd?`Inicio: ${shortDate(rangeStart)} · fin: ${shortDate(rangeEnd)}`:'';const available=Number(full?group?.nextAvailable:group?.available);const detail=group?.unavailable?(group.message||'No configurado'):group?`${full?'Próximo · ':''}${dateRange}${dateRange?' · ':''}${group.startTime}–${group.endTime} · ${available} cupos`:fallback;const capacityClass=group?.unavailable?'theory-capacity-unavailable':available>20?'theory-capacity-green':available>=5?'theory-capacity-yellow':'theory-capacity-red';return `<label class="enrollment-modality-button ${capacityClass}"><input type="radio" name="theorySchedule" value="${value}" ${group?.unavailable?'disabled':''}><strong>${title}</strong><span>${detail}</span></label>`;};
     if(options.regular!==false)items.push(renderGroup('presencial_regular','Presencial · lunes a viernes','18:00 a 20:00 · 5 días'));
     if(options.saturday!==false){items.push(renderGroup('presencial_intensivo_08','Intensivo · turno de mañana','08:00 a 12:30 · 2 sábados'));items.push(renderGroup('presencial_intensivo_13','Intensivo · turno de tarde','13:00 a 17:30 · 2 sábados'));}
     if(options.virtual!==false)items.push('<label class="enrollment-modality-button"><input type="radio" name="theorySchedule" value="virtual"><strong>Teoría virtual</strong><span>Sin horario fijo</span></label>');
@@ -2685,7 +2681,9 @@ class StudentsView extends Component {
     if (instructor && [...instructor.options].some(item => item.value === reservation.instructor_id)) {
       instructor.value = reservation.instructor_id;
       this.scheduleInstructorFilterId = reservation.instructor_id;
-      await this.reloadModalSchedules(reservation.branch_id, reservation.instructor_id);
+      await this.reloadModalSchedules(reservation.branch_id, reservation.instructor_id, null, {
+        reservationId: reservation.id,
+      });
     }
     this.selectReservedSchedule(reservation);
     if(draft.theorySchedule){const theory=form.querySelector(`[name="theorySchedule"][value="${draft.theorySchedule}"]`);if(theory)theory.checked=true;}
@@ -3240,18 +3238,22 @@ class StudentsView extends Component {
     if (instructor) instructor.required = examOnly;
     const instructorLabel = document.getElementById('preferred-instructor-label');
     if (instructorLabel) instructorLabel.innerHTML = examOnly
-      ? 'Instructor de formación intensiva <span aria-hidden="true">*</span>'
+      ? 'Instructor para Solo examen <span aria-hidden="true">*</span>'
       : 'Instructor solicitado <small>(opcional)</small>';
     const instructorHelp = document.getElementById('practice-instructor-help');
     if (instructorHelp) instructorHelp.textContent = examOnly
-      ? 'Para la formación intensiva es obligatorio seleccionar el instructor.'
+      ? 'Para Solo examen es obligatorio seleccionar el instructor.'
       : 'Puedes elegirlo o dejar que el sistema lo asigne.';
     const scheduleHelp = document.getElementById('practice-schedule-help');
     if (scheduleHelp) scheduleHelp.textContent = examOnly
-      ? 'Selecciona una sola celda para la formación intensiva, incluso si el bloque ya tiene una clase.'
+      ? 'Selecciona una sola celda para Solo examen, incluso si el bloque ya tiene una clase.'
       : 'Selecciona una hora disponible en el curso correspondiente.';
     document.querySelectorAll('.schedule-option').forEach(option => {
-      option.disabled = !examOnly && option.dataset.normalDisabled === 'true';
+      const blockedForClass = option.dataset.normalDisabled === 'true';
+      const isFullScheduleCell = option.classList.contains('enrollment-calendar-unavailable-cell');
+      option.disabled = !examOnly && blockedForClass && !isFullScheduleCell;
+      option.classList.toggle('disabled', !examOnly && blockedForClass);
+      option.setAttribute('aria-disabled', String(!examOnly && blockedForClass));
       option.classList.toggle('exam-selectable', examOnly);
     });
     document.querySelectorAll('.schedule-rotation-toggle').forEach(toggle => {
@@ -3410,15 +3412,20 @@ class StudentsView extends Component {
   syncRotationState(calendar) {
     if (!calendar) return;
     const enabled = this.isRotationEnabled(calendar);
+    const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';
     calendar.classList.toggle('rotation-enabled', enabled);
     const message = calendar.querySelector('.schedule-rotation-message');
     if (message) message.hidden = !enabled;
     calendar.querySelectorAll('.schedule-option').forEach(option => {
       const normalDisabled = option.dataset.normalDisabled === 'true';
       const available = Number(enabled ? option.dataset.dailyAvailable : option.dataset.normalAvailable);
-      option.disabled = !enabled && normalDisabled;
-      option.classList.toggle('normal-slot-unavailable', !enabled && normalDisabled);
-      option.setAttribute('aria-hidden', String(!enabled && normalDisabled));
+      const isFullScheduleCell = option.classList.contains('enrollment-calendar-unavailable-cell');
+      const blockedForClass = !enabled && normalDisabled;
+      option.disabled = blockedForClass && !examOnly && !isFullScheduleCell;
+      option.classList.toggle('disabled', blockedForClass && !examOnly);
+      option.classList.toggle('normal-slot-unavailable', blockedForClass && !examOnly && !isFullScheduleCell);
+      option.setAttribute('aria-disabled', String(blockedForClass && !examOnly));
+      option.setAttribute('aria-hidden', String(blockedForClass && !examOnly && !isFullScheduleCell));
       const capacity = option.querySelector('.schedule-option-capacity');
       if (capacity) capacity.textContent = `${available} ${available === 1 ? 'cupo disponible' : 'cupos disponibles'}`;
     });
@@ -3489,7 +3496,7 @@ class StudentsView extends Component {
     let title = 'Aún no has elegido un horario';
     if (plan.length) {
       title = examOnly
-        ? `Curso de formación intensiva · ${plan[0]?.date || ''} · ${plan[0]?.time || ''}`
+        ? `Solo examen · ${plan[0]?.date || ''} · ${plan[0]?.time || ''}`
         : `${plan.length} ${plan.length === 1 ? 'clase seleccionada' : 'clases seleccionadas'}${plan[0]?.time ? ` · ${plan[0].time}` : ''}`;
     }
     summary.classList.toggle('is-empty', plan.length === 0);
@@ -3520,10 +3527,25 @@ class StudentsView extends Component {
     }
 
     const preferredSelect = document.getElementById('preferred-instructor-select');
-    const preferredInstructorId = preferredSelect?.value || null;
-    const preferredName = preferredInstructorId
-      ? preferredSelect.selectedOptions?.[0]?.textContent?.trim()
-      : '';
+    const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';
+    const activeInstructorButton = [...document.querySelectorAll('#student-schedule-calendar [data-course-instructor-id].active')]
+      .find(button => button.closest('.enrollment-calendar')?.style.display !== 'none');
+    const preferredInstructorId = examOnly
+      ? activeInstructorButton?.dataset.courseInstructorId || this.scheduleInstructorFilterId || preferredSelect?.value || null
+      : preferredSelect?.value || null;
+    const preferredName = examOnly
+      ? activeInstructorButton?.textContent?.trim() || preferredSelect?.selectedOptions?.[0]?.textContent?.trim() || ''
+      : preferredInstructorId
+        ? preferredSelect.selectedOptions?.[0]?.textContent?.trim()
+        : '';
+    if (examOnly && preferredInstructorId) {
+      preview.hidden = false;
+      preview.className = 'schedule-instructor-preview available';
+      preview.dataset.instructorId = preferredInstructorId;
+      preview.dataset.instructorName = preferredName || 'Instructor seleccionado';
+      preview.innerHTML = `<span>Instructor para Solo examen</span><strong>${escapeHtml(preferredName || 'Instructor seleccionado')}</strong><small>Se conservar&aacute; exactamente este instructor al completar el registro.</small>`;
+      return;
+    }
     const isReservedInstructor = this.activatingReservation
       && String(preferredInstructorId || '') === String(this.activatingReservation.instructor_id || '');
     if (isReservedInstructor && preferredName) {
@@ -3762,7 +3784,12 @@ class StudentsView extends Component {
     const scheduleId = formData.get('scheduleId');
     const schedulePlan = this.parseSchedulePlan(formData.get('schedulePlan'));
     const theorySchedule = formData.get('theorySchedule');
-    const preferredInstructorId = formData.get('preferredInstructorId') || null;
+    const examOnly = formData.get('practicalMode') === 'exam_only';
+    const activeInstructorButton = [...document.querySelectorAll('#student-schedule-calendar [data-course-instructor-id].active')]
+      .find(button => button.closest('.enrollment-calendar')?.style.display !== 'none');
+    const preferredInstructorId = examOnly
+      ? activeInstructorButton?.dataset.courseInstructorId || this.scheduleInstructorFilterId || formData.get('preferredInstructorId') || null
+      : formData.get('preferredInstructorId') || this.scheduleInstructorFilterId || null;
     const advancedPracticalStartEnabled = formData.get('advancedPracticalStartEnabled') === 'on';
     const practicalStartDate = advancedPracticalStartEnabled ? String(formData.get('practicalStartDate') || '') : '';
     if (advancedPracticalStartEnabled && !practicalStartDate) {
@@ -3774,7 +3801,6 @@ class StudentsView extends Component {
     }
     const activeCalendar = [...document.querySelectorAll('.enrollment-calendar')]
       .find(calendar => calendar.style.display !== 'none');
-    const examOnly = formData.get('practicalMode') === 'exam_only';
     const requiredClasses = examOnly ? 1 : Number(activeCalendar?.dataset.requiredClasses || activeCalendar?.dataset.dayCount || 8);
     const rotationEnabled = Boolean(schedulePlan.rotation) && !examOnly;
     const minimumClasses = rotationEnabled ? Math.ceil(requiredClasses / 2) : requiredClasses;
@@ -3784,7 +3810,7 @@ class StudentsView extends Component {
     if (invalidSelectionCount) {
       const scheduleError = document.getElementById('schedule-error');
       const message = examOnly
-        ? 'Para formación intensiva debes seleccionar una única fecha y horario.'
+        ? 'Para Solo examen debes seleccionar una única fecha y horario.'
         : rotationEnabled
           ? `En horario rotativo debes seleccionar entre ${minimumClasses} y ${requiredClasses} clases prácticas.`
           : `Debes seleccionar exactamente ${requiredClasses} clases prácticas en total.`;
@@ -3797,8 +3823,8 @@ class StudentsView extends Component {
     const availableSchedules = await this.getSchedulesForModal(selectedBranchId, preferredInstructorId, practicalStartDate || null);
     if (examOnly && !preferredInstructorId) {
       const scheduleError = document.getElementById('schedule-error');
-      if (scheduleError) scheduleError.textContent = 'Selecciona el instructor de la formación intensiva.';
-      this.showModalAlert('error', 'Selecciona el instructor de la formación intensiva.');
+      if (scheduleError) scheduleError.textContent = 'Selecciona el instructor para Solo examen.';
+      this.showModalAlert('error', 'Selecciona el instructor para Solo examen.');
       this.goToModalStep(1);
       return;
     }

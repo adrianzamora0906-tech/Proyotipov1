@@ -299,6 +299,10 @@ class ApiService {
     return apiClient.get(`/course-cycles/theory-options${qs ? '?' + qs : ''}`);
   }
 
+  static async changeStudentTheory(studentId, selection) {
+    return apiClient.post(`/course-cycles/student/${studentId}/theory`, { selection });
+  }
+
   static async getInstructorFirstAvailability(params = {}) {
     const qs = new URLSearchParams(params).toString();
     return apiClient.get(`/course-cycles/instructor-first-availability?${qs}`);

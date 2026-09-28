@@ -4,6 +4,93 @@ const ReferralCampaignService = require('./ReferralCampaignService');
 const { createError } = require('../middleware/errorHandler');
 
 class StudentService {
+  static async getBranchAdminAttendance(studentId, user, lock = false, client = db) {
+    const branchAdmin = await client.query(`SELECT ur.branch_id FROM user_roles ur
+      JOIN roles r ON r.id=ur.role_id AND r.code='BRANCH_ADMIN'
+      WHERE ur.user_id=$1 AND ur.branch_id=$2 AND ur.active=TRUE
+        AND (ur.valid_from IS NULL OR ur.valid_from<=NOW())
+        AND (ur.valid_until IS NULL OR ur.valid_until>NOW()) LIMIT 1`, [user.id,user.branch_id]);
+    if (!branchAdmin.rows.length) throw createError(403, 'Solo el Administrador de Sucursal puede registrar esta asistencia');
+    const branchId = branchAdmin.rows[0].branch_id;
+    const result = await client.query(`SELECT assignment.id assignment_id,assignment.enrollment_id,
+        assignment.instructor_id,e.branch_id,assignment.schedule_date+assignment.start_time scheduled_start,
+        assignment.schedule_date+assignment.end_time scheduled_end,ps.id session_id,ps.status session_status,
+        ps.attendance_status,ps.actual_start,ps.actual_end,
+        TRIM(CONCAT(iu.first_name,' ',iu.last_name)) instructor_name
+      FROM course_cycle_schedule_assignments assignment
+      JOIN enrollments e ON e.id=assignment.enrollment_id AND e.student_id=$1
+      LEFT JOIN instructor_profiles ip ON ip.id=assignment.instructor_id
+      LEFT JOIN users iu ON iu.id=ip.user_id
+      LEFT JOIN practical_sessions ps ON ps.enrollment_id=assignment.enrollment_id
+        AND ps.instructor_id=assignment.instructor_id
+        AND ps.scheduled_start=assignment.schedule_date+assignment.start_time
+        AND ps.deleted_at IS NULL
+      WHERE assignment.status='activo' AND e.branch_id=$2
+        AND assignment.schedule_date=(NOW() AT TIME ZONE 'America/Guayaquil')::date
+      ORDER BY assignment.start_time LIMIT 1 ${lock ? 'FOR UPDATE OF assignment' : ''}`, [studentId, branchId]);
+    if (!result.rows.length) return { hasClass: false, canRegister: false, message: 'El estudiante no tiene una clase programada hoy' };
+    const row = result.rows[0];
+    const now = new Date();
+    const sessionStatus = String(row.session_status || '').toUpperCase();
+    const hasEntry = Boolean(row.actual_start) || ['asistio','asistió','presente'].includes(String(row.attendance_status || '').toLowerCase())
+      || ['EN_CURSO','COMPLETADA'].includes(sessionStatus);
+    const hasExit = Boolean(row.actual_end) || sessionStatus === 'COMPLETADA';
+    const phase = hasEntry && !hasExit ? 'EXIT' : 'ENTRY';
+    const entryWindowEnd = new Date(row.scheduled_end);
+    const exitWindowEnd = new Date(entryWindowEnd.getTime() + 30 * 60 * 1000);
+    const attendanceWindowStart = new Date(new Date(row.scheduled_start).getTime() - 10 * 60 * 1000);
+    const withinWindow = attendanceWindowStart <= now && now <= (phase === 'EXIT' ? exitWindowEnd : entryWindowEnd);
+    const completed = hasEntry && hasExit;
+    return { hasClass: true, canRegister: withinWindow && !completed, phase,
+      hasEntry, hasExit, completed, sessionId: row.session_id, assignmentId: row.assignment_id,
+      enrollmentId: row.enrollment_id, instructorId: row.instructor_id, branchId: row.branch_id,
+      instructor: row.instructor_name, scheduledStart: row.scheduled_start, scheduledEnd: row.scheduled_end,
+      message: completed ? 'La entrada y salida ya fueron registradas' : withinWindow
+        ? `La ${phase === 'EXIT' ? 'salida' : 'entrada'} puede registrarse ahora`
+        : `La ${phase === 'EXIT' ? 'salida' : 'entrada'} se habilita durante el horario permitido` };
+  }
+
+  static async registerBranchAdminAttendance(studentId, user) {
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
+      const attendance = await this.getBranchAdminAttendance(studentId, user, true, client);
+      if (!attendance.hasClass || !attendance.canRegister) throw createError(409, attendance.message);
+      const phase = String(attendance.phase || 'ENTRY').toUpperCase();
+      let session;
+      if (phase === 'EXIT') {
+        session = (await client.query(`UPDATE practical_sessions SET status='COMPLETADA',actual_end=NOW(),
+          attendance_status=COALESCE(attendance_status,'Asistio'),updated_at=NOW()
+          WHERE id=$1 AND status='EN_CURSO' AND actual_end IS NULL RETURNING *`, [attendance.sessionId])).rows[0];
+      } else if (attendance.sessionId) {
+        session = (await client.query(`UPDATE practical_sessions SET status='EN_CURSO',
+          actual_start=COALESCE(actual_start,NOW()),attendance_status='Asistio',updated_at=NOW()
+          WHERE id=$1 AND status IN('PROGRAMADA','PROXIMA') RETURNING *`, [attendance.sessionId])).rows[0];
+      } else {
+        session = (await client.query(`INSERT INTO practical_sessions
+          (enrollment_id,instructor_id,branch_id,scheduled_start,scheduled_end,actual_start,
+           session_number,status,attendance_status,observations,created_by)
+          SELECT $1,$2,$3,$4,$5,NOW(),COUNT(*)+1,'EN_CURSO','Asistio',
+            'Asistencia registrada por Administrador de Sucursal',$6
+          FROM practical_sessions WHERE enrollment_id=$1
+          RETURNING *`, [attendance.enrollmentId, attendance.instructorId, attendance.branchId,
+          attendance.scheduledStart, attendance.scheduledEnd, user.id])).rows[0];
+      }
+      if (!session) throw createError(409, 'La clase cambió de estado; actualiza el expediente e intenta nuevamente');
+      await client.query('INSERT INTO history(student_id,action) VALUES($1,$2)', [studentId,
+        `${phase === 'EXIT' ? 'Salida' : 'Entrada'} registrada por Administrador de Sucursal (${user.name || user.username || 'usuario'})`]);
+      await client.query(`INSERT INTO audit_logs(user_id,role,branch_id,action,entity,entity_id,metadata)
+        VALUES($1,$2,$3,$4,'practical_sessions',$5,$6::jsonb)`,
+      [user.id,user.role,attendance.branchId,phase === 'EXIT' ? 'BRANCH_ADMIN_ATTENDANCE_EXIT_REGISTERED' : 'BRANCH_ADMIN_ATTENDANCE_ENTRY_REGISTERED',session.id,
+        JSON.stringify({studentId,enrollmentId:attendance.enrollmentId,method:'branch_admin_manual',phase})]);
+      await client.query('COMMIT');
+      return { ...attendance, sessionId: session.id, phase, registered: true, canRegister: false };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
   static async getActiveSeatReservations(filters = {}) {
     await db.query('SELECT expire_course_cycle_seat_reservations()');
     const params = [];
@@ -109,7 +196,7 @@ class StudentService {
         ) occupied WHERE instructor_id=$1 AND schedule_date=$2::date AND start_time<$4::time AND end_time>$3::time LIMIT 1`,[instructorId,date,match[1],match[2]]);
         if(busy.rowCount)throw createError(409,`El horario ${date} ${match[1]} ya no está disponible`);
       }
-      const safeDraft={birthDate:data.birthDate||null,email:String(data.email||'').slice(0,160),phone:String(data.phone||'').slice(0,40),address:String(data.address||'').slice(0,300),bloodType:data.bloodType||null,cityId:data.cityId||null,registrationBranchId:data.registrationBranchId||user.branch_id||null,referredByUserId:data.referredByUserId||null,theorySchedule:plan.theorySchedule||null,schedulePlan:plan};
+      const safeDraft={birthDate:data.birthDate||null,email:String(data.email||'').slice(0,160),phone:String(data.phone||'').slice(0,40),address:String(data.address||'').slice(0,300),bloodType:data.bloodType||null,pickupBranchId:data.pickupBranchId||user.branch_id||null,cityId:data.cityId||null,registrationBranchId:data.registrationBranchId||user.branch_id||null,referredByUserId:data.referredByUserId||null,theorySchedule:plan.theorySchedule||null,schedulePlan:plan};
       const firstTime=String(selections[0].time).match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);
       const reservation=(await client.query(`INSERT INTO course_cycle_seat_reservations
         (cycle_id,instructor_id,referred_name,referred_phone,referred_identification,course_id,branch_id,reserved_start_time,reserved_end_time,notes,created_by,expires_at,reservation_kind,draft_data)
@@ -183,7 +270,7 @@ class StudentService {
     // que un ciclo cambie a "en_curso" o "completado" aunque no haya otra escritura.
     await db.query('SELECT refresh_due_student_academic_statuses()');
     let sql = `
-      SELECT s.*, b.name as branch_name, c.name as city_name, c.province as city_province,
+      SELECT s.*, b.name as branch_name, pickup.name as pickup_branch_name, c.name as city_name, c.province as city_province,
         TRIM(CONCAT(creator.first_name, ' ', creator.last_name)) AS created_by_name,
         TRIM(CONCAT(referrer.first_name, ' ', referrer.last_name)) AS referred_by_name,
         referrer_branch.name AS referred_by_branch_name,
@@ -198,6 +285,7 @@ class StudentService {
          LIMIT 1) AS course
       FROM students s
       LEFT JOIN branches b ON s.branch_id = b.id
+      LEFT JOIN branches pickup ON pickup.id = s.pickup_branch_id
       LEFT JOIN cities c ON s.city_id = c.id
       LEFT JOIN users creator ON creator.id = s.created_by
       LEFT JOIN users referrer ON referrer.id = s.referred_by_user_id
@@ -314,7 +402,7 @@ class StudentService {
     const createdBy = scope.created_by || null;
     const updatedBy = scope.updated_by || createdBy;
     const result = await db.query(`
-      SELECT s.*, b.name as branch_name, c.name as city_name, c.province as city_province,
+      SELECT s.*, b.name as branch_name, pickup.name as pickup_branch_name, c.name as city_name, c.province as city_province,
         TRIM(CONCAT(referrer.first_name, ' ', referrer.last_name)) AS referred_by_name,
         referrer_branch.name AS referred_by_branch_name,
         instructor.instructor_id,
@@ -367,6 +455,7 @@ class StudentService {
          WHERE ap.student_id = s.id) AS additional_practices
       FROM students s
       LEFT JOIN branches b ON s.branch_id = b.id
+      LEFT JOIN branches pickup ON pickup.id = s.pickup_branch_id
       LEFT JOIN cities c ON s.city_id = c.id
       LEFT JOIN users referrer ON referrer.id = s.referred_by_user_id
       LEFT JOIN branches referrer_branch ON referrer_branch.id = referrer.branch_id
@@ -408,9 +497,10 @@ class StudentService {
     const updatedBy = scope.updated_by || createdBy;
     const searchTerm = `%${query}%`;
     const result = await db.query(`
-      SELECT s.*, b.name as branch_name
+      SELECT s.*, b.name as branch_name, pickup.name as pickup_branch_name
       FROM students s
       LEFT JOIN branches b ON s.branch_id = b.id
+      LEFT JOIN branches pickup ON pickup.id = s.pickup_branch_id
       WHERE (s.identification ILIKE $1
          OR s.first_name ILIKE $1
          OR s.last_name ILIKE $1
@@ -491,6 +581,13 @@ class StudentService {
       cityId = branchLocation.rows[0].city_id;
     }
 
+    const pickupBranchId = data.pickupBranchId || branchId;
+    const pickupBranch = await db.query(
+      'SELECT id FROM branches WHERE id=$1 AND active=TRUE',
+      [pickupBranchId]
+    );
+    if (!pickupBranch.rows.length) throw createError(422, 'Selecciona una sucursal válida para recoger al estudiante');
+
     // La atribución capturada en la landing prevalece sobre una selección manual.
     // Así el código oculto no puede alterarse durante la matrícula.
     let referredByUserId = referralAttribution?.referrer_user_id || data.referredByUserId || null;
@@ -533,8 +630,9 @@ class StudentService {
     const notes = String(data.notes || '').trim().slice(0, 500);
     const result = await db.query(`
       INSERT INTO students (identification, first_name, last_name, birth_date, email, phone,
-        address, blood_type, branch_id, city_id, status, created_by, registration_type, referred_by_user_id, notes)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        address, blood_type, branch_id, city_id, status, created_by, registration_type, referred_by_user_id, notes,
+        pickup_branch_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *
     `, [
       data.identification,
@@ -552,6 +650,7 @@ class StudentService {
       data.registrationType === 'ADDITIONAL_PRACTICE' ? 'ADDITIONAL_PRACTICE' : 'REGULAR',
       referredByUserId,
       notes || null,
+      pickupBranchId,
     ]);
 
     const student = result.rows[0];
@@ -626,6 +725,7 @@ class StudentService {
       phone: 'phone',
       address: 'address',
       bloodType: 'blood_type',
+      pickupBranchId: 'pickup_branch_id',
       branch_id: 'branch_id',
       notes: 'notes',
     };

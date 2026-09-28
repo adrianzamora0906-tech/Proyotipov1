@@ -13,6 +13,12 @@ const selections = {
 };
 
 function iso(value){return new Date(value).toISOString().slice(0,10);}
+function normalizePendingTheoryValue(value){
+  const normalized=String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  if(!normalized)return true;
+  if(['por_confirmar','por_asignar','por_definir','pendiente','teoria_por_confirmar','teoria_por_asignar','teoria_pendiente'].includes(normalized))return true;
+  return normalized.includes('por_')&&(normalized.includes('confirmar')||normalized.includes('asignar')||normalized.includes('definir'));
+}
 function addDays(value,days){const date=new Date(`${iso(value)}T12:00:00`);date.setDate(date.getDate()+days);return iso(date);}
 function nextWeekday(value,weekday){const date=new Date(`${iso(value)}T12:00:00`);do{date.setDate(date.getDate()+1);}while(date.getDay()!==weekday);return iso(date);}
 function currentOrNextWeekday(value,weekday){const date=new Date(`${iso(value)}T12:00:00`);if(date.getDay()===weekday)return iso(date);return nextWeekday(value,weekday);}
@@ -43,6 +49,7 @@ async function resolveEnrollmentBranchId(branchId){
 }
 
 class TheoryCourseService {
+  static isPendingSelection(value){return normalizePendingTheoryValue(value);}
   static normalizeSelection(value){const option=selections[value];if(!option)throw createError(422,'Selecciona un turno de teoría válido');return option;}
 
   static async findInstructor(client,branchId,option){
@@ -86,8 +93,8 @@ class TheoryCourseService {
   }
 
   static async changeStudentTheory(user,studentId,data={}){
-    const selection=String(data.selection||'');
-    const pending=selection==='por_confirmar';
+    const selection=String(data.selection||'').trim();
+    const pending=this.isPendingSelection(selection);
     const virtual=selection==='virtual';
     const option=pending||virtual?null:this.normalizeSelection(selection);
     const client=await db.getClient();

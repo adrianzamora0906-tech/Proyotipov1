@@ -29,12 +29,17 @@ router.get('/', requirePermission('STUDENT_VIEW'), StudentController.getAll);
 // POST /api/students - Crear estudiante (solo secretaria)
 router.post('/', requirePermission('STUDENT_CREATE'), StudentController.create);
 router.post('/:id/additional-practices', requirePermission('STUDENT_CREATE'), StudentController.createAdditionalPractice);
+router.get('/:id/branch-admin-attendance', requirePermission('STUDENT_UPDATE'), StudentController.branchAdminAttendanceStatus);
+router.post('/:id/branch-admin-attendance', requirePermission('STUDENT_UPDATE'), StudentController.registerBranchAdminAttendance);
 
 // GET /api/students/:id - Obtener estudiante por ID
 router.get('/:id', requirePermission('STUDENT_VIEW'), StudentController.getById);
 
 // Genera una nueva clave temporal; la clave se devuelve una sola vez.
 router.post('/:id/reset-access', requirePermission('STUDENT_UPDATE'), StudentController.resetAccess);
+
+// POST /api/students/:id/disable - Inhabilitar estudiante sin borrar expediente
+router.post('/:id/disable', requirePermission('STUDENT_UPDATE'), StudentController.disable);
 
 // PUT /api/students/:id - Actualizar estudiante
 router.put('/:id', requirePermission('STUDENT_UPDATE'), StudentController.update);
@@ -44,6 +49,9 @@ router.put('/:id/status', requirePermission('STUDENT_STATUS_UPDATE'), StudentCon
 
 // GET /api/students/:id/history - Historial del estudiante
 router.get('/:id/history', requirePermission('STUDENT_VIEW'), StudentController.getHistory);
+
+// DELETE /api/students/:id - Eliminar expediente completo del estudiante
+router.delete('/:id', requirePermission('STUDENT_UPDATE'), StudentController.delete);
 
 // Documentos del estudiante
 router.get('/:studentId/documents', requirePermission('DOCUMENT_VIEW'), DocumentController.getByStudent);

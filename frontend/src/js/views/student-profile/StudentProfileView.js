@@ -997,12 +997,11 @@ class StudentProfileView extends Component {
         branch_id: current.branchId,
         course_id: current.courseId,
         modality: current.modality || 'normal',
+        reschedule_from_start_date: current.startDate,
       });
-      const today = new Date().toISOString().slice(0, 10);
       const currentInstructorIds = new Set((current.currentAssignments || []).map(assignment => String(assignment.instructorId)));
       const cycles = (optionsResult.success ? optionsResult.data : [])
         .filter(cycle => cycle.startDate >= current.startDate
-          && cycle.startDate >= today
           && (String(cycle.id) !== String(current.id)
             || (cycle.instructors || []).some(instructor => !currentInstructorIds.has(String(instructor.id)))))
         .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)));
@@ -1035,7 +1034,7 @@ class StudentProfileView extends Component {
         optionsHost.innerHTML = '<div class="schedule-empty">Consultando disponibilidad…</div>';
         const instructorId = instructorSelect.value;
         if (!instructorId) { optionsHost.innerHTML = '<div class="schedule-empty">Este curso no tiene instructores disponibles.</div>'; return; }
-        const result = await ApiService.getCourseEnrollmentOptions({branch_id:current.branchId,course_id:current.courseId,modality:current.modality||'normal',instructor_id:instructorId});
+        const result = await ApiService.getCourseEnrollmentOptions({branch_id:current.branchId,course_id:current.courseId,modality:current.modality||'normal',instructor_id:instructorId,reschedule_from_start_date:current.startDate});
         const availableCycle = (result.success ? result.data : []).find(cycle => String(cycle.id) === String(selectedCycle.id));
         const slots = (availableCycle?.slots || []).map(slot => {
           const dates = Object.entries(slot.occupancyByDate || {});

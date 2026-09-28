@@ -45,9 +45,9 @@ function normalizeTime(value) {
   return String(value || '').slice(0, 5);
 }
 
-async function resolveEnrollmentBranchId(branchId) {
+async function resolveEnrollmentBranchId(branchId, queryable = db) {
   if (!branchId) return null;
-  const result = await db.query(`
+  const result = await queryable.query(`
     SELECT COALESCE(reference.id, current.id) AS enrollment_branch_id
     FROM branches current
     LEFT JOIN branches reference
@@ -254,6 +254,30 @@ class CourseCycleService {
         const configuredOrder=new Map(configuredRotation.map(item=>[String(item.instructor_id),Number(item.position_order)]));
         pool.sort((left,right)=>(configuredOrder.get(String(left.id))??Number.MAX_SAFE_INTEGER)-(configuredOrder.get(String(right.id))??Number.MAX_SAFE_INTEGER));
       }
+      const findForcedWeekendInstructor = async (instructorId) => {
+        const fromPool = pool.find(item => String(item.id) === String(instructorId));
+        if (fromPool) return fromPool;
+        if (vehicleType !== 'moto') return null;
+        return (await client.query(`
+          SELECT ip.id,TRIM(CONCAT(u.first_name,' ',u.last_name)) name
+          FROM instructor_profiles ip
+          JOIN users u ON u.id=ip.user_id AND u.active=TRUE
+          JOIN branches home ON home.id=u.branch_id
+          JOIN branches target ON target.id=$1 AND target.city_id=home.city_id
+          LEFT JOIN LATERAL (
+            SELECT priority.practice_area
+            FROM instructor_branch_priorities priority
+            WHERE priority.instructor_id=ip.id AND priority.branch_id=$1 AND priority.active=TRUE
+              AND priority.effective_from<=CURRENT_DATE
+              AND (priority.effective_until IS NULL OR priority.effective_until>=CURRENT_DATE)
+            LIMIT 1
+          ) scoped ON TRUE
+          WHERE ip.id=$2 AND ip.status='activo' AND ip.deleted_at IS NULL
+            AND COALESCE(ip.weekend_practice_area,scoped.practice_area,ip.practice_area)='carro'
+            AND (u.branch_id=$1 OR scoped.practice_area IS NOT NULL)
+          LIMIT 1
+        `, [branchId, instructorId, program.course_id])).rows[0] || null;
+      };
       if (!pool.length) {
         await client.query('COMMIT');
         return null;
@@ -312,7 +336,7 @@ class CourseCycleService {
           `, [branchId, vehicleType, startDate, positionOrder])).rows[0]?.instructor_id;
           const lastIndex = pool.findIndex(item => String(item.id) === String(lastUsed));
           const selected = forcedInstructorId
-            ? pool.find(item => String(item.id) === String(forcedInstructorId))
+            ? await findForcedWeekendInstructor(forcedInstructorId)
             : pool[(lastIndex + 1 + pool.length) % pool.length];
           if (!selected) throw createError(422, `El instructor configurado para ${startDate} ya no está habilitado`);
           const inserted = (await client.query(`
@@ -762,15 +786,25 @@ class CourseCycleService {
       filters = { ...filters, instructor_id: null };
     }
     const params = [];
+    const rescheduleFromStartDate = /^\d{4}-\d{2}-\d{2}$/.test(String(filters.reschedule_from_start_date || ''))
+      ? String(filters.reschedule_from_start_date)
+      : null;
     let where = `
       cc.active = true
       AND cc.deleted_at IS NULL
       AND cc.status IN ('activo', 'proximo')
-      -- REGLA PROTEGIDA: una matricula nueva admite como maximo los dos dias
-      -- posteriores al inicio. No reemplazar esta condicion por end_date.
-      AND CURRENT_DATE <= cc.start_date + 2
       AND EXISTS (SELECT 1 FROM branch_courses bc WHERE bc.branch_id=cc.branch_id AND bc.course_id=cc.course_id AND bc.active=TRUE)
     `;
+    if (rescheduleFromStartDate) {
+      params.push(rescheduleFromStartDate);
+      where += ` AND cc.start_date >= $${params.length}::date`;
+    } else {
+      where += `
+        -- REGLA PROTEGIDA: una matricula nueva admite como maximo los dos dias
+        -- posteriores al inicio. No reemplazar esta condicion por end_date.
+        AND CURRENT_DATE <= cc.start_date + 2
+      `;
+    }
 
     const branchId = filters.branch_id || user.branch_id;
     if (branchId) {
@@ -1430,18 +1464,33 @@ class CourseCycleService {
       instructorId: assignment.instructor_id,
       instructorName: assignment.instructor_name,
     }));
+    const assignedInstructor = currentAssignments.find(assignment => assignment.instructorId) || null;
+    if (!assignedInstructor) {
+      throw createError(404, 'El estudiante no tiene un instructor practico asignado');
+    }
 
     const occupancyResult = await db.query(`
-      SELECT instructor_id, schedule_date, start_time, end_time, COUNT(*)::int AS occupied
-      FROM course_cycle_schedule_assignments
-      WHERE cycle_id = $1 AND status = 'activo' AND student_id <> $2
-      GROUP BY instructor_id, schedule_date, start_time, end_time
-    `, [row.id, studentId]);
+      SELECT schedule_date,start_time,end_time,COUNT(*)::int AS occupied
+      FROM (
+        SELECT schedule_date,start_time,end_time
+        FROM course_cycle_schedule_assignments
+        WHERE instructor_id=$1 AND status='activo' AND student_id<>$2
+        UNION ALL
+        SELECT schedule_date,start_time,end_time
+        FROM referred_instructor_schedule_blocks
+        WHERE instructor_id=$1 AND status='activo' AND student_id<>$2
+        UNION ALL
+        SELECT schedule_date,start_time,end_time
+        FROM instructor_availability_overrides
+        WHERE instructor_id=$1 AND active=TRUE
+      ) instructor_occupation
+      GROUP BY schedule_date,start_time,end_time
+    `, [assignedInstructor.instructorId, studentId]);
     const occupancy = new Map(occupancyResult.rows.map(item => [
-      `${item.instructor_id || ''}:${toDateString(item.schedule_date)}:${normalizeTime(item.start_time)}:${normalizeTime(item.end_time)}`,
+      `${toDateString(item.schedule_date)}:${normalizeTime(item.start_time)}:${normalizeTime(item.end_time)}`,
       Number(item.occupied),
     ]));
-    const capacity = Math.max(Number(row.capacity_per_instructor) || 1, 1);
+    const capacity = 1;
     const dates = cycleDates(row);
 
     return {
@@ -1465,6 +1514,10 @@ class CourseCycleService {
           : 'presencial_regular',
       group: row.group_code ? { code: row.group_code, name: row.group_name } : null,
       slotCapacity: capacity,
+      instructor: {
+        id: assignedInstructor.instructorId,
+        name: assignedInstructor.instructorName,
+      },
       currentAssignments,
       slots: practicalSlots(row).map(([startTime, endTime]) => {
         const eligibleDates = Array.isArray(row.schedule_templates) && row.schedule_templates.length
@@ -1474,8 +1527,7 @@ class CourseCycleService {
             && normalizeTime(template.end_time) === endTime))
           : dates;
         const occupancyByDate = Object.fromEntries(eligibleDates.map(date => {
-          const assignment = currentAssignments.find(item => item.date === date);
-          const occupied = occupancy.get(`${assignment?.instructorId || ''}:${date}:${startTime}:${endTime}`) || 0;
+          const occupied = occupancy.get(`${date}:${startTime}:${endTime}`) || 0;
           return [date, { occupied, available: Math.max(capacity - occupied, 0) }];
         }));
         return { startTime, endTime, capacity, occupancyByDate };
@@ -1755,8 +1807,8 @@ class CourseCycleService {
     const { studentId, schedulePlan } = data;
     const preferredInstructorId = data.preferredInstructorId || schedulePlan?.preferredInstructorId || null;
     const selections = Array.isArray(schedulePlan?.selections) ? schedulePlan.selections : [];
-    const theorySelection = schedulePlan?.theorySchedule;
-    const theoryPending = !theorySelection || theorySelection === 'por_confirmar';
+    const theorySelection = String(schedulePlan?.theorySchedule || '').trim();
+    const theoryPending = TheoryCourseService.isPendingSelection(theorySelection);
     const theoryOption = theoryPending || theorySelection === 'virtual'
       ? null
       : TheoryCourseService.normalizeSelection(theorySelection);
@@ -1824,17 +1876,17 @@ class CourseCycleService {
           AND cc.active = true
           AND cc.deleted_at IS NULL
           AND cc.status IN ('activo', 'proximo')
-          -- REGLA PROTEGIDA: incluso por llamada directa, solo se admiten los
-          -- dos primeros dias posteriores al inicio del ciclo.
-          AND CURRENT_DATE <= cc.start_date + 2
+          -- En matricula nueva aplica la ventana del ciclo destino; en
+          -- reagendamiento manda la ventana del curso actual del estudiante.
+          AND ($2::uuid IS NOT NULL OR CURRENT_DATE <= cc.start_date + 2)
         FOR UPDATE
-      `, [cycleId]);
+      `, [cycleId, rescheduleFromCycleId]);
 
       if (cycleResult.rows.length === 0) throw createError(404, 'Curso no disponible para inscripcion');
       const cycle = cycleResult.rows[0];
       if (rescheduleFromCycleId) {
         const sourceResult = await client.query(`
-          SELECT source.id,source.branch_id,source.course_id,source.start_date,assignment.instructor_id
+          SELECT source.id,source.branch_id,source.course_id,source.modality,source.vehicle_type,source.start_date,assignment.instructor_id
           FROM course_cycle_schedule_assignments assignment
           JOIN course_cycles source ON source.id=assignment.cycle_id
           WHERE assignment.student_id=$1 AND assignment.cycle_id=$2::uuid
@@ -1848,10 +1900,23 @@ class CourseCycleService {
         }
         const sameCycle = String(source.id) === String(cycle.id);
         const sameInstructor = preferredInstructorId && String(source.instructor_id) === String(preferredInstructorId);
+        const sourceStart = toDateString(source.start_date);
+        const destinationStart = toDateString(cycle.start_date);
+        const normalizeBranchForCycle = async item => {
+          const enrollmentBranch = await resolveEnrollmentBranchId(item.branch_id, client);
+          return item.modality === 'intensivo'
+            ? resolveIntensiveBranchId(enrollmentBranch, client)
+            : enrollmentBranch;
+        };
+        const sourceOperationalBranchId = await normalizeBranchForCycle(source);
+        const destinationOperationalBranchId = await normalizeBranchForCycle(cycle);
+        const sameOperationalBranch = String(sourceOperationalBranchId) === String(destinationOperationalBranchId);
+        const sameCourseType = String(source.course_id) === String(cycle.course_id)
+          || (source.vehicle_type && cycle.vehicle_type && String(source.vehicle_type) === String(cycle.vehicle_type));
         if ((sameCycle && (!preferredInstructorId || sameInstructor))
-          || String(source.branch_id) !== String(cycle.branch_id)
-          || String(source.course_id) !== String(cycle.course_id)
-          || (!sameCycle && toDateString(cycle.start_date) <= toDateString(source.start_date))) {
+          || !sameOperationalBranch
+          || !sameCourseType
+          || (!sameCycle && destinationStart < sourceStart)) {
           throw createError(422, 'Selecciona otro curso próximo de la misma sucursal y tipo de curso');
         }
       }
@@ -2060,6 +2125,19 @@ class CourseCycleService {
             AND ip.deleted_at IS NULL
             AND u.active = true
             AND ib.city_id = target.city_id
+            AND (
+              EXISTS (
+                SELECT 1 FROM course_cycle_instructors cci
+                WHERE cci.cycle_id=selected_cycle.id
+                  AND cci.instructor_id=ip.id AND cci.active=TRUE
+              )
+              OR EXISTS (
+                SELECT 1 FROM instructor_group_members igm
+                WHERE igm.group_id=selected_cycle.group_id
+                  AND igm.instructor_id=ip.id
+                  AND igm.active=TRUE AND igm.ended_at IS NULL
+              )
+            )
           LIMIT 1
         `, [cycleId, preferredInstructorId, cycle.branch_id]);
         if (!preferredResult.rows.length) {
@@ -2149,11 +2227,39 @@ class CourseCycleService {
             WHERE cycle_id = $1
               AND schedule_date=$4::date
               AND start_time = $2::time AND end_time = $3::time AND status = 'activo'
+              AND (
+                instructor_id IS NULL
+                OR EXISTS (
+                  SELECT 1 FROM course_cycle_instructors cci
+                  WHERE cci.cycle_id=$1 AND cci.instructor_id=course_cycle_schedule_assignments.instructor_id
+                    AND cci.active=TRUE
+                )
+                OR EXISTS (
+                  SELECT 1 FROM course_cycles member_cycle
+                  JOIN instructor_group_members igm ON igm.group_id=member_cycle.group_id
+                  WHERE member_cycle.id=$1 AND igm.instructor_id=course_cycle_schedule_assignments.instructor_id
+                    AND igm.active=TRUE AND igm.ended_at IS NULL
+                )
+              )
             UNION
             SELECT enrollment_id FROM referred_instructor_schedule_blocks
             WHERE cycle_id = $1
               AND schedule_date=$4::date
               AND start_time = $2::time AND end_time = $3::time AND status = 'activo'
+              AND (
+                instructor_id IS NULL
+                OR EXISTS (
+                  SELECT 1 FROM course_cycle_instructors cci
+                  WHERE cci.cycle_id=$1 AND cci.instructor_id=referred_instructor_schedule_blocks.instructor_id
+                    AND cci.active=TRUE
+                )
+                OR EXISTS (
+                  SELECT 1 FROM course_cycles member_cycle
+                  JOIN instructor_group_members igm ON igm.group_id=member_cycle.group_id
+                  WHERE member_cycle.id=$1 AND igm.instructor_id=referred_instructor_schedule_blocks.instructor_id
+                    AND igm.active=TRUE AND igm.ended_at IS NULL
+                )
+              )
           ) occupied_slots
         `, [cycleId, startTime, endTime, selection.date]);
         const occupied = Number(occupiedResult.rows[0]?.occupied || 0);

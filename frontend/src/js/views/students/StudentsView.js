@@ -3932,7 +3932,14 @@ class StudentsView extends Component {
 
     const scheduleId = formData.get('scheduleId');
     const schedulePlan = this.parseSchedulePlan(formData.get('schedulePlan'));
-    const theorySchedule = formData.get('theorySchedule');
+    const normalizePendingTheorySchedule = value => {
+      const normalized = String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      if (!normalized) return 'por_confirmar';
+      if (['por_confirmar', 'por_asignar', 'por_definir', 'pendiente', 'teoria_por_confirmar', 'teoria_por_asignar', 'teoria_pendiente'].includes(normalized)) return 'por_confirmar';
+      if (normalized.includes('por_') && (normalized.includes('confirmar') || normalized.includes('asignar') || normalized.includes('definir'))) return 'por_confirmar';
+      return value;
+    };
+    const theorySchedule = normalizePendingTheorySchedule(formData.get('theorySchedule'));
     const theoryConfirmationAccepted = form.dataset.theoryConfirmationAccepted === 'true'
       || formData.get('theoryConfirmationAccepted') === 'true'
       || formData.get('theoryConfirmationAccepted') === 'on';
@@ -4151,6 +4158,12 @@ class StudentsView extends Component {
       // Prueba: frontend/tests/student-registration-modal.test.mjs
       // ================================================================
       this.closeStudentModal();
+      const registrationModal = document.getElementById('student-modal-overlay');
+      if (registrationModal) {
+        registrationModal.classList.remove('active');
+        registrationModal.setAttribute('aria-hidden', 'true');
+        registrationModal.style.display = 'none';
+      }
     } catch (error) {
       this.showModalAlert('error', error.message || 'El estudiante se registró, pero hubo un problema guardando documentos u horario.');
       this.restoreSubmitButton(submitBtn);
@@ -4218,7 +4231,8 @@ class StudentsView extends Component {
     const schedulePlan=this.parseSchedulePlan(formData.get('schedulePlan'));
     const instructorId=formData.get('preferredInstructorId')||document.querySelector('#student-schedule-calendar .schedule-instructor-preview.available:not([hidden])')?.dataset.instructorId||'';
     const branchId=form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId||null;
-    const theorySchedule=formData.get('theorySchedule');
+    const normalizePendingTheorySchedule=value=>{const normalized=String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');if(!normalized)return'por_confirmar';if(['por_confirmar','por_asignar','por_definir','pendiente','teoria_por_confirmar','teoria_por_asignar','teoria_pendiente'].includes(normalized))return'por_confirmar';if(normalized.includes('por_')&&(normalized.includes('confirmar')||normalized.includes('asignar')||normalized.includes('definir')))return'por_confirmar';return value;};
+    const theorySchedule=normalizePendingTheorySchedule(formData.get('theorySchedule'));
     if(!instructorId){this.showModalAlert('error','Selecciona el instructor que reservará el cupo.');this.goToModalStep(1);return;}
     if(!formData.get('scheduleId')||!schedulePlan.selections.length){this.showModalAlert('error','Selecciona un horario disponible.');this.goToModalStep(1);return;}
     schedulePlan.preferredInstructorId=instructorId;schedulePlan.theorySchedule=theorySchedule||'por_confirmar';

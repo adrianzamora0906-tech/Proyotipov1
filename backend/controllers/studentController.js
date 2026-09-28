@@ -6,12 +6,14 @@ const StudentAccountService = require('../services/StudentAccountService');
 const LicenseRenewalService = require('../services/LicenseRenewalService');
 
 const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+const effectiveBranchId = (req) => req.authorization?.operationalCoverage?.operational_branch_id || req.authorization?.branchId || req.user.branch_id;
 
 async function getStudentScope(req, useDefaultBranch = true) {
   if (req.authorization?.global) {
     return req.query.branch_id ? { branch_id: req.query.branch_id } : {};
   }
-  const location = await db.query('SELECT city_id FROM branches WHERE id = $1', [req.user.branch_id]);
+  const branchId = effectiveBranchId(req);
+  const location = await db.query('SELECT city_id FROM branches WHERE id = $1', [branchId]);
   const cityId = location.rows[0]?.city_id || null;
   if (req.query.scope === 'created') {
     return { created_only: true, created_by: req.user.id };
@@ -23,7 +25,7 @@ async function getStudentScope(req, useDefaultBranch = true) {
     const allowed = await db.query('SELECT id FROM branches WHERE id = $1 AND city_id = $2', [req.query.branch_id, cityId]);
     if (allowed.rows.length) return { branch_id: req.query.branch_id };
   }
-  if (useDefaultBranch) return { branch_id: req.user.branch_id };
+  if (useDefaultBranch) return { branch_id: branchId };
   return {
     city_id: cityId,
     created_by: req.user.id,
@@ -32,6 +34,20 @@ async function getStudentScope(req, useDefaultBranch = true) {
 }
 
 class StudentController {
+  static async branchAdminAttendanceStatus(req, res, next) {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ success:false,error:'ID de estudiante inválido' });
+      return res.json({ success:true,data:await StudentService.getBranchAdminAttendance(req.params.id,req.user) });
+    } catch (error) { next(error); }
+  }
+
+  static async registerBranchAdminAttendance(req, res, next) {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ success:false,error:'ID de estudiante inválido' });
+      return res.json({ success:true,data:await StudentService.registerBranchAdminAttendance(req.params.id,req.user) });
+    } catch (error) { next(error); }
+  }
+
   static async createLicenseRenewal(req,res,next) {
     try { return res.status(201).json({success:true,data:await LicenseRenewalService.create(req.body,req.user)}); }
     catch(error) { next(error); }
@@ -53,7 +69,7 @@ class StudentController {
 
   static async checkAdditionalPracticeAvailability(req, res, next) {
     try {
-      const data = await AdditionalPracticeService.checkAvailability(req.query, req.query.branch_id || req.user.branch_id);
+      const data = await AdditionalPracticeService.checkAvailability(req.query, req.query.branch_id || effectiveBranchId(req));
       return res.json({ success: true, data });
     } catch (error) { next(error); }
   }
@@ -141,7 +157,10 @@ class StudentController {
       if (!identification || !firstName || !lastName) {
         return res.status(422).json({ success: false, error: 'Campos requeridos: identification, firstName, lastName' });
       }
-      const studentData = { ...req.body };
+      const studentData = {
+        ...req.body,
+        pickupBranchId: req.body.pickupBranchId || effectiveBranchId(req),
+      };
       const student = await StudentService.create(studentData, req.user.id, {
         allowDiscount: req.authorization?.permissions?.includes('PAYMENT_CREATE') || false,
       });
@@ -167,6 +186,24 @@ class StudentController {
     } catch (error) { next(error); }
   }
 
+  static async disable(req, res, next) {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ success: false, error: 'ID de estudiante invalido' });
+      await StudentService.getById(req.params.id, await getStudentScope(req, false));
+      const student = await StudentService.disable(req.params.id, req.user);
+      return res.json({ success: true, data: student });
+    } catch (error) { next(error); }
+  }
+
+  static async delete(req, res, next) {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ success: false, error: 'ID de estudiante invalido' });
+      await StudentService.getById(req.params.id, await getStudentScope(req, false));
+      const result = await StudentService.delete(req.params.id, req.user);
+      return res.json({ success: true, data: result });
+    } catch (error) { next(error); }
+  }
+
   static async getHistory(req, res, next) {
     try {
       if (!isUuid(req.params.id)) return res.status(400).json({ success: false, error: 'ID de estudiante invÃ¡lido' });
@@ -184,7 +221,7 @@ class StudentController {
 
   static async getInstructors(req, res, next) {
     try {
-      const requestedBranchId = req.query.branch_id || req.user.branch_id;
+      const requestedBranchId = req.query.branch_id || effectiveBranchId(req);
       if (!isUuid(requestedBranchId)) return res.status(400).json({ success: false, error: 'Sucursal invÃƒÂ¡lida' });
       const instructors = await StudentService.getInstructors(requestedBranchId);
       return res.json({ success: true, data: instructors });

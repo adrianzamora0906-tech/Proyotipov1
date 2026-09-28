@@ -111,8 +111,20 @@ button {
   border: none;
 }
 
-input, textarea, select {
+input, textarea, select, option, optgroup {
   font-family: 'Poppins', sans-serif;
+  font-size: 0.875rem;
+}
+
+select.form-select,
+.form-select option,
+.form-select optgroup {
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+input, textarea, select {
   border: 1px solid var(--gray-300);
   border-radius: var(--radius-md);
   padding: 0.75rem;

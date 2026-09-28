@@ -386,6 +386,7 @@ export default class AdminBranchesView extends Component {
     const roles = rolesResponse.data || [];
     const vacations = vacationResponse.data || [];
     const canUpdateUsers = permissionService.can('USER_UPDATE');
+    const coverageButton = canManageVacations ? '<button class="btn btn-secondary" id="manage-branch-coverages">Cobertura Manta / Shopping</button>' : '';
     const activeLoad = user => (Number(user.active_assigned_student_count) || 0)
       + (Number(user.future_schedule_student_count) || 0)
       + (Number(user.active_session_count) || 0);
@@ -404,9 +405,9 @@ export default class AdminBranchesView extends Component {
     };
     body.innerHTML = `
       <section class="branch-card">
-        <div class="branch-section-title"><h2>Personal y Accesos</h2>${permissionService.can('USER_CREATE') ? '<button class="btn btn-primary" id="new-user-from-branch">Nuevo usuario</button>' : ''}</div>
+        <div class="branch-section-title"><h2>Personal y Accesos</h2><div class="branch-quick-actions">${coverageButton}${permissionService.can('USER_CREATE') ? '<button class="btn btn-primary" id="new-user-from-branch">Nuevo usuario</button>' : ''}</div></div>
         <div class="branch-table-wrap"><table><thead><tr><th>Persona</th><th><button type="button" class="branch-table-sort" id="sort-staff-role" aria-label="Ordenar por jerarquía del rol" aria-sort="none">Rol/es <span>↕</span></button></th><th>Usuario</th><th>Estado</th><th>Último acceso</th><th>Acciones</th></tr></thead><tbody id="branch-staff-rows">
-          ${staff.map(user => `<tr class="${user.active?'':'user-blocked'}" data-role-rank="${staffRoleRank(user)}" data-person-name="${esc(`${user.first_name || ''} ${user.last_name || ''}`.trim().toLocaleLowerCase('es'))}"><td class="${canUpdateUsers?'editable-person':''}" ${canUpdateUsers?`data-user-id="${esc(user.id)}" role="button" tabindex="0" title="Editar perfil"`:''}><strong>${esc(`${user.first_name || ''} ${user.last_name || ''}`.trim())}</strong><small>${esc(user.email || '')}</small>${staffLoadNote(user)}${canUpdateUsers?'<span class="editable-person__hint">Ver y editar perfil</span>':''}</td><td>${(user.roles || []).map(role => `<span class="branch-role">${esc(staffRoleLabel(role,user))}</span>`).join('') || 'Sin rol'}</td><td>${esc(user.username)}</td><td><span class="branch-pill ${user.active?'active':'inactive'}">${user.active ? 'Activo' : 'Bloqueado'}</span></td><td>${dateTime(user.last_login_at)}</td><td class="branch-actions"><button class="btn btn-small view-user-access" data-user-id="${esc(user.id)}">Accesos</button><button class="btn btn-small view-user-sessions" data-user-id="${esc(user.id)}">Sesiones</button>${toggleStaffButton(user)}${permissionService.can('USER_RESET_ACCESS')?`<button class="btn btn-small reset-user-access" data-user-id="${esc(user.id)}">Restablecer acceso</button>`:''}</td></tr>`).join('') || '<tr><td colspan="6">No hay personal en esta sucursal.</td></tr>'}
+          ${staff.map(user => `<tr class="${user.active?'':'user-blocked'}" data-role-rank="${staffRoleRank(user)}" data-person-name="${esc(`${user.first_name || ''} ${user.last_name || ''}`.trim().toLocaleLowerCase('es'))}"><td class="${canUpdateUsers?'editable-person':''}" ${canUpdateUsers?`data-user-id="${esc(user.id)}" role="button" tabindex="0" title="Editar perfil"`:''}><strong>${esc(`${user.first_name || ''} ${user.last_name || ''}`.trim())}</strong><small>${esc(user.branch_name || this.branch.name)}${user.email ? ` · ${esc(user.email)}` : ''}</small>${staffLoadNote(user)}${canUpdateUsers?'<span class="editable-person__hint">Ver y editar perfil</span>':''}</td><td>${(user.roles || []).map(role => `<span class="branch-role">${esc(staffRoleLabel(role,user))}</span>`).join('') || 'Sin rol'}</td><td>${esc(user.username)}</td><td><span class="branch-pill ${user.active?'active':'inactive'}">${user.active ? 'Activo' : 'Bloqueado'}</span></td><td>${dateTime(user.last_login_at)}</td><td class="branch-actions"><button class="btn btn-small view-user-access" data-user-id="${esc(user.id)}">Accesos</button><button class="btn btn-small view-user-sessions" data-user-id="${esc(user.id)}">Sesiones</button>${toggleStaffButton(user)}${permissionService.can('USER_RESET_ACCESS')?`<button class="btn btn-small reset-user-access" data-user-id="${esc(user.id)}">Restablecer acceso</button>`:''}</td></tr>`).join('') || '<tr><td colspan="6">No hay personal en esta sucursal.</td></tr>'}
         </tbody></table></div>
       </section>
       ${this.branchAccess ? '' : `<section class="branch-card"><h2>Roles disponibles</h2><div class="branch-role-list">${roles.map(role => `<span>${esc(role.code)} · ${esc(role.name)}</span>`).join('')}</div></section>`}
@@ -437,6 +438,7 @@ export default class AdminBranchesView extends Component {
       roleSort.querySelector('span').textContent = direction === 'desc' ? '↓' : '↑';
     });
     document.getElementById('new-user-from-branch')?.addEventListener('click', () => this.openUserForm(roles));
+    document.getElementById('manage-branch-coverages')?.addEventListener('click', () => this.openStaffCoverageModal(body));
     document.querySelectorAll('.editable-person').forEach(cell => {
       const openProfile = () => {
         const user = staff.find(item => String(item.id) === String(cell.dataset.userId));
@@ -498,6 +500,128 @@ export default class AdminBranchesView extends Component {
         this.showTemporaryPassword(user,response.data,body);
       }catch(error){button.disabled=false;window.alert(error.message||'No se pudo generar la clave temporal.');}
     }));
+  }
+
+  async openStaffCoverageModal(body) {
+    const modal = document.getElementById('branch-modal');
+    modal.innerHTML = '<div class="branch-modal-backdrop"><section class="branch-modal coverage-modal"><p>Cargando coberturas...</p></section></div>';
+    try {
+      const response = await AdminService.branchStaffCoverages(this.branchId);
+      const data = response.data || {};
+      const staff = data.staff || [];
+      const targets = data.targets || [];
+      const shifts = data.shifts || [];
+      const activeCoverages = (data.coverages || []).filter(item => item.status === 'active');
+      const coverageFor = (targetId, shift) => activeCoverages.filter(item => String(item.target_branch_id) === String(targetId) && item.shift === shift);
+      const staffCard = user => `<button type="button" class="coverage-person" draggable="true" data-user-id="${esc(user.id)}"><strong>${esc(`${user.first_name || ''} ${user.last_name || ''}`.trim())}</strong><small>${(user.roles || []).map(role => esc(role.code)).join(' · ')}</small></button>`;
+      const coverageCard = item => `<article class="coverage-card"><div><strong>${esc(item.staff_name)}</strong><span>${esc(item.permanent_until_change ? 'Permanente hasta cambio' : `${dateOnly(item.start_date)} - ${dateOnly(item.end_date)}`)}</span><small>${esc(item.created_by_name || 'Sin responsable')}</small></div><button type="button" class="btn btn-small end-coverage" data-coverage-id="${esc(item.id)}">Cerrar</button></article>`;
+      const missing = [];
+      if (data.missingTargets?.manta2000) missing.push('Manta 2000 no aparece como sucursal activa.');
+      if (data.missingTargets?.shopping) missing.push('Shopping/Paseo no aparece como sucursal activa.');
+      modal.innerHTML = `<div class="branch-modal-backdrop"><section class="branch-modal coverage-modal">
+        <div class="permission-modal__header"><div><h2>Cobertura Manta / Shopping</h2><p>${esc(this.branch.name)} distribuye personal administrativo por turno.</p></div><button type="button" class="permission-modal__close close-coverage">×</button></div>
+        ${missing.length ? `<div class="coverage-warning">${missing.map(esc).join(' ')}</div>` : ''}
+        <div class="coverage-workspace">
+          <aside class="coverage-pool"><strong>Personal administrativo</strong><div>${staff.map(staffCard).join('') || '<p>No hay personal administrativo activo.</p>'}</div></aside>
+          <div class="coverage-targets">${targets.map(target => `<section class="coverage-target"><h3>${esc(target.name)}</h3><div class="coverage-shifts">${shifts.map(shift => `<div class="coverage-dropzone" data-target-id="${esc(target.id)}" data-shift="${esc(shift.code)}"><div class="coverage-shift-head"><strong>${esc(shift.label)}</strong><span>${esc(shift.startTime)} - ${esc(shift.endTime)}</span></div>${coverageFor(target.id, shift.code).map(coverageCard).join('') || '<p>Arrastra personal a este turno.</p>'}</div>`).join('')}</div></section>`).join('') || '<div class="coverage-warning">Primero registra Manta 2000 y Shopping como sucursales activas.</div>'}</div>
+        </div>
+        <form id="coverage-form" class="coverage-form" hidden>
+          <input type="hidden" name="userId"><input type="hidden" name="targetBranchId"><input type="hidden" name="shift">
+          <div class="coverage-form__title"><strong id="coverage-form-person"></strong><span id="coverage-form-target"></span></div>
+          <div class="coverage-date-grid"><label>Desde<input type="date" name="startDate" required></label><label>Hasta<input type="date" name="endDate"></label></div>
+          <label class="coverage-check"><input type="checkbox" name="permanentUntilChange" checked> Permanente hasta próximo cambio</label>
+          <label>Nota interna<input name="notes" placeholder="Ej.: turno fijo de mañana, rotación semanal"></label>
+          <div id="coverage-status" class="branch-status"></div>
+          <div class="branch-modal-actions"><button type="button" class="btn clear-coverage-form">Cancelar</button><button type="submit" class="btn btn-primary">Guardar cobertura</button></div>
+        </form>
+      </section></div>`;
+      const close = () => { modal.innerHTML = ''; };
+      modal.querySelector('.close-coverage')?.addEventListener('click', close);
+      let selectedUserId = '';
+      const form = modal.querySelector('#coverage-form');
+      const today = new Date().toISOString().slice(0, 10);
+      form.elements.startDate.value = today;
+      const fillForm = (userId, zone) => {
+        const user = staff.find(item => String(item.id) === String(userId));
+        const target = targets.find(item => String(item.id) === String(zone.dataset.targetId));
+        const shift = shifts.find(item => item.code === zone.dataset.shift);
+        if (!user || !target || !shift) return;
+        form.hidden = false;
+        form.elements.userId.value = user.id;
+        form.elements.targetBranchId.value = target.id;
+        form.elements.shift.value = shift.code;
+        form.querySelector('#coverage-form-person').textContent = `${user.first_name || ''} ${user.last_name || ''}`.trim();
+        form.querySelector('#coverage-form-target').textContent = `${target.name} · ${shift.label} ${shift.startTime}-${shift.endTime}`;
+        form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      };
+      modal.querySelectorAll('.coverage-person').forEach(button => {
+        button.addEventListener('dragstart', event => event.dataTransfer.setData('text/plain', button.dataset.userId));
+        button.addEventListener('click', () => {
+          selectedUserId = selectedUserId === button.dataset.userId ? '' : button.dataset.userId;
+          modal.querySelectorAll('.coverage-person').forEach(item => item.classList.toggle('is-selected', item.dataset.userId === selectedUserId));
+        });
+      });
+      modal.querySelectorAll('.coverage-dropzone').forEach(zone => {
+        zone.addEventListener('dragover', event => { event.preventDefault(); zone.classList.add('is-over'); });
+        zone.addEventListener('dragleave', () => zone.classList.remove('is-over'));
+        zone.addEventListener('drop', event => { event.preventDefault(); zone.classList.remove('is-over'); fillForm(event.dataTransfer.getData('text/plain'), zone); });
+        zone.addEventListener('click', event => { if (!event.target.closest('.end-coverage') && selectedUserId) fillForm(selectedUserId, zone); });
+      });
+      form.elements.permanentUntilChange.addEventListener('change', () => {
+        form.elements.endDate.disabled = form.elements.permanentUntilChange.checked;
+        if (form.elements.permanentUntilChange.checked) form.elements.endDate.value = '';
+      });
+      form.elements.endDate.disabled = true;
+      modal.querySelector('.clear-coverage-form')?.addEventListener('click', () => {
+        form.hidden = true;
+        form.reset();
+        form.elements.startDate.value = today;
+        form.elements.permanentUntilChange.checked = true;
+        form.elements.endDate.disabled = true;
+      });
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const status = form.querySelector('#coverage-status');
+        const submit = form.querySelector('button[type="submit"]');
+        const payload = Object.fromEntries(new FormData(form));
+        payload.permanentUntilChange = form.elements.permanentUntilChange.checked;
+        if (payload.permanentUntilChange) payload.endDate = null;
+        try {
+          submit.disabled = true;
+          status.textContent = 'Guardando cobertura...';
+          await AdminService.createBranchStaffCoverage(this.branchId, payload);
+          await this.openStaffCoverageModal(body);
+        } catch (error) {
+          const message = error.data?.error?.message || error.message || 'No se pudo guardar la cobertura.';
+          if (String(message).includes('Ya existe cobertura') && window.confirm(`${message} ¿Deseas reemplazarla desde la fecha indicada?`)) {
+            try {
+              await AdminService.createBranchStaffCoverage(this.branchId, { ...payload, replaceExisting: true });
+              await this.openStaffCoverageModal(body);
+              return;
+            } catch (replaceError) {
+              status.textContent = replaceError.data?.error?.message || replaceError.message || 'No se pudo reemplazar la cobertura.';
+            }
+          } else {
+            status.textContent = message;
+          }
+          submit.disabled = false;
+        }
+      });
+      modal.querySelectorAll('.end-coverage').forEach(button => button.addEventListener('click', async () => {
+        if (!window.confirm('Cerrar esta cobertura sin borrar el historial?')) return;
+        try {
+          button.disabled = true;
+          await AdminService.endBranchStaffCoverage(this.branchId, button.dataset.coverageId);
+          await this.openStaffCoverageModal(body);
+        } catch (error) {
+          button.disabled = false;
+          window.alert(error.message || 'No se pudo cerrar la cobertura.');
+        }
+      }));
+    } catch (error) {
+      modal.innerHTML = `<div class="branch-modal-backdrop"><section class="branch-modal"><h2>No se pudo abrir</h2><p>${esc(error.message)}</p><div class="branch-modal-actions"><button class="btn btn-primary close-coverage">Cerrar</button></div></section></div>`;
+      modal.querySelector('.close-coverage')?.addEventListener('click', () => { modal.innerHTML = ''; });
+    }
   }
 
   renderVacationList(vacations) {
@@ -588,21 +712,24 @@ export default class AdminBranchesView extends Component {
     const modal = document.getElementById('branch-modal');
     const initials = `${user.first_name?.[0] || ''}${user.last_name?.[0] || ''}`.toUpperCase() || 'U';
     const isInstructor = (user.roles || []).some(role => role.code === 'INSTRUCTOR');
-    const isSecretary = (user.roles || []).some(role => role.code === 'SECRETARY');
     const isSystemAdmin = (user.roles || []).some(role => role.code === 'ADMIN_SYSTEM');
     const canResetAccess = permissionService.can('USER_RESET_ACCESS') && !isSystemAdmin;
-    const canConvertRole = isSecretary && authService.getCurrentUser()?.roles?.includes('ADMIN_SYSTEM');
+    const currentUserIsSystemAdmin = authService.getCurrentUser()?.roles?.includes('ADMIN_SYSTEM');
+    const canManageRole = (permissionService.can('ROLE_MANAGE') || currentUserIsSystemAdmin) && !isSystemAdmin;
+    const currentRole = (user.roles || []).find(role => ['BRANCH_ADMIN','SECRETARY','CASHIER','INSTRUCTOR'].includes(role.code))?.code || '';
+    const roleOptions = [['BRANCH_ADMIN','Administrador de sucursal'],['SECRETARY','Secretaría'],['CASHIER','Caja'],['INSTRUCTOR','Instructor']];
     modal.innerHTML = `<div class="branch-modal-backdrop"><form class="branch-modal user-profile-modal" id="edit-user-profile-form">
       <div class="user-profile-modal__hero"><div class="user-profile-modal__avatar">${esc(initials)}</div><div><span class="user-profile-modal__eyebrow">Perfil del usuario</span><h2>${esc(`${user.first_name || ''} ${user.last_name || ''}`.trim())}</h2><p>@${esc(user.username)} · ${esc(this.branch.name)}</p></div><button type="button" class="permission-modal__close close-modal" aria-label="Cerrar">×</button></div>
       <section class="user-profile-modal__section"><div class="user-profile-modal__section-title"><strong>Información personal</strong><span>Actualiza los datos visibles dentro del sistema.</span></div><div class="user-profile-modal__grid">
         <label>Nombres<input class="form-input" name="firstName" value="${esc(user.first_name || '')}" required></label>
         <label>Apellidos<input class="form-input" name="lastName" value="${esc(user.last_name || '')}" required></label>
-        <label class="user-profile-modal__wide">Correo electrónico<input class="form-input" name="email" type="email" value="${esc(user.email || '')}" placeholder="correo@ejemplo.com"></label>
+        <label>Usuario<input class="form-input" name="username" value="${esc(user.username || '')}" minlength="3" maxlength="80" pattern="[A-Za-z0-9._-]+" required><small>Se usará para iniciar sesión.</small></label>
+        <label>Correo electrónico<input class="form-input" name="email" type="email" value="${esc(user.email || '')}" placeholder="correo@ejemplo.com"></label>
       </div></section>
-      ${canConvertRole ? `<section class="user-profile-modal__section user-profile-modal__role"><div class="user-profile-modal__section-title"><strong>Rol dentro del sistema</strong><span>Solo el Administrador del sistema puede realizar esta conversión.</span></div><div class="user-profile-modal__grid">
-        <label>Rol<select class="form-input" name="roleCode" id="edit-user-role"><option value="SECRETARY">Secretaría</option><option value="INSTRUCTOR">Instructor</option></select></label>
+      ${canManageRole ? `<section class="user-profile-modal__section user-profile-modal__role"><div class="user-profile-modal__section-title"><strong>Función dentro del sistema</strong><span>Define el rol base; los permisos adicionales se otorgan desde Accesos.</span></div><div class="user-profile-modal__grid">
+        <label>Función<select class="form-input" name="roleCode" id="edit-user-role">${roleOptions.map(([code,label])=>`<option value="${code}" ${code===currentRole?'selected':''}>${label}</option>`).join('')}</select></label>
         <label id="edit-instructor-area-wrap" hidden>Tipo de instructor<input class="form-input" value="Profesor de teoría" readonly><input type="hidden" name="practiceArea" value="teoria"></label>
-      </div><div class="user-profile-modal__notice user-profile-modal__role-notice" id="edit-user-role-notice" hidden>Al guardar, el usuario perderá el acceso de Secretaría y será registrado únicamente como profesor de teoría. Sus sesiones abiertas se cerrarán.</div></section>` : ''}
+      </div><div class="user-profile-modal__notice user-profile-modal__role-notice" id="edit-user-role-notice" hidden>Al cambiar la función se cerrarán las sesiones y se retirarán los permisos individuales anteriores. Los nuevos accesos se podrán otorgar desde el botón Accesos.</div></section>` : ''}
       <section class="user-profile-modal__section user-profile-modal__security"><div class="user-profile-modal__section-title"><strong>Seguridad de acceso</strong><span>${isSystemAdmin?'La credencial principal está protegida.':'Genera una credencial individual y de un solo uso.'}</span></div>${canResetAccess?'<button type="button" class="btn btn-primary" id="generate-user-temporary-password">Generar clave temporal</button><div class="user-profile-modal__notice">La contraseña actual dejará de funcionar, se cerrarán las sesiones abiertas y el usuario deberá cambiar la nueva clave al ingresar.</div>':'<div class="user-profile-modal__notice">La contraseña del Administrador del sistema no puede cambiarse desde esta interfaz.</div>'}</section>
       ${isInstructor ? `<section class="user-profile-modal__section"><div class="user-profile-modal__section-title"><strong>Disponibilidad del instructor</strong><span>Define los días y bloques en que puede recibir clases.</span></div><button type="button" class="btn btn-primary" id="configure-instructor-availability">Configurar disponibilidad</button></section>` : ''}
       <div id="edit-user-profile-status" class="branch-status" aria-live="polite"></div>
@@ -612,11 +739,12 @@ export default class AdminBranchesView extends Component {
     modal.querySelectorAll('.close-modal').forEach(button => button.addEventListener('click', close));
     const roleSelect = modal.querySelector('#edit-user-role');
     const syncRoleFields = () => {
-      const convertsToInstructor = roleSelect?.value === 'INSTRUCTOR';
+      const convertsToInstructor = roleSelect?.value === 'INSTRUCTOR' && currentRole !== 'INSTRUCTOR';
+      const changesRole = roleSelect?.value && roleSelect.value !== currentRole;
       const area = modal.querySelector('#edit-instructor-area-wrap');
       const notice = modal.querySelector('#edit-user-role-notice');
       if (area) area.hidden = !convertsToInstructor;
-      if (notice) notice.hidden = !convertsToInstructor;
+      if (notice) notice.hidden = !changesRole;
     };
     roleSelect?.addEventListener('change', syncRoleFields);
     syncRoleFields();
@@ -641,10 +769,10 @@ export default class AdminBranchesView extends Component {
       const data = Object.fromEntries(new FormData(form));
       const status = form.querySelector('#edit-user-profile-status');
       const submit = form.querySelector('button[type="submit"]');
-      const payload = { firstName: data.firstName.trim(), lastName: data.lastName.trim(), email: data.email.trim() || null };
-      if (canConvertRole && data.roleCode === 'INSTRUCTOR') {
-        if (!window.confirm('¿Confirmas cambiar este usuario de Secretaría a profesor de teoría? Sus sesiones abiertas se cerrarán.')) return;
-        payload.roleCode = 'INSTRUCTOR';
+      const payload = { firstName: data.firstName.trim(), lastName: data.lastName.trim(), username: data.username.trim(), email: data.email.trim() || null };
+      if (canManageRole && data.roleCode && data.roleCode !== currentRole) {
+        if (!window.confirm('¿Confirmas cambiar la función de este usuario? Sus sesiones abiertas se cerrarán y sus permisos individuales deberán revisarse.')) return;
+        payload.roleCode = data.roleCode;
         payload.practiceArea = data.practiceArea;
       }
       try {
@@ -904,8 +1032,13 @@ export default class AdminBranchesView extends Component {
         .filter(item=>!forcedIds.includes(String(item.id)));})(),
     ]:baseRotationInstructors;
     const rotationRow=(item,index)=>`<tr data-instructor-id="${esc(item.id)}"><td class="rotation-position">${index+1}</td><td><strong>${esc(item.name)}</strong></td><td class="rotation-date">Se calculará automáticamente</td><td><input class="rotation-observation" maxlength="300" value="${esc(item.observation)}" placeholder="Observación opcional"></td><td><div class="rotation-actions"><button type="button" class="rotation-up" title="Subir instructor" aria-label="Subir ${esc(item.name)}">↑</button><button type="button" class="rotation-down" title="Bajar instructor" aria-label="Bajar ${esc(item.name)}">↓</button></div></td></tr>`;
-    const weekendCandidates=rotationCandidates.filter(item=>item.course_enabled);
-    const weekendInstructorOptions=(selected='')=>`<option value="">Seleccionar instructor</option>${weekendCandidates.map(item=>`<option value="${esc(item.id)}" ${String(item.id)===String(selected)?'selected':''}>${esc(item.name)}</option>`).join('')}`;
+    const isWeekendOverrideCompatible=instructor=>{
+      const weekendArea=instructor.weekend_practice_area||instructor.practice_area;
+      return weekendArea==='mixto'||weekendArea===selectedVehicleType||(selectedVehicleType==='moto'&&weekendArea==='carro');
+    };
+    const isCarSupportForMoto=instructor=>selectedVehicleType==='moto'&&(instructor.weekend_practice_area||instructor.practice_area)==='carro';
+    const weekendCandidates=instructors.filter(item=>isWeekendOverrideCompatible(item)&&(item.course_enabled||isCarSupportForMoto(item)));
+    const weekendInstructorOptions=(selected='')=>`<option value="">Seleccionar instructor</option>${weekendCandidates.map(item=>`<option value="${esc(item.id)}" ${String(item.id)===String(selected)?'selected':''}>${esc(item.name)} · ${esc(areaLabel(item.weekend_practice_area||item.practice_area))}</option>`).join('')}`;
     const weekendOverrideRow=(item={})=>{const selected=item.instructors||[],count=Math.min(Math.max(Number(item.instructor_count||2),1),3);return `<div class="weekend-capacity-row">
       <label><span>Sábado de inicio</span><input type="date" class="weekend-start-date" value="${esc(String(item.start_date||'').slice(0,10))}" required></label>
       <label><span>Instructores</span><select class="weekend-instructor-count"><option value="1" ${count===1?'selected':''}>1 instructor</option><option value="2" ${count===2?'selected':''}>2 instructores</option><option value="3" ${count===3?'selected':''}>3 instructores</option></select></label>

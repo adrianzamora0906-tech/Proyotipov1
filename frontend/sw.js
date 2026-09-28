@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v4';
+const CACHE_NAME = 'sportmancar-offline-v5';
 const APP_SHELL = [
   '/',
   '/index.html',

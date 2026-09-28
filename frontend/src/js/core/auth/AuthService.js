@@ -17,6 +17,7 @@ class AuthService {
         role:user.role,roles:user.roles||[],branch:user.branch,branch_id:user.branch_id,avatar:user.avatar,
         apiToken:user.token,refreshToken:user.refreshToken,sessionId:user.sessionId,permissions:user.permissions||[],
         scope:user.scope||'BRANCH',instructorType:user.instructorType||null,practiceArea:user.practiceArea||null,
+        operationalCoverage:user.operationalCoverage||null,operationalBranch:user.operationalBranch||null,operationalBranchId:user.operationalBranchId||null,
         mustChangePassword:user.mustChangePassword,loginTime:new Date().toISOString()};
       sessionStorage.setItem(this.sessionKey,JSON.stringify(session));apiClient.setToken(user.token);
       return{success:true,message:'Sesión iniciada',user:session};
@@ -24,8 +25,9 @@ class AuthService {
   }
   async refreshAuthorization(branchId=null){
     const user=this.getCurrentUser();if(!user)return null;
-    const key=String(branchId||user.branch_id||'');
-    if(this.authorizationKey===key&&Date.now()-this.authorizationCheckedAt<5000)return user;
+    const key=String(branchId||user.operationalBranchId||user.branch_id||'');
+    // Evita bloquear cada cambio de pantalla con la misma consulta de permisos.
+    if(this.authorizationKey===key&&Date.now()-this.authorizationCheckedAt<30000)return user;
     if(this.authorizationPromise&&this.authorizationKey===key)return this.authorizationPromise;
     const q=key?`?branchId=${encodeURIComponent(key)}`:'';
     this.authorizationKey=key;
@@ -44,6 +46,9 @@ class AuthService {
         scope: nextScope,
         instructorType: hasFreshAuthorization ? (r.data.instructorType ?? current.instructorType ?? null) : (current.instructorType ?? null),
         practiceArea: hasFreshAuthorization ? (r.data.practiceArea ?? current.practiceArea ?? null) : (current.practiceArea ?? null),
+        operationalCoverage: r.data.operationalCoverage ?? current.operationalCoverage ?? null,
+        operationalBranch: r.data.operationalBranch ?? current.operationalBranch ?? null,
+        operationalBranchId: r.data.operationalBranchId ?? current.operationalBranchId ?? null,
         mustChangePassword: r.data.mustChangePassword ?? current.mustChangePassword ?? false,
       };
       sessionStorage.setItem(this.sessionKey,JSON.stringify(session));
@@ -54,6 +59,8 @@ class AuthService {
   }
   async logout(){try{if(apiClient.getToken())await apiClient.post('/auth/logout',{});}catch(error){console.warn('No se pudo confirmar el logout:',error.message);}finally{sessionStorage.removeItem(this.sessionKey);apiClient.setToken(null);this.authorizationPromise=null;this.authorizationKey=null;this.authorizationCheckedAt=0;}return{success:true,message:'Sesión cerrada'};}
   getCurrentUser(){try{return JSON.parse(sessionStorage.getItem(this.sessionKey)||'null');}catch{return null;}}
+  getEffectiveBranchId(){const user=this.getCurrentUser();return user?.operationalBranchId||user?.branch_id||'';}
+  getEffectiveBranchName(){const user=this.getCurrentUser();return user?.operationalBranch||user?.branch||'';}
   isAuthenticated(){return Boolean(this.getCurrentUser()?.apiToken);}
   hasRole(role){const user=this.getCurrentUser();return user?.roles?.includes(role)||user?.role===role;}
   can(permission){return this.getCurrentUser()?.permissions?.includes(permission)||false;}

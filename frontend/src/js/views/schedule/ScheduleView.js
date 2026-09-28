@@ -259,6 +259,7 @@ class ScheduleView extends Component {
             </div>
             <div class="calendar-course-actions">
               <span class="badge badge-primary">Prácticas normales · lunes a viernes</span>
+              <button type="button" class="btn btn-primary" id="reserve-selected-calendar-slot" ${calendar.reservationSelection ? '' : 'disabled'}>Reservar horario</button>
               ${calendar.availabilityEditMode ? '' : '<button type="button" class="btn btn-secondary" id="configure-instructor-availability">Configurar disponibilidad</button>'}
             </div>
           </div>
@@ -273,7 +274,13 @@ class ScheduleView extends Component {
           ${visibleSlots.length && workingDays.length ? `<div class="weekly-calendar" style="--calendar-day-count:${Math.max(workingDays.length, 1)}">
             <div class="calendar-time-column">
               <div class="calendar-heading">Hora</div>
-              ${visibleSlots.map(slot => `<div class="calendar-time-cell">${slot.start} - ${slot.end}</div>`).join('')}
+              ${visibleSlots.map(slot => {
+                const rowSelection = calendar.availabilityEditMode
+                  ? calendar.availabilityRowSelection
+                  : calendar.reservationSelection;
+                const selected = rowSelection?.startTime === slot.start && rowSelection?.endTime === slot.end;
+                return `<button type="button" class="calendar-time-cell ${selected ? 'is-selected' : ''}" ${calendar.availabilityEditMode ? `data-availability-row="${slot.start}|${slot.end}"` : 'disabled'} aria-pressed="${selected}"><span>${slot.start} - ${slot.end}</span></button>`;
+              }).join('')}
             </div>
             ${workingDays.map(day => {
               const key = day.date || this.normalizeDay(day.day);
@@ -313,18 +320,31 @@ class ScheduleView extends Component {
 
     const availabilityKey = `${slot.date}|${slot.startTime}|${slot.endTime}`;
     const status = String(slot.status || '').toLowerCase();
+    const draftReason = calendar?.availabilityDraftReasons?.[calendar.availabilityScope || 'daily']?.get(availabilityKey);
+    const reasonType = draftReason?.reasonType || slot.blockReasonType;
+    const blockedLabel = reasonType === 'transport'
+      ? 'Transporte'
+      : reasonType === 'other'
+        ? (draftReason?.reason || slot.blockReason || 'Otro motivo')
+        : 'No disponible';
     if (calendar?.availabilityEditMode) {
       if (status === 'reservado' || status === 'reserved') {
         return `<div class="calendar-slot reserved" aria-label="Reservado"><span class="slot-status">Reservado</span></div>`;
       }
+      if ((status === 'ocupado' || status === 'occupied') && !slot.availabilityBlocked) {
+        return `<div class="calendar-slot occupied" aria-label="Ocupado"><span class="slot-status">Ocupado</span></div>`;
+      }
       const blocked = availabilityDraft.has(availabilityKey);
-      return `<button type="button" class="calendar-slot calendar-slot-editor ${blocked ? 'occupied' : 'free'}" data-inline-availability="${availabilityKey}" aria-pressed="${blocked}"><span class="slot-status">${blocked ? 'No disponible' : 'Disponible'}</span></button>`;
+      const selected = !blocked
+        && calendar.availabilityRowSelection?.startTime === slot.startTime
+        && calendar.availabilityRowSelection?.endTime === slot.endTime;
+      return `<button type="button" class="calendar-slot calendar-slot-editor ${blocked ? 'occupied' : 'free'} ${selected ? 'is-reservation-selected' : ''}" data-inline-availability="${availabilityKey}" aria-pressed="${blocked}" title="${blocked ? this.escapeHtml(draftReason?.reason || blockedLabel) : 'Disponible'}"><span class="slot-status">${blocked ? this.escapeHtml(blockedLabel) : 'Disponible'}</span></button>`;
     }
 
     if (status === 'ocupado' || status === 'occupied') {
       return `
         <div class="calendar-slot occupied" aria-label="Ocupado">
-          <span class="slot-status">Ocupado</span>
+          <span class="slot-status" title="${this.escapeHtml(slot.blockReason || '')}">${reasonType === 'transport' ? 'Transporte' : reasonType === 'other' ? this.escapeHtml(slot.blockReason || 'Otro motivo') : 'Ocupado'}</span>
         </div>
       `;
     }
@@ -337,10 +357,12 @@ class ScheduleView extends Component {
       `;
     }
 
+    const selected = calendar?.reservationSelection?.startTime === slot.startTime
+      && calendar?.reservationSelection?.endTime === slot.endTime;
     return `
-      <div class="calendar-slot free">
+      <button type="button" class="calendar-slot free ${selected ? 'is-reservation-selected' : ''}" data-week-reservation="${slot.startTime}|${slot.endTime}">
         <span class="slot-status">Disponible</span>
-      </div>
+      </button>
     `;
   }
 
@@ -564,7 +586,7 @@ class ScheduleView extends Component {
           </div>
           <div class="performance-summary">
             <div><strong>${totals.courses || 0}</strong><span>Cursos impartidos</span></div>
-            <div><strong>${totals.assignedStudents || 0}</strong><span>Estudiantes asignados</span></div>
+            <div><strong>${totals.assignedStudents || 0}</strong><span>Estudiantes asignados${totals.transportStudents ? ` (incluye ${totals.transportStudents} por transporte)` : ''}</span></div>
             <div><strong>${totals.attendedStudents || 0}</strong><span>Estudiantes que asistieron</span></div>
             <div><strong>${totals.attendanceCount || 0}</strong><span>Asistencias registradas</span></div>
           </div>
@@ -729,9 +751,33 @@ class ScheduleView extends Component {
     modal.querySelector('#view-instructor-students')?.addEventListener('click', () => {
       this.openInstructorStudentsModal(calendar);
     });
+    modal.querySelectorAll('[data-week-reservation]').forEach(element => element.addEventListener('click', event => {
+      if (event.target.closest('[data-inline-availability]')) return;
+      const [startTime, endTime] = element.dataset.weekReservation.split('|');
+      const availableSlots = (calendar.slots || []).filter(slot => (
+        slot.startTime === startTime
+        && slot.endTime === endTime
+        && !['reserved', 'reservado', 'occupied', 'ocupado'].includes(String(slot.status || '').toLowerCase())
+      ));
+      if (!availableSlots.length) return;
+      calendar.reservationSelection = {
+        date: availableSlots[0].date,
+        startTime,
+        endTime,
+      };
+      modal.innerHTML = this.renderCalendar(calendar);
+      this.bindModalClose(modal);
+      this.bindCalendarAvailabilityEditor(modal, calendar);
+    }));
+    modal.querySelector('#reserve-selected-calendar-slot')?.addEventListener('click', () => {
+      if (calendar.reservationSelection) {
+        this.openCalendarReservationModal(modal, calendar, calendar.reservationSelection);
+      }
+    });
     modal.querySelector('#configure-instructor-availability')?.addEventListener('click', () => {
       calendar.availabilityEditMode = true;
       calendar.availabilityScope = 'daily';
+      delete calendar.availabilityRowSelection;
       calendar.availabilityDrafts = {
         daily: new Set((calendar.availabilityOverrides || [])
           .filter(item => item.status !== 'reserved')
@@ -739,6 +785,20 @@ class ScheduleView extends Component {
         permanent: new Set((calendar.slots || [])
           .filter(slot => slot.permanentlyAvailable === false)
           .map(slot => `${slot.date}|${slot.startTime}|${slot.endTime}`)),
+      };
+      calendar.availabilityDraftReasons = {
+        daily: new Map((calendar.availabilityOverrides || [])
+          .filter(item => item.status !== 'reserved')
+          .map(item => ([
+            `${String(item.schedule_date).slice(0, 10)}|${item.start_time}|${item.end_time}`,
+            { reasonType: item.reason_type || 'occupied', reason: item.reason || '' },
+          ]))),
+        permanent: new Map((calendar.slots || [])
+          .filter(slot => slot.permanentlyAvailable === false)
+          .map(slot => ([
+            `${slot.date}|${slot.startTime}|${slot.endTime}`,
+            { reasonType: slot.permanentReasonType || 'occupied', reason: slot.permanentReason || '' },
+          ]))),
       };
       modal.innerHTML = this.renderCalendar(calendar);
       this.bindModalClose(modal);
@@ -750,39 +810,68 @@ class ScheduleView extends Component {
       this.bindModalClose(modal);
       this.bindCalendarAvailabilityEditor(modal, calendar);
     }));
+    modal.querySelectorAll('[data-availability-row]').forEach(button => button.addEventListener('click', () => {
+      const [startTime, endTime] = button.dataset.availabilityRow.split('|');
+      const alreadySelected = calendar.availabilityRowSelection?.startTime === startTime
+        && calendar.availabilityRowSelection?.endTime === endTime;
+      calendar.availabilityRowSelection = alreadySelected ? null : { startTime, endTime };
+      modal.innerHTML = this.renderCalendar(calendar);
+      this.bindModalClose(modal);
+      this.bindCalendarAvailabilityEditor(modal, calendar);
+    }));
     modal.querySelectorAll('[data-inline-availability]').forEach(slot => slot.addEventListener('click', () => {
       const key = slot.dataset.inlineAvailability;
       const draft = calendar.availabilityDrafts[calendar.availabilityScope];
-      if (calendar.availabilityScope === 'permanent') {
-        const selected = (calendar.slots || []).filter(item => (
-          item.date === key.split('|')[0]
-          && item.startTime === key.split('|')[1]
-          && item.endTime === key.split('|')[2]
-        ))[0];
-        (calendar.slots || []).filter(item => (
-          item.weekday === selected?.weekday
-          && item.startTime === selected?.startTime
-          && item.endTime === selected?.endTime
-        )).forEach(item => {
-          const repeatedKey = `${item.date}|${item.startTime}|${item.endTime}`;
-          if (draft.has(key)) draft.delete(repeatedKey);
-          else draft.add(repeatedKey);
+      const reasons = calendar.availabilityDraftReasons[calendar.availabilityScope];
+      const [selectedDate, selectedStartTime, selectedEndTime] = key.split('|');
+      const selectedSlot = (calendar.slots || []).find(item => (
+        item.date === selectedDate
+        && item.startTime === selectedStartTime
+        && item.endTime === selectedEndTime
+      ));
+      const fullRowSelected = calendar.availabilityRowSelection?.startTime === selectedStartTime
+        && calendar.availabilityRowSelection?.endTime === selectedEndTime;
+      const editableSlots = (calendar.slots || []).filter(item => {
+        const status = String(item.status || '').toLowerCase();
+        return !['reserved', 'reservado'].includes(status)
+          && (!['occupied', 'ocupado'].includes(status) || item.availabilityBlocked);
+      });
+      const affectedKeys = (fullRowSelected
+        ? editableSlots.filter(item => item.startTime === selectedStartTime && item.endTime === selectedEndTime)
+        : calendar.availabilityScope === 'permanent'
+          ? editableSlots.filter(item => (
+            item.weekday === selectedSlot?.weekday
+            && item.startTime === selectedStartTime
+            && item.endTime === selectedEndTime
+          ))
+          : [selectedSlot].filter(Boolean)
+      ).map(item => `${item.date}|${item.startTime}|${item.endTime}`);
+      const applyChange = reasonData => {
+        const removing = draft.has(key);
+        affectedKeys.forEach(affectedKey => {
+          if (removing) {
+            draft.delete(affectedKey);
+            reasons.delete(affectedKey);
+          } else {
+            draft.add(affectedKey);
+            reasons.set(affectedKey, reasonData);
+          }
         });
         modal.innerHTML = this.renderCalendar(calendar);
         this.bindModalClose(modal);
         this.bindCalendarAvailabilityEditor(modal, calendar);
+      };
+      if (draft.has(key)) {
+        applyChange(null);
         return;
       }
-      if (draft.has(key)) draft.delete(key);
-      else draft.add(key);
-      slot.classList.toggle('occupied', draft.has(key));
-      slot.classList.toggle('free', !draft.has(key));
-      slot.querySelector('.slot-status').textContent = draft.has(key) ? 'No disponible' : 'Disponible';
-      slot.setAttribute('aria-pressed', draft.has(key));
+      this.openAvailabilityReasonModal(applyChange);
     }));
     modal.querySelector('#cancel-instructor-availability')?.addEventListener('click', () => {
       calendar.availabilityEditMode = false;
       delete calendar.availabilityDrafts;
+      delete calendar.availabilityDraftReasons;
+      delete calendar.availabilityRowSelection;
       delete calendar.availabilityScope;
       modal.innerHTML = this.renderCalendar(calendar);
       this.bindModalClose(modal);
@@ -793,7 +882,8 @@ class ScheduleView extends Component {
       const scope = calendar.availabilityScope || 'daily';
       const overrides = [...calendar.availabilityDrafts[scope]].map(key => {
         const [date, startTime, endTime] = key.split('|');
-        return { date, startTime, endTime, status: 'blocked' };
+        const reasonData = calendar.availabilityDraftReasons[scope].get(key) || { reasonType: 'occupied', reason: '' };
+        return { date, startTime, endTime, status: 'blocked', ...reasonData };
       });
       try {
         const result = await ApiService.saveInstructorAvailabilityOverrides(
@@ -816,10 +906,137 @@ class ScheduleView extends Component {
     });
   }
 
+  openAvailabilityReasonModal(onConfirm) {
+    document.getElementById('availability-reason-modal')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'availability-reason-modal';
+    overlay.className = 'modal-overlay modal-overlay-secondary active availability-reason-overlay';
+    overlay.innerHTML = `
+      <div class="modal availability-reason-modal" role="dialog" aria-modal="true" aria-labelledby="availability-reason-title">
+        <div class="modal-header">
+          <div>
+            <h3 class="modal-title" id="availability-reason-title">Motivo de ocupaci&oacute;n</h3>
+            <p class="card-subtitle">Selecciona por qu&eacute; se apartar&aacute; esta disponibilidad.</p>
+          </div>
+          <button type="button" class="modal-close" data-close-availability-reason>&times;</button>
+        </div>
+        <form id="availability-reason-form">
+          <div class="modal-body">
+            <div class="availability-reason-options" role="radiogroup" aria-label="Motivo">
+              <label><input type="radio" name="reasonType" value="transport" required><span><strong>Transporte</strong><small>Cuenta como un estudiante adicional en el mes.</small></span></label>
+              <label><input type="radio" name="reasonType" value="occupied" required><span><strong>Disponibilidad ocupada</strong><small>Bloqueo operativo sin sumar estudiantes.</small></span></label>
+              <label><input type="radio" name="reasonType" value="other" required><span><strong>Otro motivo</strong><small>Requiere indicar la raz&oacute;n.</small></span></label>
+            </div>
+            <label class="form-group availability-other-reason" hidden>
+              <span class="form-label required">Especifica el motivo</span>
+              <textarea class="form-input" name="reason" maxlength="180" rows="3"></textarea>
+            </label>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-availability-reason>Cancelar</button>
+            <button type="submit" class="btn btn-primary">Aplicar</button>
+          </div>
+        </form>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    const otherField = overlay.querySelector('.availability-other-reason');
+    const reasonInput = otherField.querySelector('[name="reason"]');
+    overlay.querySelectorAll('[data-close-availability-reason]').forEach(button => button.addEventListener('click', close));
+    overlay.querySelectorAll('[name="reasonType"]').forEach(input => input.addEventListener('change', () => {
+      const needsReason = input.checked && input.value === 'other';
+      otherField.hidden = !needsReason;
+      reasonInput.required = needsReason;
+      if (needsReason) reasonInput.focus();
+      else reasonInput.value = '';
+    }));
+    overlay.querySelector('form').addEventListener('submit', event => {
+      event.preventDefault();
+      const values = new FormData(event.currentTarget);
+      const reasonType = values.get('reasonType');
+      const reason = String(values.get('reason') || '').trim();
+      if (reasonType === 'other' && !reason) {
+        reasonInput.setCustomValidity('Debes especificar el motivo.');
+        reasonInput.reportValidity();
+        return;
+      }
+      reasonInput.setCustomValidity('');
+      close();
+      onConfirm({ reasonType, reason });
+    });
+  }
+
+  openCalendarReservationModal(parentModal, calendar, slot) {
+    const layer = document.createElement('div');
+    layer.className = 'modal-overlay active calendar-reservation-overlay';
+    layer.innerHTML = `
+      <div class="modal calendar-reservation-modal">
+        <div class="modal-header">
+          <div>
+            <h3 class="modal-title">Reservar cupo</h3>
+            <p class="card-subtitle">${this.escapeHtml(calendar.instructor.name)} · ${this.escapeHtml(calendar.course?.code || '')} · ${this.escapeHtml(slot.startTime)}-${this.escapeHtml(slot.endTime)}</p>
+          </div>
+          <button type="button" class="modal-close" data-close-calendar-reservation>&times;</button>
+        </div>
+        <form id="calendar-reservation-form">
+          <div class="modal-body">
+            <label class="form-group">
+              <span class="form-label required">Nombre del estudiante o referido</span>
+              <input class="form-input" name="referredName" required autofocus>
+            </label>
+            <label class="form-group">
+              <span class="form-label">C&eacute;dula</span>
+              <input class="form-input" name="referredIdentification" inputmode="numeric" maxlength="10">
+            </label>
+            <label class="form-group">
+              <span class="form-label">Observaci&oacute;n</span>
+              <textarea class="form-input" name="notes" maxlength="240"></textarea>
+            </label>
+            <div class="alert alert-error" hidden></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-calendar-reservation>Cancelar</button>
+            <button type="submit" class="btn btn-primary">Reservar aqu&iacute;</button>
+          </div>
+        </form>
+      </div>
+    `;
+    document.body.appendChild(layer);
+    const close = () => layer.remove();
+    layer.querySelectorAll('[data-close-calendar-reservation]').forEach(button => button.addEventListener('click', close));
+    layer.querySelector('form')?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const submit = event.submitter;
+      const errorBox = layer.querySelector('.alert-error');
+      try {
+        submit.disabled = true;
+        errorBox.hidden = true;
+        const values = Object.fromEntries(new FormData(event.currentTarget));
+        const result = await ApiService.reserveInstructorCalendarSeat(calendar.instructor.id, {
+          ...values,
+          cycleId: calendar.course?.id,
+          date: slot.date,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+        });
+        if (!result.success) throw new Error(result.error || 'No se pudo reservar el cupo.');
+        close();
+        await this.openInstructorCalendar(calendar.instructor.id, calendar.course?.id);
+      } catch (error) {
+        errorBox.textContent = error.data?.error?.message || error.message || 'No se pudo reservar el cupo.';
+        errorBox.hidden = false;
+        submit.disabled = false;
+      }
+    });
+    layer.querySelector('[name="referredName"]')?.focus();
+  }
+
   renderInstructorStudentsModal(calendar) {
     const students = calendar.students || [];
     const matriculated = students.filter(student => student.status === 'matriculado').length;
     const reserved = students.filter(student => student.status === 'reservado').length;
+    const transport = students.filter(student => student.status === 'transporte').length;
     return `
       <div class="modal instructor-students-modal" role="dialog" aria-modal="true" aria-label="Estudiantes de ${this.escapeHtml(calendar.instructor.name)}">
         <div class="modal-header">
@@ -833,6 +1050,7 @@ class ScheduleView extends Component {
           <div class="instructor-students-summary">
             <span class="matriculated">${matriculated} matriculado${matriculated === 1 ? '' : 's'}</span>
             <span class="reserved">${reserved} reservado${reserved === 1 ? '' : 's'}</span>
+            ${transport ? `<span class="transport">${transport} por transporte</span>` : ''}
           </div>
           ${students.length ? `
             <div class="instructor-students-list">
@@ -844,7 +1062,7 @@ class ScheduleView extends Component {
                     <span>${student.identification ? `Cédula: ${this.escapeHtml(student.identification)}` : 'Cédula pendiente'}${student.phone ? ` · ${this.escapeHtml(student.phone)}` : ''}</span>
                     <small>${student.start_time ? `${this.escapeHtml(student.start_time)}–${this.escapeHtml(student.end_time)}` : 'Horario pendiente'}</small>
                   </div>
-                  <span class="instructor-student-status ${student.status}">${student.status === 'reservado' ? 'Reservado' : 'Matriculado'}</span>
+                  <span class="instructor-student-status ${student.status}">${student.status === 'reservado' ? 'Reservado' : student.status === 'transporte' ? 'Transporte' : 'Matriculado'}</span>
                 </article>
               `).join('')}
             </div>

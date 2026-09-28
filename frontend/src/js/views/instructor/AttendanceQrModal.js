@@ -30,7 +30,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
   overlay.innerHTML = `
     <div class="modal attendance-qr-modal">
       <div class="modal-header">
-        <div><h3 class="modal-title">${isExit ? 'Registrar salida' : 'Registrar entrada'}</h3><p class="card-subtitle">QR seguro que cambia cada 10 segundos</p></div>
+        <div><h3 class="modal-title">${isExit ? 'Registrar salida' : 'Registrar entrada'}</h3><p class="card-subtitle">QR seguro que cambia cada 30 segundos</p></div>
         <button type="button" class="modal-close" data-close-attendance>&times;</button>
       </div>
       <div class="modal-body attendance-qr-body">
@@ -38,7 +38,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
         <img class="attendance-qr-image" data-attendance-qr hidden alt="Codigo QR temporal para asistencia">
         <strong data-attendance-title hidden>QR de un solo uso</strong>
         <p data-attendance-help hidden>El estudiante debe escanear el codigo vigente desde su propia sesion para registrar ${isExit ? 'su salida' : 'su entrada'}.</p>
-        <div class="attendance-countdown" data-attendance-countdown hidden>Cambia en <strong data-attendance-seconds>10</strong> segundos</div>
+        <div class="attendance-countdown" data-attendance-countdown hidden>Cambia en <strong data-attendance-seconds>30</strong> segundos</div>
         <div class="attendance-waiting" data-attendance-status>Generando codigo...</div>
       </div>
       <div class="modal-footer"><button type="button" class="btn btn-secondary" data-close-attendance>Cancelar</button></div>
@@ -89,7 +89,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       const status = overlay.querySelector('[data-attendance-status]');
       status.className = 'attendance-waiting';
       status.textContent = 'Esperando al estudiante...';
-      let seconds = Number(challenge.expiresInSeconds) || 10;
+      let seconds = Number(challenge.expiresInSeconds) || 30;
       overlay.querySelector('[data-attendance-seconds]').textContent = seconds;
       if (countdownTimer) window.clearInterval(countdownTimer);
       countdownTimer = window.setInterval(() => {
@@ -98,7 +98,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
         if (target) target.textContent = seconds;
       }, 1000);
       if (rotationTimer) window.clearTimeout(rotationTimer);
-      rotationTimer = window.setTimeout(refreshChallenge, (Number(challenge.expiresInSeconds) || 10) * 1000);
+      rotationTimer = window.setTimeout(refreshChallenge, (Number(challenge.expiresInSeconds) || 30) * 1000);
     } catch (error) {
       const status = overlay.querySelector('[data-attendance-status]');
       if (isNetworkError(error)) {

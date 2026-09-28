@@ -136,6 +136,15 @@ export default class AdminService {
   static cancelBranchVacation(branchId, vacationId) {
     return apiClient.delete(`/admin/branches/${branchId}/vacations/${vacationId}`);
   }
+  static branchStaffCoverages(id) {
+    return apiClient.get(`/admin/branches/${id}/staff-coverages`);
+  }
+  static createBranchStaffCoverage(id, data) {
+    return apiClient.post(`/admin/branches/${id}/staff-coverages`, data);
+  }
+  static endBranchStaffCoverage(id, coverageId) {
+    return apiClient.delete(`/admin/branches/${id}/staff-coverages/${coverageId}`);
+  }
   static branchWorkflow(id) {
     return apiClient.get(`/admin/branches/${id}/workflow`);
   }

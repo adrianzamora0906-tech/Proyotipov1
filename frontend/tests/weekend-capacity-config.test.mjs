@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const adminView = fs.readFileSync(new URL('../src/js/views/admin/AdminBranchesView.js', import.meta.url), 'utf8');
+const studentsView = fs.readFileSync(new URL('../src/js/views/students/StudentsView.js', import.meta.url), 'utf8');
 const cycleService = fs.readFileSync(new URL('../../backend/services/CourseCycleService.js', import.meta.url), 'utf8');
 const branchService = fs.readFileSync(new URL('../../backend/services/BranchAdminService.js', import.meta.url), 'utf8');
 const migration = fs.readFileSync(new URL('../../backend/migrations/enterprise/087_weekend_instructor_overrides.sql', import.meta.url), 'utf8');
@@ -76,4 +77,12 @@ test('Manta comparte únicamente la operación intensiva con Flavio Reyes', () =
 test('el guardado recibe el contexto requerido por auditoría', () => {
   assert.match(branchService, /saveCourseProgram\(actor, branchId, courseId, data, requestContext = null\)/);
   assert.match(branchService, /newValues:\{courseId,vehicleType:data\.vehicleType\|\|'carro',weekendOverrides\},requestContext/);
+});
+
+test('la teoria por confirmar solicita aceptacion en un modal al continuar', () => {
+  assert.match(studentsView, /showTheoryConfirmationModal\(/);
+  assert.match(studentsView, /data-accept-theory-confirmation/);
+  assert.match(studentsView, /Acepto que la teor.*quede por confirmar/i);
+  assert.match(studentsView, /theoryConfirmationAccepted/);
+  assert.doesNotMatch(studentsView, /theory-confirmation-acceptance/);
 });

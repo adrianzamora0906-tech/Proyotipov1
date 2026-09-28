@@ -342,10 +342,16 @@
   display: inline-flex;
   align-items: center;
   gap: .45rem;
+  min-height: 34px;
+  padding: 0 .7rem;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  background: #fff;
   color: var(--gray-700);
   font-size: .82rem;
   font-weight: 600;
   cursor: pointer;
+  transition: var(--transition);
 }
 
 .student-transfer-check input {
@@ -353,6 +359,78 @@
   height: 1rem;
   margin: 0;
   accent-color: var(--primary);
+}
+
+.student-transfer-check:has(input:checked) {
+  border-color: var(--primary);
+  background: #eef2ff;
+  color: var(--primary);
+}
+
+.student-transfer-reference {
+  margin: 0;
+}
+
+.student-transfer-reference[hidden] {
+  display: none;
+}
+
+.student-transfer-reference .form-input {
+  height: 42px;
+  width: 100%;
+}
+
+.student-blood-transfer-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.student-blood-transfer-row.single-column {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.student-transfer-column {
+  position: relative;
+  min-width: 0;
+}
+
+.student-transfer-heading {
+  display: flex;
+  align-items: center;
+  min-height: 21px;
+  padding-right: 142px;
+  gap: .75rem;
+}
+
+.student-transfer-heading .form-label {
+  margin: 0;
+}
+
+.student-transfer-column:has(#student-transfer-payment:checked) .student-transfer-heading .form-label::after {
+  content: ' *';
+  color: var(--danger);
+}
+
+.student-transfer-column .student-transfer-check {
+  position: absolute;
+  top: -7px;
+  right: 0;
+  width: fit-content;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 700px) {
+  .student-blood-transfer-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .student-transfer-heading {
+    min-height: 34px;
+  }
+
+  .student-transfer-column .student-transfer-check {
+    top: 0;
+  }
 }
 
 .form-input,
@@ -417,6 +495,10 @@
 
 .student-registration-result-backdrop {
   z-index: 12000 !important;
+}
+
+.student-registration-result {
+  position: relative;
 }
 
 /* La captura QR se abre sobre el modal de inscripción sin desmontarlo. */

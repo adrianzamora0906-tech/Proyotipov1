@@ -160,7 +160,7 @@ class PendingPaymentsView extends Component {
       const isServicePayment = Boolean(serviceTransactionId);
       const balance = isServicePayment ? Number(pendingRow?.balance || 0) : (await PaymentService.getStudentBalance(student.id)).balance;
       const concept = pendingRow?.student?.course || pendingRow?.course || student.course || 'Curso';
-      const collectionBranchId = authService.getCurrentUser()?.branch_id || '';
+      const collectionBranchId = authService.getEffectiveBranchId();
       const methods = await PaymentService.getAvailableMethods(collectionBranchId);
       const modal = document.getElementById('payment-modal');
       const methodsOptionsHtml = (methods && methods.length > 0) ? methods.map(method => `<option value="${method.code}" data-requires-reference="${method.requires_reference ? 'true' : 'false'}">${method.name}</option>`).join('') : '<option value="">No hay métodos disponibles</option>';

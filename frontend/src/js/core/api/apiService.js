@@ -46,6 +46,14 @@ class ApiService {
     return apiClient.get(`/students/${id}`);
   }
 
+  static async getBranchAdminAttendance(id) {
+    return apiClient.get(`/students/${id}/branch-admin-attendance`);
+  }
+
+  static async registerBranchAdminAttendance(id) {
+    return apiClient.post(`/students/${id}/branch-admin-attendance`, {});
+  }
+
   static async resetStudentAccess(id) {
     return apiClient.post(`/students/${id}/reset-access`, {});
   }
@@ -387,6 +395,10 @@ class ApiService {
 
   static async saveInstructorAvailabilityOverrides(instructorId, overrides, startDate, endDate, scope = 'daily', slots = []) {
     return apiClient.put(`/instructors/${instructorId}/availability-overrides`, { overrides, startDate, endDate, scope, slots });
+  }
+
+  static async reserveInstructorCalendarSeat(instructorId, data) {
+    return apiClient.post(`/instructors/${instructorId}/calendar-reservations`, data);
   }
 }
 

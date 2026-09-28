@@ -255,6 +255,43 @@
   opacity: .62;
 }
 
+.profile-initial-time {
+  width: 100%;
+  border-right: 1px solid var(--gray-200);
+  border-bottom: 0;
+  border-left: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.profile-initial-time.selected {
+  color: var(--primary);
+  background: rgba(79, 70, 229, .1);
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+.profile-initial-time.disabled {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+.profile-initial-calendar-cell.selected {
+  background: rgba(79, 70, 229, .1);
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+.profile-schedule-modal .schedule-option.current {
+  opacity: 1;
+  border-color: #ef4444;
+  background: #fef2f2;
+  box-shadow: inset 0 0 0 2px #ef4444;
+}
+
+.profile-schedule-modal .schedule-option-status.current {
+  background: #fecaca;
+  color: #b91c1c;
+}
+
 @media (max-width: 640px) {
   .additional-practice-profile-grid { grid-template-columns: 1fr; }
 }

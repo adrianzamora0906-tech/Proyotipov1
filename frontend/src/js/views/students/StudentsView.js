@@ -306,7 +306,7 @@ class StudentsView extends Component {
     return params;
   }
 
-  async refreshStudentTable(params, requestedPage = 1) {
+  async refreshStudentTable(params, requestedPage = 1, prefetched = {}) {
     const container = document.getElementById('students-list-content');
     if (!container) return;
     container.setAttribute('aria-busy', 'true');
@@ -317,8 +317,8 @@ class StudentsView extends Component {
       delete summaryParams.status;
       delete summaryParams.registration_type;
       const [students, reservations, summaryStudents, summaryReservations] = await Promise.all([
-        StudentService.getAllStudents(params),
-        StudentService.getActiveReservations(params),
+        prefetched.students ? Promise.resolve(prefetched.students) : StudentService.getAllStudents(params),
+        prefetched.reservations ? Promise.resolve(prefetched.reservations) : StudentService.getActiveReservations(params),
         StudentService.getAllStudents(summaryParams),
         params.status ? StudentService.getActiveReservations(summaryParams) : Promise.resolve(null),
       ]);
@@ -517,7 +517,7 @@ class StudentsView extends Component {
   async renderStudentModal(pageMode = false) {
     const schedules = await this.getSchedulesForModal();
     const canRegisterPayment = authService.can('PAYMENT_CREATE');
-    const paymentMethods = canRegisterPayment ? await PaymentService.getAvailableMethods(authService.getCurrentUser()?.branch_id || '') : [];
+    const paymentMethods = canRegisterPayment ? await PaymentService.getAvailableMethods(authService.getEffectiveBranchId()) : [];
     const paymentOptions = paymentMethods.map(method => `<option value="${method.code}" data-requires-reference="${method.requires_reference ? 'true' : 'false'}">${method.name}</option>`).join('');
     const transferPaymentMethod = paymentMethods.find(method => (
       String(method.code || '').toLowerCase() === 'transferencia'
@@ -640,27 +640,39 @@ class StudentsView extends Component {
                   </div>
                 </div>
 
-                <div class="form-row regular-enrollment-only renewal-hidden" id="regular-course-fields">
-                  <div class="form-group">
-                    <div class="student-blood-type-heading">
+                <div class="regular-enrollment-only renewal-hidden" id="regular-course-fields">
+                  <div class="form-row student-blood-transfer-row${canRegisterPayment ? ' single-column' : ''}">
+                    <div class="form-group">
                       <label class="form-label required">Tipo de sangre</label>
-                      <label class="student-transfer-check" for="student-transfer-payment">
-                        <input type="checkbox" id="student-transfer-payment" data-payment-method="${transferPaymentMethod?.code || 'transferencia'}">
-                        <span>Transferencia</span>
-                      </label>
+                      <select class="form-select" name="bloodType" required>
+                        <option value="">Seleccionar...</option>
+                        <option value="O+">O+</option>
+                        <option value="O-">O-</option>
+                        <option value="A+">A+</option>
+                        <option value="A-">A-</option>
+                        <option value="B+">B+</option>
+                        <option value="B-">B-</option>
+                        <option value="AB+">AB+</option>
+                        <option value="AB-">AB-</option>
+                      </select>
+                      <div class="form-error"></div>
                     </div>
-                    <select class="form-select" name="bloodType" required>
-                      <option value="">Seleccionar...</option>
-                      <option value="O+">O+</option>
-                      <option value="O-">O-</option>
-                      <option value="A+">A+</option>
-                      <option value="A-">A-</option>
-                      <option value="B+">B+</option>
-                      <option value="B-">B-</option>
-                      <option value="AB+">AB+</option>
-                      <option value="AB-">AB-</option>
-                    </select>
-                    <div class="form-error"></div>
+
+                    ${!canRegisterPayment ? `
+                    <div class="form-group student-transfer-column">
+                      <div class="student-transfer-heading">
+                        <label class="form-label" for="student-transfer-reference-input">Nro. comprobante</label>
+                        <label class="student-transfer-check" for="student-transfer-payment">
+                          <input type="checkbox" id="student-transfer-payment" data-payment-method="${transferPaymentMethod?.code || 'transferencia'}">
+                          <span>Transferencia</span>
+                        </label>
+                      </div>
+                      <div class="student-transfer-reference" id="student-transfer-reference" hidden>
+                        <input class="form-input" id="student-transfer-reference-input" placeholder="Escribe el comprobante de transferencia">
+                        <div class="form-error" id="student-transfer-reference-error"></div>
+                      </div>
+                    </div>
+                    ` : ''}
                   </div>
 
                   <div class="form-group">
@@ -670,6 +682,14 @@ class StudentsView extends Component {
                   </select>
                     <div class="form-error"></div>
                   </div>
+                </div>
+
+                <div class="form-group regular-enrollment-only renewal-hidden" id="student-pickup-branch-field">
+                  <label class="form-label required" for="student-pickup-branch">Recoger en</label>
+                  <select class="form-select" name="pickupBranchId" id="student-pickup-branch" required>
+                    <option value="">Cargando sucursales...</option>
+                  </select>
+                  <div class="form-error"></div>
                 </div>
 
                 <div class="staff-referral-field regular-enrollment-only renewal-hidden">
@@ -813,6 +833,7 @@ class StudentsView extends Component {
                 </div>
                 <div class="theory-schedule-panel">
                   <div class="enrollment-modality-selector theory-schedule-selector">${this.renderTheoryScheduleOptions()}</div>
+                  <input type="hidden" name="theoryConfirmationAccepted" value="false">
                 </div>
                 <div class="form-error" id="theory-schedule-error"></div>
                 </section>
@@ -988,11 +1009,23 @@ class StudentsView extends Component {
       if (fields) fields.style.display = event.target.checked ? 'block' : 'none';
     });
     const transferCheck = document.getElementById('student-transfer-payment');
+    const transferReference = document.getElementById('student-transfer-reference');
+    const transferReferenceInput = document.getElementById('student-transfer-reference-input');
     const paymentMethodSelect = form?.querySelector('[name="paymentMethod"]');
+    const paymentReferenceInput = form?.querySelector('[name="paymentReference"]');
+    const syncTransferReference = () => {
+      if (paymentReferenceInput && transferReferenceInput) paymentReferenceInput.value = transferReferenceInput.value;
+    };
     transferCheck?.addEventListener('change', event => {
       const transferMethod = event.currentTarget.dataset.paymentMethod;
       const collectPayment = document.getElementById('student-collect-payment');
       if (event.currentTarget.checked) {
+        if (transferReference) transferReference.hidden = false;
+        if (transferReferenceInput) {
+          transferReferenceInput.required = true;
+          transferReferenceInput.value = paymentReferenceInput?.value || transferReferenceInput.value;
+          setTimeout(() => transferReferenceInput.focus(), 0);
+        }
         if (collectPayment) {
           collectPayment.checked = true;
           collectPayment.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1005,9 +1038,30 @@ class StudentsView extends Component {
         paymentMethodSelect.value = '';
         paymentMethodSelect.dispatchEvent(new Event('change', { bubbles: true }));
       }
+      if (!event.currentTarget.checked) {
+        if (transferReference) transferReference.hidden = true;
+        if (transferReferenceInput) {
+          transferReferenceInput.required = false;
+          transferReferenceInput.value = '';
+        }
+        if (paymentReferenceInput) paymentReferenceInput.value = '';
+        const transferReferenceError = document.getElementById('student-transfer-reference-error');
+        if (transferReferenceError) transferReferenceError.textContent = '';
+      }
     });
+    transferReferenceInput?.addEventListener('input', syncTransferReference);
     paymentMethodSelect?.addEventListener('change', event => {
-      if (transferCheck) transferCheck.checked = event.currentTarget.value === transferCheck.dataset.paymentMethod;
+      if (transferCheck) {
+        const isTransfer = event.currentTarget.value === transferCheck.dataset.paymentMethod;
+        transferCheck.checked = isTransfer;
+        if (transferReference) transferReference.hidden = !isTransfer;
+        if (transferReferenceInput) {
+          transferReferenceInput.required = isTransfer;
+          if (isTransfer && paymentReferenceInput?.value && !transferReferenceInput.value) {
+            transferReferenceInput.value = paymentReferenceInput.value;
+          }
+        }
+      }
     });
     document.getElementById('additional-practice-toggle')?.addEventListener('change', event => this.toggleAdditionalPracticeMode(event.target.checked));
     form?.querySelectorAll('[name="registrationMode"]').forEach(input => input.addEventListener('change', event => this.setRegistrationMode(event.target.value)));
@@ -1074,7 +1128,7 @@ class StudentsView extends Component {
       if (!instructorButton) return;
       const branchId = document.getElementById('modal-branch-select')?.selectedOptions?.[0]?.dataset?.branchId
         || this.studentModalScheduleContext?.branchId
-        || authService.getCurrentUser()?.branch_id;
+        || authService.getEffectiveBranchId();
       if (instructorButton.disabled) return;
       if (!branchId) {
         this.showModalAlert('error', 'Selecciona nuevamente la sucursal antes de cambiar de instructor.');
@@ -1451,7 +1505,7 @@ class StudentsView extends Component {
     box.textContent = 'Comprobando disponibilidad del instructor...';
     const result = await StudentService.checkAdditionalPracticeAvailability({
       instructor_id: instructorId, start_date: startDate, daily_start_time: dailyTime,
-      number_of_days: days, branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getCurrentUser()?.branch_id,
+      number_of_days: days, branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId(),
     });
     if (!result.success) { box.className = 'additional-practice-availability unavailable'; box.textContent = result.error || 'No se pudo comprobar la disponibilidad.'; return; }
     const data = result.data;
@@ -2302,7 +2356,11 @@ class StudentsView extends Component {
 
   renderTheoryScheduleOptions(){
     const options=this.modalTheoryOptions||{regular:true,saturday:true,virtual:true},items=[
-      '<label class="enrollment-modality-button active"><input type="radio" name="theorySchedule" value="por_confirmar" checked><strong>Por confirmar</strong><span>La modalidad de teor&iacute;a se definir&aacute; despu&eacute;s</span></label>',
+      `<label class="enrollment-modality-button active">
+        <input type="radio" name="theorySchedule" value="por_confirmar" checked>
+        <strong>Por confirmar</strong>
+        <span>La modalidad de teor&iacute;a se definir&aacute; despu&eacute;s</span>
+      </label>`,
     ];
     const groups=this.modalTheoryGroups||[];
     const renderGroup=(value,title,fallback)=>{const group=groups.find(item=>item.value===value),shortDate=value=>String(value||'').split('-').reverse().join('/'),full=Boolean(group?.full),rangeStart=full?group?.nextAvailableStartDate:group?.startDate,rangeEnd=full?group?.nextAvailableEndDate:group?.endDate,dateRange=rangeStart&&rangeEnd?`Inicio: ${shortDate(rangeStart)} · fin: ${shortDate(rangeEnd)}`:'';const available=Number(full?group?.nextAvailable:group?.available);const detail=group?.unavailable?(group.message||'No configurado'):group?`${full?'Próximo · ':''}${dateRange}${dateRange?' · ':''}${group.startTime}–${group.endTime} · ${available} cupos`:fallback;const capacityClass=group?.unavailable?'theory-capacity-unavailable':available>20?'theory-capacity-green':available>=5?'theory-capacity-yellow':'theory-capacity-red';return `<label class="enrollment-modality-button ${capacityClass}"><input type="radio" name="theorySchedule" value="${value}" ${group?.unavailable?'disabled':''}><strong>${title}</strong><span>${detail}</span></label>`;};
@@ -2318,6 +2376,10 @@ class StudentsView extends Component {
         document.querySelectorAll('.theory-schedule-selector .enrollment-modality-button').forEach(option =>
           option.classList.toggle('active', option.contains(input)),
         );
+        const form = document.getElementById('student-modal-form');
+        const acceptance = form?.querySelector('[name="theoryConfirmationAccepted"]');
+        if (acceptance) acceptance.value = 'false';
+        if (form) form.dataset.theoryConfirmationAccepted = 'false';
         const error = document.getElementById('theory-schedule-error');
         if (error) error.textContent = '';
       });
@@ -2335,6 +2397,20 @@ class StudentsView extends Component {
       const branches = branchesResult.success ? branchesResult.data : [];
       const provinces = [...new Set(cities.map(city => city.province).filter(Boolean))];
       this.modalLocationCatalog = { cities, branches };
+      const pickupBranchSelect = document.getElementById('student-pickup-branch');
+      if (pickupBranchSelect) {
+        const sessionBranchId = String(authService.getEffectiveBranchId() || '');
+        const sessionBranch = branches.find(branch => String(branch.id) === sessionBranchId);
+        const pickupBranches = sessionBranch?.city_id
+          ? branches.filter(branch => String(branch.city_id) === String(sessionBranch.city_id))
+          : branches.filter(branch => String(branch.id) === sessionBranchId);
+        pickupBranchSelect.innerHTML = '<option value="">Seleccionar sucursal...</option>' + pickupBranches
+          .map(branch => `<option value="${branch.id}">${branch.name}</option>`)
+          .join('');
+        if (pickupBranches.some(branch => String(branch.id) === sessionBranchId)) {
+          pickupBranchSelect.value = sessionBranchId;
+        }
+      }
 
       const renderCities = async () => {
         const selectedProvince = provinceSelect.value;
@@ -2392,7 +2468,7 @@ class StudentsView extends Component {
         if (branchId) await this.reloadModalSchedules(branchId);
       });
 
-      const sessionBranchId = String(authService.getCurrentUser()?.branch_id || '');
+      const sessionBranchId = String(authService.getEffectiveBranchId() || '');
       const sessionBranch = branches.find(branch => String(branch.id) === sessionBranchId);
       const sessionCity = sessionBranch
         ? cities.find(city => String(city.id) === String(sessionBranch.city_id))
@@ -2526,6 +2602,8 @@ class StudentsView extends Component {
   openStudentModal() {
     const modal = document.getElementById('student-modal-overlay');
     if (!modal) return;
+    const form = document.getElementById('student-modal-form');
+    if (form) form.dataset.theoryConfirmationAccepted = 'false';
     this.restoreSubmitButton(document.getElementById('student-modal-submit'));
     
     // Limpiar el estado anterior del overlay
@@ -2565,7 +2643,7 @@ class StudentsView extends Component {
     const form = document.getElementById('student-modal-form');
     const catalog = this.modalLocationCatalog;
     if (!form || !catalog || this.studentModalScheduleContext) return;
-    const sessionBranchId = String(authService.getCurrentUser()?.branch_id || '');
+    const sessionBranchId = String(authService.getEffectiveBranchId() || '');
     const sessionBranch = catalog.branches.find(branch => String(branch.id) === sessionBranchId);
     const sessionCity = sessionBranch
       ? catalog.cities.find(city => String(city.id) === String(sessionBranch.city_id))
@@ -2597,7 +2675,7 @@ class StudentsView extends Component {
     return {
       province: form?.querySelector('[name="province"]')?.value || '',
       cityId: form?.querySelector('[name="city_id"]')?.value || '',
-      branchId: branch?.selectedOptions?.[0]?.dataset?.branchId || authService.getCurrentUser()?.branch_id || '',
+      branchId: branch?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId() || '',
       branchValue: branch?.value || '',
       courseId: course?.value || '',
       instructorId: instructor?.value || this.scheduleInstructorFilterId || '',
@@ -2647,7 +2725,7 @@ class StudentsView extends Component {
       firstName: parts.slice(0, splitAt).join(' '),
       lastName: parts.slice(splitAt).join(' '),
       cedula: reservation.identification || '',
-      phone: draft.phone||reservation.phone||'',birthDate:draft.birthDate||'',email:draft.email||'',address:draft.address||'',bloodType:draft.bloodType||'',
+      phone: draft.phone||reservation.phone||'',birthDate:draft.birthDate||'',email:draft.email||'',address:draft.address||'',bloodType:draft.bloodType||'',pickupBranchId:draft.pickupBranchId||authService.getEffectiveBranchId()||'',
     };
     Object.entries(values).forEach(([name, value]) => {
       const input = form.elements[name];
@@ -2693,7 +2771,10 @@ class StudentsView extends Component {
   }
 
   selectReservedSchedule(reservation) {
-    const expectedTime = `${reservation.start_time || ''} - ${reservation.end_time || ''}`.replace(/\s/g, '');
+    const normalizeTime = value => String(value || '').replace(/\s/g, '').slice(0, 11);
+    const reservationStart = reservation.start_time || reservation.reserved_start_time || '';
+    const reservationEnd = reservation.end_time || reservation.reserved_end_time || '';
+    const expectedTime = normalizeTime(`${reservationStart} - ${reservationEnd}`);
     const reservedSelections=reservation.draft_data?.schedulePlan?.selections||[];
     document.querySelectorAll('.schedule-option.selected, .schedule-option.reservation-activation-slot').forEach(cell => {
       cell.classList.remove('selected', 'reservation-activation-slot');
@@ -2702,8 +2783,9 @@ class StudentsView extends Component {
       let payload = {};
       try { payload = JSON.parse(cell.dataset.schedule || '{}'); } catch (error) { /* dato inválido */ }
       if(String(payload.cycleId||'')!==String(reservation.cycle_id))return false;
-      if(reservedSelections.length)return reservedSelections.some(selection=>String(selection.date)===String(payload.date)&&String(selection.time||'').replace(/\s/g,'')===String(cell.dataset.time||'').replace(/\s/g,''));
-      return String(cell.dataset.time || '').replace(/\s/g, '') === expectedTime;
+      const cellTime = normalizeTime(cell.dataset.time || payload.time);
+      if(reservedSelections.length)return reservedSelections.some(selection=>String(selection.date)===String(payload.date)&&normalizeTime(selection.time)===cellTime);
+      return Boolean(expectedTime) && cellTime === expectedTime;
     });
     if (!cells.length) return;
     const calendar = cells[0].closest('.enrollment-calendar');
@@ -2916,7 +2998,42 @@ class StudentsView extends Component {
     const currentStep = this.getCurrentModalStep();
     if (currentStep === 1 && !this.validateScheduleFirstStep()) return;
     if (currentStep === 2 && !this.validateStudentFields()) return;
+    const registrationMode = document.querySelector('#student-modal-form [name="registrationMode"]:checked')?.value;
+    const theorySchedule = document.querySelector('#student-modal-form [name="theorySchedule"]:checked')?.value;
+    const theoryAccepted = document.querySelector('#student-modal-form')?.dataset.theoryConfirmationAccepted === 'true';
+    if (currentStep === 1 && registrationMode === 'regular' && theorySchedule === 'por_confirmar' && !theoryAccepted) {
+      this.showTheoryConfirmationModal(() => this.goToNextModalStep());
+      return;
+    }
     if (currentStep < this.getStudentModalLastStep()) this.goToModalStep(currentStep + 1);
+  }
+
+  showTheoryConfirmationModal(onAccept = () => this.goToNextModalStep()) {
+    document.getElementById('theory-confirmation-modal')?.remove();
+    const layer = document.createElement('div');
+    layer.id = 'theory-confirmation-modal';
+    layer.className = 'branch-modal-backdrop student-registration-result-backdrop';
+    layer.innerHTML = `
+      <section class="branch-modal student-registration-result" role="dialog" aria-modal="true" aria-labelledby="theory-confirmation-title" style="max-width:480px;">
+        <h2 id="theory-confirmation-title">Teor&iacute;a por confirmar</h2>
+        <p>Acepto que la teor&iacute;a quede por confirmar y se defina luego con la sucursal.</p>
+        <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:24px;">
+          <button type="button" class="btn btn-secondary" data-cancel-theory-confirmation>Cancelar</button>
+          <button type="button" class="btn btn-primary" data-accept-theory-confirmation>Acepto y continuar</button>
+        </div>
+      </section>`;
+    document.body.appendChild(layer);
+    const close = () => layer.remove();
+    layer.querySelector('[data-cancel-theory-confirmation]')?.addEventListener('click', close);
+    layer.querySelector('[data-accept-theory-confirmation]')?.addEventListener('click', () => {
+      const form = document.getElementById('student-modal-form');
+      const acceptance = form?.querySelector('[name="theoryConfirmationAccepted"]');
+      if (acceptance) acceptance.value = 'true';
+      if (form) form.dataset.theoryConfirmationAccepted = 'true';
+      close();
+      onAccept();
+    });
+    layer.querySelector('[data-cancel-theory-confirmation]')?.focus();
   }
 
   validateScheduleFirstStep() {
@@ -3376,7 +3493,7 @@ class StudentsView extends Component {
 
     const branchId = document.getElementById('modal-branch-select')?.selectedOptions?.[0]?.dataset?.branchId
       || this.studentModalScheduleContext?.branchId
-      || authService.getCurrentUser()?.branch_id;
+      || authService.getEffectiveBranchId();
     if (!branchId) return;
     const instructorId = this.scheduleInstructorFilterId
       || document.getElementById('preferred-instructor-select')?.value
@@ -3725,6 +3842,7 @@ class StudentsView extends Component {
       ],
       address: additionalPractice || renewal ? [] : [{ type: 'required', message: 'La dirección es requerida' }],
       bloodType: temporaryReservation || additionalPractice || renewal ? [] : [{ type: 'required', message: 'Debes seleccionar el tipo de sangre' }],
+      pickupBranchId: additionalPractice || renewal ? [] : [{ type: 'required', message: 'Selecciona dónde recoger al estudiante' }],
       course_id: additionalPractice || renewal ? [] : [{ type: 'required', message: 'Debes seleccionar un curso' }],
       city_id: [{ type: 'required', message: 'Debes seleccionar una ciudad' }],
       branch: [{ type: 'required', message: 'Debes seleccionar una sucursal' }],
@@ -3761,6 +3879,17 @@ class StudentsView extends Component {
 
     if (formData.get('additionalPractice') === 'on') {
       await this.handleAdditionalPracticeSubmit(form, formData, submitBtn);
+      return;
+    }
+
+    const topTransferCheck = document.getElementById('student-transfer-payment');
+    const topTransferReferenceInput = document.getElementById('student-transfer-reference-input');
+    if (!authService.can('PAYMENT_CREATE') && topTransferCheck?.checked && !String(topTransferReferenceInput?.value || '').trim()) {
+      const transferReferenceError = document.getElementById('student-transfer-reference-error');
+      if (transferReferenceError) transferReferenceError.textContent = 'Escribe el numero de comprobante.';
+      this.showModalAlert('error', 'Escribe el numero de comprobante de la transferencia.');
+      this.goToModalStep(2);
+      topTransferReferenceInput?.focus();
       return;
     }
 
@@ -3804,6 +3933,9 @@ class StudentsView extends Component {
     const scheduleId = formData.get('scheduleId');
     const schedulePlan = this.parseSchedulePlan(formData.get('schedulePlan'));
     const theorySchedule = formData.get('theorySchedule');
+    const theoryConfirmationAccepted = form.dataset.theoryConfirmationAccepted === 'true'
+      || formData.get('theoryConfirmationAccepted') === 'true'
+      || formData.get('theoryConfirmationAccepted') === 'on';
     const examOnly = formData.get('practicalMode') === 'exam_only';
     const activeInstructorButton = [...document.querySelectorAll('#student-schedule-calendar [data-course-instructor-id].active')]
       .find(button => button.closest('.enrollment-calendar')?.style.display !== 'none');
@@ -3869,7 +4001,12 @@ class StudentsView extends Component {
       this.goToModalStep(1);
       return;
     }
+    if (theorySchedule === 'por_confirmar' && !theoryConfirmationAccepted) {
+      this.showTheoryConfirmationModal(() => form.requestSubmit(submitBtn));
+      return;
+    }
     schedulePlan.theorySchedule = theorySchedule || 'por_confirmar';
+    schedulePlan.theoryConfirmationAccepted = theoryConfirmationAccepted;
     schedulePlan.practicalMode = examOnly ? 'exam_only' : 'classes';
     schedulePlan.preferredInstructorId = preferredInstructorId;
     schedulePlan.practicalStartDate = practicalStartDate
@@ -3898,11 +4035,17 @@ class StudentsView extends Component {
       const amount = Number(formData.get('paymentAmount'));
       const method = formData.get('paymentMethod');
       const methodOption = document.querySelector('[name="paymentMethod"]')?.selectedOptions?.[0];
-      const reference = String(formData.get('paymentReference') || '').trim();
+      const transferCheck = document.getElementById('student-transfer-payment');
+      const transferReferenceInput = document.getElementById('student-transfer-reference-input');
+      const reference = String(transferCheck?.checked ? (transferReferenceInput?.value || formData.get('paymentReference') || '') : (formData.get('paymentReference') || '')).trim();
+      const isTransferMethod = String(method || '').toLowerCase().includes('transfer')
+        || String(methodOption?.textContent || '').toLowerCase().includes('transferencia');
       const amountError = document.getElementById('payment-amount-error');
       const methodError = document.getElementById('payment-method-error');
+      const transferReferenceError = document.getElementById('student-transfer-reference-error');
       if (amountError) amountError.textContent = '';
       if (methodError) methodError.textContent = '';
+      if (transferReferenceError) transferReferenceError.textContent = '';
       if (!Number.isFinite(amount) || amount <= 0) {
         if (amountError) amountError.textContent = 'Ingresa un valor mayor a cero.';
         this.showModalAlert('error', 'Ingresa un valor de pago mayor a cero.');
@@ -3921,10 +4064,17 @@ class StudentsView extends Component {
         this.goToModalStep(4);
         return;
       }
-      if (methodOption?.dataset.requiresReference === 'true' && !reference) {
+      if (transferCheck?.checked && !reference) {
+        if (transferReferenceError) transferReferenceError.textContent = 'Escribe el numero de comprobante.';
+        this.showModalAlert('error', 'Escribe el numero de comprobante de la transferencia.');
+        this.goToModalStep(2);
+        transferReferenceInput?.focus();
+        return;
+      }
+      if ((isTransferMethod || methodOption?.dataset.requiresReference === 'true') && !reference) {
         const referenceError = document.getElementById('payment-reference-error');
-        if (referenceError) referenceError.textContent = 'Ingresa la referencia de este pago.';
-        this.showModalAlert('error', 'Ingresa la referencia de este pago.');
+        if (referenceError) referenceError.textContent = 'Ingresa el numero de comprobante.';
+        this.showModalAlert('error', 'Ingresa el numero de comprobante de la transferencia.');
         this.goToModalStep(4);
         return;
       }
@@ -3935,6 +4085,14 @@ class StudentsView extends Component {
       submitBtn.textContent = 'Creando estudiante...';
     }
 
+    const topTransferReference = !authService.can('PAYMENT_CREATE') && topTransferCheck?.checked
+      ? String(topTransferReferenceInput?.value || '').trim()
+      : '';
+    const registrationNotes = [
+      this.getVisibleRegistrationNotes(),
+      topTransferReference ? `Transferencia declarada. Comprobante: ${topTransferReference}` : '',
+    ].filter(Boolean).join('\n');
+
     const result = await StudentService.createStudent({
       firstName: formData.get('firstName'),
       lastName: formData.get('lastName'),
@@ -3944,14 +4102,15 @@ class StudentsView extends Component {
       phone: formData.get('phone'),
       address: formData.get('address'),
       bloodType: formData.get('bloodType'),
+      pickupBranchId: formData.get('pickupBranchId'),
       course_id: formData.get('course_id'),
       city_id: this.currentBranchRecord?.city_id || formData.get('city_id'),
-      branch_id: authService.getCurrentUser()?.branch_id || null,
+      branch_id: selectedBranchId || authService.getEffectiveBranchId() || null,
       branch: formData.get('branch'),
       referredByUserId: formData.get('referredByUserId') || null,
       reservationId: this.activatingReservation?.id || null,
       discount: discountAmount,
-      notes: this.getVisibleRegistrationNotes(),
+      notes: registrationNotes,
     });
 
     if (!result.success) {
@@ -4006,7 +4165,9 @@ class StudentsView extends Component {
         cedula: student.cedula || student.identification || formData.get('cedula'),
         amount: formData.get('paymentAmount'),
         method: formData.get('paymentMethod'),
-        reference: formData.get('paymentReference'),
+        reference: document.getElementById('student-transfer-payment')?.checked
+          ? document.getElementById('student-transfer-reference-input')?.value
+          : formData.get('paymentReference'),
         cashier: authService.getCurrentUser()?.name || 'Secretaría de sucursal',
         // Actualiza la lista solamente después de cerrar este modal.
         notify: false,
@@ -4065,7 +4226,7 @@ class StudentsView extends Component {
     const result=await StudentService.createTemporaryReservation({
       identification:formData.get('cedula'),firstName:formData.get('firstName'),lastName:formData.get('lastName'),
       birthDate:formData.get('birthDate'),email:formData.get('email'),phone:formData.get('phone'),address:formData.get('address'),
-      bloodType:formData.get('bloodType'),cityId:this.currentBranchRecord?.city_id||formData.get('city_id'),branchId,registrationBranchId:authService.getCurrentUser()?.branch_id||null,courseId:formData.get('course_id'),
+      bloodType:formData.get('bloodType'),pickupBranchId:formData.get('pickupBranchId'),cityId:this.currentBranchRecord?.city_id||formData.get('city_id'),branchId,registrationBranchId:authService.getCurrentUser()?.branch_id||null,courseId:formData.get('course_id'),
       instructorId,referredByUserId:formData.get('referredByUserId')||null,notes:this.getVisibleRegistrationNotes(),schedulePlan,
     });
     if(!result.success){this.showModalAlert('error',result.error||'No se pudo reservar el cupo.');this.restoreSubmitButton(submitBtn);return;}
@@ -4106,7 +4267,7 @@ class StudentsView extends Component {
       start_date: startDate,
       daily_start_time: dailyTime,
       number_of_days: days,
-      branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getCurrentUser()?.branch_id,
+      branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId(),
     });
     if (!availability.success || !availability.data?.available) {
       this.showModalAlert('error', availability.error || 'El instructor no está disponible. Acepta una sugerencia de instructor o cambia la fecha antes de continuar.');
@@ -4150,7 +4311,7 @@ class StudentsView extends Component {
         await this.uploadModalDocument(student.id, 'licencia', documentToUpload, documentTitle);
       }
       const practice = await StudentService.createAdditionalPractice(student.id, {
-        branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getCurrentUser()?.branch_id,
+        branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId(),
         instructor_id: instructorId, number_of_days: days,
         start_date: startDate, daily_start_time: dailyTime, payment_method: method,
         customer_type: this.additionalPracticeStudent?.former_student ? 'FORMER_STUDENT' : 'EXTERNAL',
@@ -4313,18 +4474,21 @@ class StudentsView extends Component {
     layer.id = 'student-registration-result-modal';
     layer.className = 'branch-modal-backdrop student-registration-result-backdrop';
     layer.innerHTML = `
-      <section class="branch-modal" role="alertdialog" aria-modal="true" aria-labelledby="student-result-title" style="max-width:460px;text-align:center;">
+      <section class="branch-modal student-registration-result" role="alertdialog" aria-modal="true" aria-labelledby="student-result-title" style="max-width:460px;text-align:center;">
+        <button type="button" class="student-registration-success__close" data-close-student-result aria-label="Cerrar mensaje">&times;</button>
         <div style="font-size:44px;margin-bottom:12px;">${isSuccess ? '✓' : '!'}</div>
         <h2 id="student-result-title">${isSuccess ? 'Registro exitoso' : 'No se pudo completar el registro'}</h2>
         <p style="margin:12px 0 18px;">${message}</p>
-        <small>Este mensaje se cerrará en 5 segundos.</small>
       </section>`;
     document.body.appendChild(layer);
     document.body.style.overflow = 'hidden';
-    window.setTimeout(() => {
+    const closeResult = () => {
       layer.remove();
-      document.body.style.overflow = '';
-    }, 5000);
+      if (isSuccess) this.closeStudentModal();
+      else document.body.style.overflow = '';
+    };
+    layer.querySelector('[data-close-student-result]')?.addEventListener('click', closeResult);
+    layer.querySelector('[data-close-student-result]')?.focus();
   }
 
   showStudentAccess(student) {
@@ -4341,7 +4505,7 @@ class StudentsView extends Component {
     document.body.style.overflow = 'hidden';
     const closeAccessModal = () => {
       layer.remove();
-      document.body.style.overflow = '';
+      this.closeStudentModal();
     };
     layer.querySelector('#close-student-access').onclick = closeAccessModal;
     layer.querySelector('#copy-student-access').onclick = async event => {
@@ -4374,27 +4538,8 @@ class StudentsView extends Component {
       }
     };
     layer.querySelector('#accept-student-access').onclick = () => {
-      // Remover completamente el layer de credenciales
       layer.remove();
-      
-      // Remover COMPLETAMENTE todos los overlays, modales y backdrops del DOM
-      document.querySelectorAll('.modal-overlay, .branch-modal-backdrop, .student-modal-overlay, [class*="backdrop"], [class*="overlay"]').forEach(el => {
-        if (el !== layer && el.parentNode) {
-          el.parentNode.removeChild(el);
-        }
-      });
-      
-      // Limpiar estilos
-      document.body.style.overflow = '';
-      
-      // Asegurar que el layout principal esté visible
-      const layout = document.querySelector('.layout');
-      if (layout) {
-        layout.style.display = '';
-        layout.style.visibility = 'visible';
-      }
-      
-      // Navegar al perfil del estudiante
+      this.closeStudentModal();
       setTimeout(() => {
         window.history.pushState(null, null, `/student-profile/${student.id}`);
         window.dispatchEvent(new PopStateEvent('popstate'));
@@ -4684,10 +4829,18 @@ class StudentsView extends Component {
   }
 
   startAutomaticRefresh() {
+    if (this.refreshTimer) window.clearInterval(this.refreshTimer);
+    this.refreshInProgress = false;
     this.refreshTimer = window.setInterval(async () => {
-      if (document.visibilityState !== 'visible') return;
+      if (!document.getElementById('students-list-content')) {
+        window.clearInterval(this.refreshTimer);
+        this.refreshTimer = null;
+        return;
+      }
+      if (document.visibilityState !== 'visible' || this.refreshInProgress) return;
 
       try {
+        this.refreshInProgress = true;
         const reservationParams = { ...(this.listParams || {}) };
         delete reservationParams.status;
         const [students, reservations] = await Promise.all([
@@ -4700,13 +4853,19 @@ class StudentsView extends Component {
           const form = document.getElementById('student-filter-form');
           if (form) {
             const page = Number(new URLSearchParams(window.location.search).get('page')) || 1;
-            await this.refreshStudentTable(this.getStudentListParams(Object.fromEntries(new FormData(form))), page);
+            await this.refreshStudentTable(
+              this.getStudentListParams(Object.fromEntries(new FormData(form))),
+              page,
+              { students, reservations },
+            );
           }
         }
       } catch (error) {
         console.warn('No se pudo actualizar automáticamente la lista de estudiantes:', error.message);
+      } finally {
+        this.refreshInProgress = false;
       }
-    }, 15000);
+    }, 45000);
   }
 
   createSnapshot(students) {

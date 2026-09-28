@@ -31,6 +31,8 @@ class StudentService {
       lastName: student.lastName || student.last_name || '',
       birthDate: student.birthDate || student.birth_date || null,
       bloodType: student.bloodType || student.blood_type || '',
+      pickupBranchId: student.pickupBranchId || student.pickup_branch_id || null,
+      pickupBranchName: student.pickupBranchName || student.pickup_branch_name || '',
       branch: student.branch || student.branch_name || '',
       branchId: student.branchId || student.branch_id || null,
       city: student.city || student.city_name || '',
@@ -71,6 +73,7 @@ class StudentService {
           phone: studentData.phone || null,
           address: studentData.address || null,
           bloodType: studentData.bloodType || 'N/D',
+          pickupBranchId: studentData.pickupBranchId || null,
           city_id: studentData.city_id || null,
           branch_id: studentData.branch_id || null,
           course_id: studentData.course_id || null,
@@ -400,8 +403,15 @@ class StudentService {
   static async getBranches() {
     if (this.useApi) {
       try {
+        if (this.branchesCache && Date.now() - this.branchesCache.createdAt < 300000) {
+          return this.branchesCache.data;
+        }
         const result = await ApiService.getBranches();
-        if (result.success) return result.data;
+        if (result.success) {
+          const branches = result.data || [];
+          this.branchesCache = { createdAt: Date.now(), data: branches };
+          return branches;
+        }
       } catch (e) {
         console.warn('API no disponible para getBranches:', e.message);
       }

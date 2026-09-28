@@ -21,6 +21,7 @@ class SidebarLayout {
     const isGeneralManager = user?.roles?.includes('GENERAL_MANAGER');
     const isManagerNavigationRoute = currentPath === '/manager' || currentPath.startsWith('/manager/');
     const managerMobileLayoutClass = isGeneralManager && isManagerNavigationRoute ? 'manager-mobile-layout' : '';
+    const hasOperationalCoverage = Boolean(user?.operationalCoverage && user?.operationalBranchId);
     const adminIcons = {
       '/admin-system': '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
       '/admin-system/branches': '<path d="M3 21h18"/><path d="M6 21V7l6-4 6 4v14"/><path d="M9 10h1M14 10h1M9 14h1M14 14h1"/>',
@@ -263,7 +264,8 @@ class SidebarLayout {
 
             <div class="topbar-right">
               <div class="topbar-item">
-                <span class="branch">${user.scope === 'GLOBAL' ? 'Todas las sucursales' : user.branch}</span>
+                <span class="branch">${user.scope === 'GLOBAL' ? 'Todas las sucursales' : (user.operationalBranch || user.branch)}</span>
+                ${hasOperationalCoverage ? '<span class="coverage-chip">Cobertura activa</span>' : ''}
               </div>
 
               <div class="topbar-item">

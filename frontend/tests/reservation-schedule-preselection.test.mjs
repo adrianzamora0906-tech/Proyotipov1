@@ -19,3 +19,14 @@ test('la activacion consulta la disponibilidad excluyendo su propia reserva', ()
   assert.match(backend, /o\.reason NOT LIKE CONCAT\('RESERVA_CURSO:',\$3::text,':%'\)/);
   assert.match(backend, /id<>\$2::uuid/);
 });
+
+test('la activacion puede seleccionar reservas de instructor sin borrador de horario', () => {
+  const selectionStart = frontend.indexOf('selectReservedSchedule(reservation)');
+  const selectionEnd = frontend.indexOf('\n  closeStudentModal', selectionStart);
+  const selectionFlow = frontend.slice(selectionStart, selectionEnd);
+
+  assert.match(selectionFlow, /reserved_start_time/);
+  assert.match(selectionFlow, /reserved_end_time/);
+  assert.match(selectionFlow, /cell\.dataset\.time \|\| payload\.time/);
+  assert.match(selectionFlow, /Boolean\(expectedTime\) && cellTime === expectedTime/);
+});

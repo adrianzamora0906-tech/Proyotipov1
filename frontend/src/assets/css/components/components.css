@@ -219,6 +219,18 @@
   transition: var(--transition);
 }
 
+.form-select,
+.form-select option,
+.form-select optgroup {
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.875rem;
+}
+
+.form-select {
+  width: 100%;
+  max-width: 100%;
+}
+
 .form-input:focus,
 .form-textarea:focus,
 .form-select:focus {
@@ -540,7 +552,7 @@
   border: 1px dashed var(--gray-300);
   border-radius: 1rem;
   box-shadow: 0 14px 35px rgba(50, 50, 93, 0.08);
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: 'Poppins', sans-serif;
   color: var(--gray-900);
 }
 

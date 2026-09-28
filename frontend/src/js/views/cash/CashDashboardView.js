@@ -113,7 +113,7 @@ class CashDashboardView extends Component {
   async openChargeModal(payment, closeSearch) {
     const overlay = document.getElementById('cash-charge-overlay');
     const student = payment.student || {};
-    const branchId = payment.branchId || payment.branch_id || student.branchId || student.branch_id || authService.getCurrentUser()?.branch_id || '';
+    const branchId = payment.branchId || payment.branch_id || student.branchId || student.branch_id || authService.getEffectiveBranchId() || '';
     const methods = await PaymentService.getAvailableMethods(branchId);
     const money = value => new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
     const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);

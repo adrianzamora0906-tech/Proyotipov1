@@ -44,6 +44,17 @@ class StudentProfileView extends Component {
       return `<div class="error-page"><h1>Estudiante no encontrado</h1></div>`;
     }
 
+    const isBranchAdmin = (authService.getCurrentUser()?.roles || []).includes('BRANCH_ADMIN');
+    let branchAdminAttendance = null;
+    if (isBranchAdmin) {
+      try {
+        const result = await ApiService.getBranchAdminAttendance(studentId);
+        branchAdminAttendance = result.success ? result.data : null;
+      } catch (error) {
+        console.warn('No se pudo consultar la asistencia administrativa:', error.message);
+      }
+    }
+
     let documents = [];
     try {
       const result = await ApiService.getStudentDocuments(studentId);
@@ -109,6 +120,7 @@ class StudentProfileView extends Component {
             </div>
           </div>
           <div class="profile-header-actions">
+            ${isBranchAdmin ? `<button class="btn btn-primary" id="register-branch-admin-attendance" ${branchAdminAttendance?.canRegister?'':'disabled'} data-phase="${branchAdminAttendance?.phase || 'ENTRY'}" title="${escapeHtml(branchAdminAttendance?.message || 'No se pudo comprobar la clase programada')}">${branchAdminAttendance?.completed?'Asistencia completa':branchAdminAttendance?.phase==='EXIT'?'Registrar salida':'Registrar entrada'}</button>` : ''}
             <button class="btn btn-secondary" id="edit-student-btn">Editar</button>
             ${canManageStudentRecord ? `
               <button type="button" class="btn btn-secondary" id="disable-student-btn">Inhabilitar</button>
@@ -540,6 +552,22 @@ class StudentProfileView extends Component {
       this.openEditStudentModal(studentId);
     });
 
+    document.getElementById('register-branch-admin-attendance')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const phase = button.dataset.phase === 'EXIT' ? 'salida' : 'entrada';
+      if (!window.confirm(`¿Confirmas la ${phase} del estudiante en este momento?`)) return;
+      try {
+        button.disabled = true;
+        button.textContent = 'Registrando...';
+        await ApiService.registerBranchAdminAttendance(studentId);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = phase === 'salida' ? 'Registrar salida' : 'Registrar entrada';
+        window.alert(error.message || 'No se pudo registrar la asistencia.');
+      }
+    });
+
     document.getElementById('reset-student-access-btn')?.addEventListener('click', () => {
       this.openResetStudentAccessModal(studentId);
     });
@@ -679,9 +707,8 @@ class StudentProfileView extends Component {
       alert('Observaciones guardadas');
     });
 
-    const openScheduleModal = () => this.openScheduleModal(studentId);
-    document.getElementById('select-schedule-btn')?.addEventListener('click', openScheduleModal);
-    document.getElementById('change-schedule-btn')?.addEventListener('click', openScheduleModal);
+    document.getElementById('select-schedule-btn')?.addEventListener('click', () => this.openScheduleModal(studentId, { allowInitial: true }));
+    document.getElementById('change-schedule-btn')?.addEventListener('click', () => this.openScheduleModal(studentId, { allowInitial: false }));
     document.getElementById('change-theory-schedule-btn')?.addEventListener('click', () => this.openTheoryScheduleModal(studentId));
 
     this.updateNotificationBadge();
@@ -1265,7 +1292,7 @@ class StudentProfileView extends Component {
     }
   }
 
-  async openScheduleModal(studentId) {
+  async openScheduleModal(studentId, { allowInitial = false } = {}) {
     const modal = document.getElementById('profile-action-modal');
     if (!modal) return;
     modal.innerHTML = '<div class="modal"><div class="modal-body">Cargando horarios disponibles…</div></div>';
@@ -1319,10 +1346,13 @@ class StudentProfileView extends Component {
     } catch (error) {
       const hasNoCurrentSchedule = error?.status === 404
         && /horario asignado|curso vigente/i.test(error.message || '');
-      if (hasNoCurrentSchedule) {
+      if (hasNoCurrentSchedule && allowInitial) {
         return this.openInitialCourseScheduleModal(studentId, modal);
       }
-      modal.innerHTML = `<div class="modal"><div class="modal-body"><div class="form-error">${error.message || 'No se pudieron cargar los horarios.'}</div></div><div class="modal-footer"><button class="btn btn-secondary" data-close-modal>Cerrar</button></div></div>`;
+      const message = hasNoCurrentSchedule
+        ? 'No se puede cambiar el horario porque el estudiante todav&iacute;a no tiene instructor ni d&iacute;as pr&aacute;cticos asignados.'
+        : (error.message || 'No se pudieron cargar los horarios.');
+      modal.innerHTML = `<div class="modal"><div class="modal-header"><h3 class="modal-title">Cambiar horarios</h3><button class="modal-close" data-close-modal>&times;</button></div><div class="modal-body"><div class="form-error">${message}</div></div><div class="modal-footer"><button class="btn btn-secondary" data-close-modal>Cerrar</button></div></div>`;
       this.bindProfileModalClose(modal);
     }
   }
@@ -1398,13 +1428,16 @@ class StudentProfileView extends Component {
 
     modal.querySelectorAll('[data-initial-schedule]').forEach(button => {
       button.addEventListener('click', () => {
-        modal.querySelectorAll('[data-initial-schedule]').forEach(item => item.classList.remove('selected'));
-        button.classList.add('selected');
+        this.selectInitialProfileScheduleRow(modal, button);
         const cycle = cycles.find(item => item.id === button.dataset.cycleId);
         renderTheoryOptions(cycle);
         modal.querySelector('#profile-schedule-error').textContent = '';
       });
     });
+    modal.querySelectorAll('.calendar-window-btn').forEach(button => {
+      button.addEventListener('click', () => this.shiftProfileCalendarWindow(button.closest('.enrollment-calendar'), Number(button.dataset.direction)));
+    });
+    modal.querySelectorAll('.enrollment-calendar').forEach(calendar => this.updateProfileCalendarWindow(calendar));
 
     modal.querySelector('#confirm-initial-profile-schedule')?.addEventListener('click', async event => {
       const button = event.currentTarget;
@@ -1461,27 +1494,63 @@ class StudentProfileView extends Component {
     });
   }
 
+  selectInitialProfileScheduleRow(modal, button) {
+    modal.querySelectorAll('[data-initial-schedule]').forEach(item => {
+      const sameRow = item.dataset.cycleId === button.dataset.cycleId
+        && item.dataset.startTime === button.dataset.startTime
+        && item.dataset.endTime === button.dataset.endTime;
+      item.classList.toggle('selected', sameRow && !item.disabled);
+    });
+  }
+
   renderInitialCycleOption(cycle) {
-    const slots = (cycle.slots || []).map(slot => {
-      const dates = Object.values(slot.occupancyByDate || {});
+    const dateKeys = [...new Set((cycle.slots || []).flatMap(slot => Object.keys(slot.occupancyByDate || {})))].sort();
+    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
+    const days = dateKeys.map(date => {
+      const parsed = new Date(`${date}T12:00:00`);
+      return { date, name: dayNames[parsed.getDay()], label: date.slice(5).split('-').reverse().join('/') };
+    });
+    const slots = [...(cycle.slots || [])].sort((first, second) => String(first.startTime).localeCompare(String(second.startTime)));
+    const rows = slots.map(slot => {
+      const dates = Object.entries(slot.occupancyByDate || {});
       const required = Math.max(Number(cycle.durationBusinessDays) || 0, 1);
-      const available = dates.length >= required
-        ? Math.min(...dates.map(item => Number(item.available || 0)))
+      const availableDates = dates.filter(([, item]) => Number(item.available || 0) > 0);
+      const available = availableDates.length >= required
+        ? Math.min(...availableDates.map(([, item]) => Number(item.available || 0)))
         : 0;
       return `
-        <button type="button" class="schedule-option profile-initial-slot ${available > 0 ? '' : 'disabled'}"
+        <button type="button" class="enrollment-calendar-time profile-initial-time ${available > 0 ? '' : 'disabled'}"
           data-initial-schedule data-cycle-id="${cycle.id}" data-start-time="${slot.startTime}" data-end-time="${slot.endTime}"
           ${available > 0 ? '' : 'disabled'}>
-          <strong>${slot.startTime} - ${slot.endTime}</strong>
-          <span class="schedule-option-status ${available > 0 ? 'available' : 'full'}">${available > 0 ? `${available} cupo${available === 1 ? '' : 's'}` : 'Completo'}</span>
-        </button>`;
+          ${slot.startTime} - ${slot.endTime}
+        </button>
+        ${days.map((day, dayIndex) => {
+          const occupancy = slot.occupancyByDate?.[day.date] || {};
+          const dayAvailable = Number(occupancy.available || 0);
+          const selectable = available > 0 && dayAvailable > 0;
+          return `<button type="button" class="schedule-option profile-initial-calendar-cell ${selectable ? '' : 'disabled'}"
+            data-initial-schedule data-cycle-id="${cycle.id}" data-start-time="${slot.startTime}" data-end-time="${slot.endTime}"
+            data-date="${day.date}" data-day-index="${dayIndex}" ${selectable ? '' : 'disabled'}>
+            <span class="schedule-option-status ${selectable ? 'available' : 'full'}">${selectable ? `${dayAvailable} cupo${dayAvailable === 1 ? '' : 's'}` : 'Completo'}</span>
+          </button>`;
+        }).join('')}`;
     }).join('');
     return `
-      <section class="profile-initial-cycle">
-        <div class="profile-initial-cycle-head">
+      <section class="profile-initial-cycle enrollment-calendar" data-day-window-start="0" data-day-count="${days.length}">
+        <div class="profile-initial-cycle-head enrollment-calendar-head">
           <div><strong>${cycle.modality === 'intensivo' ? 'Intensivo' : 'Normal'} · ${cycle.code}</strong><span>${cycle.startDate} al ${cycle.endDate}</span></div>
+          <div class="calendar-window-controls">
+            <button type="button" class="calendar-window-btn" data-direction="-1" aria-label="Dias anteriores">&lt;</button>
+            <span class="calendar-window-label"></span>
+            <button type="button" class="calendar-window-btn" data-direction="1" aria-label="Dias siguientes">&gt;</button>
+          </div>
         </div>
-        <div class="profile-initial-slot-grid">${slots}</div>
+        <div class="schedule-rotation-message">Selecciona una hora para aplicarla a todos los d&iacute;as disponibles del curso.</div>
+        <div class="enrollment-calendar-grid" style="--cycle-count:${Math.min(days.length, 5)}">
+          <div class="enrollment-calendar-heading">Hora</div>
+          ${days.map((day, dayIndex) => `<div class="enrollment-calendar-heading" data-day-index="${dayIndex}"><strong>${day.name}</strong><span>${day.label}</span></div>`).join('')}
+          ${rows}
+        </div>
       </section>`;
   }
 
@@ -1517,11 +1586,20 @@ class StudentProfileView extends Component {
   renderProfileScheduleCalendar(cycle) {
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const days = this.getProfileBusinessDays(cycle.startDate, cycle.endDate)
-      .filter(day => day.date >= today);
+    const availableDates = [...new Set([
+      ...(cycle.currentAssignments || []).map(item => item.date),
+      ...(cycle.slots || []).flatMap(slot => Object.keys(slot.occupancyByDate || {})),
+    ])].filter(date => date >= today).sort();
+    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
+    const days = availableDates.map(date => {
+      const parsed = new Date(`${date}T12:00:00`);
+      return { date, name: dayNames[parsed.getDay()], label: date.slice(5).split('-').reverse().join('/') };
+    });
     const slots = [...(cycle.slots || [])]
       .sort((first, second) => String(first.startTime || '').localeCompare(String(second.startTime || '')));
-    const instructorName = (cycle.currentAssignments || []).find(item => item.instructorName)?.instructorName || '';
+    const instructorName = cycle.instructor?.name
+      || (cycle.currentAssignments || []).find(item => item.instructorName)?.instructorName
+      || '';
     return `
       <div class="enrollment-calendar" data-course="${cycle.vehicleType}" data-cycle-id="${cycle.id}" data-day-window-start="0" data-day-count="${days.length}">
         <div class="enrollment-calendar-head">
@@ -1537,7 +1615,7 @@ class StudentProfileView extends Component {
             </div>
           </div>
         </div>
-        <div class="schedule-rotation-message">Puedes cambiar uno, varios o todos los d&iacute;as siguientes. El instructor se mantendr&aacute;${instructorName ? `: <strong>${instructorName}</strong>` : ''}.</div>
+        <div class="schedule-rotation-message">Selecciona por celda el nuevo horario de cada d&iacute;a. Instructor: <strong>${instructorName || 'Sin instructor asignado'}</strong>.</div>
         <div class="enrollment-calendar-grid" style="--cycle-count: ${Math.min(days.length, 5)};">
           <div class="enrollment-calendar-heading">Hora</div>
           ${days.map((day, dayIndex) => `
@@ -1587,7 +1665,7 @@ class StudentProfileView extends Component {
         data-date="${day.date}"
         data-day-index="${dayIndex}"
         ${disabled ? 'disabled' : ''}>
-        <span class="schedule-option-status ${isCurrent ? 'available' : (disabled ? 'full' : 'available')}">${isCurrent ? 'Actual' : (isPast ? 'Pasado' : (!assignment ? 'Sin asignación' : (available <= 0 ? 'Completo' : 'Disponible')))}</span>
+        <span class="schedule-option-status ${isCurrent ? 'current' : (disabled ? 'full' : 'available')}">${isCurrent ? 'Horario actual' : (isPast ? 'Pasado' : (!assignment ? 'Sin asignaci&oacute;n' : (available <= 0 ? 'Ocupado' : 'Disponible')))}</span>
         <span class="schedule-option-capacity">${available}/${slot.capacity} cupos</span>
       </button>
     `;

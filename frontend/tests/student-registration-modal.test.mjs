@@ -28,6 +28,27 @@ test('las notificaciones locales no pueden impedir el cierre del modal', () => {
   assert.match(scheduleFlow, /try\s*\{\s*NotificationService\.notifyScheduleSelected\(studentId\);\s*\}\s*catch/s);
 });
 
+test('el mensaje de resultado se cierra manualmente con una X', () => {
+  const alertStart = source.indexOf('showModalAlert(type, message)');
+  const alertEnd = source.indexOf('showStudentAccess(student)', alertStart);
+  const alertFlow = source.slice(alertStart, alertEnd);
+
+  assert.match(alertFlow, /data-close-student-result/);
+  assert.match(alertFlow, /aria-label="Cerrar mensaje"/);
+  assert.doesNotMatch(alertFlow, /Este mensaje se cerrar/);
+  assert.doesNotMatch(alertFlow, /setTimeout/);
+  assert.match(alertFlow, /if \(isSuccess\) this\.closeStudentModal\(\)/);
+});
+
+test('cerrar credenciales o abrir el expediente vuelve a cerrar Nuevo Estudiante', () => {
+  const accessStart = source.indexOf('\n  showStudentAccess(student) {');
+  const accessEnd = source.indexOf('restoreSubmitButton', accessStart);
+  const accessFlow = source.slice(accessStart, accessEnd);
+
+  assert.match(accessFlow, /const closeAccessModal = \(\) => \{\s*layer\.remove\(\);\s*this\.closeStudentModal\(\)/s);
+  assert.match(accessFlow, /querySelector\('#accept-student-access'\)\.onclick = \(\) => \{\s*layer\.remove\(\);\s*this\.closeStudentModal\(\)/s);
+});
+
 test('el filtro de estudiantes inicia con todas las sucursales del cantón', () => {
   assert.match(source, /else if \(!queryParams\.get\('branch_id'\)\) listParams\.scope = 'all'/);
   assert.match(source, /const activeStudentFilter = !queryParams\.get\('branch_id'\)/);

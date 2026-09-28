@@ -38,10 +38,15 @@ class InstructorIncidentsView extends Component {
 
   renderForm(students) {
     const types = ['Estudiante ausente', 'Estudiante llego tarde', 'Vehiculo con falla', 'Dano en el vehiculo', 'Accidente', 'Clase suspendida', 'Condiciones climaticas', 'Problema de horario', 'Comportamiento inapropiado', 'Problema de seguridad', 'Otro'];
+    const studentOptions = students.map(item => {
+      const label = `${item.name} - ${item.course}`;
+      const shortLabel = label.length > 54 ? `${label.slice(0, 51)}...` : label;
+      return `<option value="${item.enrollmentId}" title="${escapeHtml(label)}">${escapeHtml(shortLabel)}</option>`;
+    }).join('');
     return `
       <form id="incident-form">
         <div class="form-group"><label class="form-label required">Tipo</label><select class="form-select" name="incidentType" required>${types.map(type => `<option value="${type}">${type}</option>`).join('')}</select></div>
-        <div class="form-group"><label class="form-label">Estudiante relacionado</label><select class="form-select" name="enrollmentId"><option value="">Sin estudiante</option>${students.map(item => `<option value="${item.enrollmentId}">${escapeHtml(item.name)} - ${escapeHtml(item.course)}</option>`).join('')}</select></div>
+        <div class="form-group"><label class="form-label">Estudiante relacionado</label><select class="form-select" name="enrollmentId"><option value="">Sin estudiante</option>${studentOptions}</select></div>
         <div class="form-group"><label class="form-label">Prioridad</label><select class="form-select" name="priority"><option>BAJA</option><option selected>MEDIA</option><option>ALTA</option><option>CRITICA</option></select></div>
         <div class="form-group"><label class="form-label required">Descripcion</label><textarea class="form-textarea" name="description" required></textarea></div>
         <div class="form-group"><label class="form-label">Evidencia</label><input class="form-input" name="evidencePath" placeholder="Ruta o referencia de evidencia"></div>

@@ -145,7 +145,7 @@ class PaymentService {
   static async getAvailableMethods(branchId = '') {
     try {
       const currentUser = authService.getCurrentUser();
-      const queryBranchId = currentUser?.scope === 'GLOBAL' ? branchId : '';
+      const queryBranchId = currentUser?.scope === 'GLOBAL' ? branchId : (branchId || authService.getEffectiveBranchId());
       const result = await ApiService.getPaymentMethods(queryBranchId);
       return result.success ? result.data : [];
     } catch (error) {

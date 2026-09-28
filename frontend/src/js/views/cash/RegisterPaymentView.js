@@ -4,6 +4,7 @@ import PaymentService from '../../services/PaymentService.js';
 import StudentService from '../../services/StudentService.js';
 import ReceiptService from '../../services/ReceiptService.js';
 import StringHelper from '../../helpers/StringHelper.js';
+import { authService } from '../../core/auth/AuthService.js';
 
 class RegisterPaymentView extends Component {
   async render() {
@@ -43,7 +44,7 @@ class RegisterPaymentView extends Component {
       const normalizedCedula = StringHelper.normalizeCedula(student.cedula);
 
       const renderPaymentForm = async () => {
-      const methods = await PaymentService.getAvailableMethods(JSON.parse(sessionStorage.getItem('erp_session') || '{}').branch_id || '');
+      const methods = await PaymentService.getAvailableMethods(authService.getEffectiveBranchId());
       studentCard.innerHTML = `
         <div class="card">
           <div class="card-body">

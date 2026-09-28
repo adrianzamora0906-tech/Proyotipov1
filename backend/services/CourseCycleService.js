@@ -37,6 +37,10 @@ function toDateString(value) {
   return new Date(value).toISOString().slice(0, 10);
 }
 
+function isWithinCourseRescheduleWindow(startDate, today = new Date()) {
+  return toDateString(today) <= addBusinessDays(startDate, 2);
+}
+
 function normalizeTime(value) {
   return String(value || '').slice(0, 5);
 }
@@ -1453,7 +1457,7 @@ class CourseCycleService {
         endDate: toDateString(row.end_date),
       durationBusinessDays: Number(row.duration_business_days),
       status: row.status,
-      canRescheduleCourse: toDateString(new Date()) < toDateString(row.start_date),
+      canRescheduleCourse: isWithinCourseRescheduleWindow(row.start_date),
       theorySchedule: row.theory_modality === 'virtual'
         ? 'virtual'
         : row.theory_modality === 'presencial_intensivo'
@@ -1839,8 +1843,8 @@ class CourseCycleService {
         `,[studentId,rescheduleFromCycleId]);
         if (!sourceResult.rows.length) throw createError(404, 'No se encontró el curso actual del estudiante');
         const source = sourceResult.rows[0];
-        if (toDateString(source.start_date) <= toDateString(new Date())) {
-          throw createError(409, 'No se puede reagendar porque el curso ya inició');
+        if (!isWithinCourseRescheduleWindow(source.start_date)) {
+          throw createError(409, 'No se puede reagendar porque ya pasaron mas de dos dias habiles desde el inicio del curso');
         }
         const sameCycle = String(source.id) === String(cycle.id);
         const sameInstructor = preferredInstructorId && String(source.instructor_id) === String(preferredInstructorId);

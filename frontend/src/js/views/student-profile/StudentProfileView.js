@@ -965,7 +965,7 @@ class StudentProfileView extends Component {
       const currentResult = await ApiService.getStudentScheduleChangeOptions(studentId);
       const current = currentResult.success ? currentResult.data : null;
       if (!current) throw new Error(currentResult.error || 'No se encontró el curso actual.');
-      if (!current.canRescheduleCourse) throw new Error('Este curso ya inició y no puede reagendarse a otro curso.');
+      if (!current.canRescheduleCourse) throw new Error('Este curso solo puede reagendarse hasta dos dias habiles despues de su inicio.');
       const optionsResult = await ApiService.getCourseEnrollmentOptions({
         branch_id: current.branchId,
         course_id: current.courseId,

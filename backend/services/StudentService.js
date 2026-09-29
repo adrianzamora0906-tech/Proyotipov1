@@ -12,7 +12,19 @@ class StudentService {
         AND (ur.valid_until IS NULL OR ur.valid_until>NOW()) LIMIT 1`, [user.id,user.branch_id]);
     if (!branchAdmin.rows.length) throw createError(403, 'Solo el Administrador de Sucursal puede registrar esta asistencia');
     const branchId = branchAdmin.rows[0].branch_id;
-    const result = await client.query(`SELECT assignment.id assignment_id,assignment.enrollment_id,
+    const openResult = await client.query(`SELECT NULL::uuid assignment_id,ps.enrollment_id,
+        ps.instructor_id,e.branch_id,ps.scheduled_start,ps.scheduled_end,ps.id session_id,ps.status session_status,
+        ps.attendance_status,ps.actual_start,ps.actual_end,
+        TRIM(CONCAT(iu.first_name,' ',iu.last_name)) instructor_name
+      FROM practical_sessions ps
+      JOIN enrollments e ON e.id=ps.enrollment_id AND e.student_id=$1
+      LEFT JOIN instructor_profiles ip ON ip.id=ps.instructor_id
+      LEFT JOIN users iu ON iu.id=ip.user_id
+      WHERE e.branch_id=$2 AND ps.deleted_at IS NULL
+        AND ps.status='EN_CURSO' AND ps.actual_end IS NULL
+      ORDER BY ps.actual_start DESC NULLS LAST,ps.scheduled_start DESC
+      LIMIT 1 ${lock ? 'FOR UPDATE OF ps' : ''}`, [studentId, branchId]);
+    const result = openResult.rows.length ? openResult : await client.query(`SELECT assignment.id assignment_id,assignment.enrollment_id,
         assignment.instructor_id,e.branch_id,assignment.schedule_date+assignment.start_time scheduled_start,
         assignment.schedule_date+assignment.end_time scheduled_end,ps.id session_id,ps.status session_status,
         ps.attendance_status,ps.actual_start,ps.actual_end,
@@ -39,7 +51,8 @@ class StudentService {
     const entryWindowEnd = new Date(row.scheduled_end);
     const exitWindowEnd = new Date(entryWindowEnd.getTime() + 30 * 60 * 1000);
     const attendanceWindowStart = new Date(new Date(row.scheduled_start).getTime() - 10 * 60 * 1000);
-    const withinWindow = attendanceWindowStart <= now && now <= (phase === 'EXIT' ? exitWindowEnd : entryWindowEnd);
+    const isOpenSession = phase === 'EXIT' && sessionStatus === 'EN_CURSO' && !row.actual_end;
+    const withinWindow = isOpenSession || (attendanceWindowStart <= now && now <= (phase === 'EXIT' ? exitWindowEnd : entryWindowEnd));
     const completed = hasEntry && hasExit;
     return { hasClass: true, canRegister: withinWindow && !completed, phase,
       hasEntry, hasExit, completed, sessionId: row.session_id, assignmentId: row.assignment_id,

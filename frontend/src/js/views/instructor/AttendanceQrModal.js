@@ -50,6 +50,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
   let rotationTimer = null;
   let closed = false;
   let refreshing = false;
+  let mileageFormVisible = false;
   const clearTimers = () => {
     if (pollTimer) window.clearInterval(pollTimer);
     if (countdownTimer) window.clearInterval(countdownTimer);
@@ -63,6 +64,56 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
   };
   overlay.querySelectorAll('[data-close-attendance]').forEach(button => button.addEventListener('click', close));
 
+  const showMileageForm = () => {
+    if (closed || isExit || mileageFormVisible) return;
+    mileageFormVisible = true;
+    clearTimers();
+    const body = overlay.querySelector('.attendance-qr-body');
+    body.innerHTML = `
+      <div class="attendance-waiting attendance-success">Entrada confirmada por el estudiante.</div>
+      <strong>Registrar kilometraje inicial</strong>
+      <p>Ingresa el kilometraje que marca el vehiculo antes de iniciar la practica.</p>
+      <form data-start-mileage-form>
+        <label for="start-mileage">Kilometraje inicial</label>
+        <input id="start-mileage" name="startMileage" type="text" inputmode="numeric"
+          pattern="[0-9]+" maxlength="7" autocomplete="off" placeholder="Ej. 45820" required>
+        <div class="attendance-error" data-start-mileage-error aria-live="polite"></div>
+        <button type="submit" class="btn btn-primary">Guardar e iniciar</button>
+      </form>`;
+    const form = body.querySelector('[data-start-mileage-form]');
+    const input = form.elements.startMileage;
+    input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, 7); });
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const error = body.querySelector('[data-start-mileage-error]');
+      const button = form.querySelector('button[type="submit"]');
+      if (!/^\d{1,7}$/.test(input.value)) {
+        error.textContent = 'Ingresa el kilometraje usando solo numeros.';
+        input.focus();
+        return;
+      }
+      try {
+        button.disabled = true;
+        button.textContent = 'Guardando...';
+        error.textContent = '';
+        await PracticalSessionService.registerStartMileage(sessionId, input.value);
+        body.innerHTML = '<div class="attendance-waiting attendance-success">Kilometraje registrado. La clase ha iniciado.</div>';
+        window.setTimeout(() => {
+          if (!closed) {
+            close();
+            onConfirmed?.();
+          }
+        }, 900);
+      } catch (requestError) {
+        error.textContent = requestError.message || 'No se pudo registrar el kilometraje.';
+        button.disabled = false;
+        button.textContent = 'Guardar e iniciar';
+        input.focus();
+      }
+    });
+    input.focus();
+  };
+
   const refreshChallenge = async () => {
     if (closed || refreshing) return;
     refreshing = true;
@@ -71,8 +122,17 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       if (closed) return;
       const challenge = response.data;
       if (challenge.alreadyConfirmed) {
-        close();
-        onConfirmed?.();
+        if (isExit) {
+          close();
+          onConfirmed?.();
+        } else {
+          const current = await PracticalSessionService.getAttendanceQrStatus(sessionId, phase);
+          if (current.data.requiresStartMileage) showMileageForm();
+          else {
+            close();
+            onConfirmed?.();
+          }
+        }
         return;
       }
       const localOrigin = ['localhost', '127.0.0.1'].includes(window.location.hostname);
@@ -147,6 +207,10 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       const response = await PracticalSessionService.getAttendanceQrStatus(sessionId, phase);
       const confirmed = isExit ? response.data.exitConfirmed : response.data.started;
       if (!confirmed) return;
+      if (!isExit && response.data.requiresStartMileage) {
+        showMileageForm();
+        return;
+      }
       clearTimers();
       const status = overlay.querySelector('[data-attendance-status]');
       if (status) {

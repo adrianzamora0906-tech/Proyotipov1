@@ -1656,6 +1656,20 @@ class CourseCycleService {
           [studentId, `Cambio de horario del ${date}: ${normalizeTime(current.start_time)} - ${normalizeTime(current.end_time)} a ${startTime} - ${endTime}. Observacion: ${observation}`]
         );
       }
+      const enrollmentsToSync = new Map(insertedAssignments
+        .filter(assignment => assignment.enrollment_id && assignment.instructor_id)
+        .map(assignment => [String(assignment.enrollment_id), {
+          enrollmentId: assignment.enrollment_id,
+          instructorId: assignment.instructor_id,
+        }]));
+      for (const item of enrollmentsToSync.values()) {
+        await CycleInstructorAssignmentService.reconcilePracticalSessions(
+          client,
+          item.enrollmentId,
+          item.instructorId,
+          user.id
+        );
+      }
       const student = (await client.query(`
         SELECT concat_ws(' ', first_name, last_name) AS name
         FROM students WHERE id = $1

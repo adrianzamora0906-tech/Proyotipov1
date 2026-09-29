@@ -17,6 +17,10 @@ class PracticalSessionService {
     return apiClient.get(`/instructor/sessions/${sessionId}/attendance-qr/status?phase=${encodeURIComponent(phase)}`);
   }
 
+  static async registerStartMileage(sessionId, startMileage) {
+    return apiClient.post(`/instructor/sessions/${sessionId}/start-mileage`, { startMileage });
+  }
+
   static async resetQrTestSession(sessionId) {
     return apiClient.post(`/instructor/sessions/${sessionId}/reset-qr-test`);
   }

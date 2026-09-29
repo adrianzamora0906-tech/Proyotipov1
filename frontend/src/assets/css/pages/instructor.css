@@ -273,6 +273,34 @@
   background: var(--danger-light);
 }
 
+.attendance-qr-body [data-start-mileage-form] {
+  display: grid;
+  width: 100%;
+  gap: .65rem;
+  text-align: left;
+}
+
+.attendance-qr-body [data-start-mileage-form] label {
+  color: var(--gray-800);
+  font-size: .8rem;
+  font-weight: 700;
+}
+
+.attendance-qr-body [data-start-mileage-form] input {
+  width: 100%;
+  min-height: 46px;
+  padding: .7rem .8rem;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-md);
+  font: inherit;
+}
+
+.attendance-qr-body [data-start-mileage-form] .attendance-error {
+  min-height: 1rem;
+  color: var(--danger);
+  font-size: .72rem;
+}
+
 .complete-session-modal { width: min(640px, calc(100vw - 2rem)); max-width: 640px; overflow: hidden; }
 .referral-new-person{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.8rem;min-width:0;padding:.85rem;border:1px solid #e4e7ec;border-radius:11px;background:#f8fafc}.referral-new-person label:first-child{grid-column:1/-1}
 .referral-schedule-help{color:#667085;font-size:.68rem;font-weight:500;line-height:1.4}

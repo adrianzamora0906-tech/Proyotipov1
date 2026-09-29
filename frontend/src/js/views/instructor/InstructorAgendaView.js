@@ -208,6 +208,11 @@ class InstructorAgendaView extends Component {
 
   renderActions(item) {
     const buttons = [`<button class="btn btn-secondary btn-small js-session-detail" data-id="${item.id}">Detalle</button>`];
+    if (item.isScheduleOnly) {
+      buttons.push('<span class="badge badge-warning">Asistencia pendiente de sincronizacion</span>');
+      buttons.push(`<a class="btn btn-secondary btn-small" href="/instructor/students?enrollment=${encodeURIComponent(item.enrollmentId)}">Ver estudiante</a>`);
+      return `<div class="instructor-actions">${buttons.join('')}</div>`;
+    }
     if (item.isExamOnly) {
       if (this.isExamToday(item)) buttons.push(`<a class="btn btn-primary btn-small" href="/instructor/evaluations?session=${encodeURIComponent(item.id)}&enrollment=${encodeURIComponent(item.enrollmentId)}">Evaluar</a>`);
       else buttons.push(`<span class="agenda-exam-wait">Disponible el ${new Date(item.scheduledStart).toLocaleDateString('es-EC')}</span>`);

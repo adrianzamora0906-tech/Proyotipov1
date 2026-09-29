@@ -87,12 +87,25 @@ class StudentProfileView extends Component {
     const activeEnrollment = (student.enrollments || []).find(enrollment => enrollment.status === 'activo') || (student.enrollments || [])[0] || null;
     const classStartDate = activeEnrollment?.practical_start_date
       || activeEnrollment?.practicalStartDate
+      || activeEnrollment?.start_date
+      || activeEnrollment?.startDate
       || student.assignment_start_date
       || student.assignmentStartDate
       || schedule?.startDate
       || null;
+    const classEndDate = activeEnrollment?.practical_end_date
+      || activeEnrollment?.practicalEndDate
+      || activeEnrollment?.end_date
+      || activeEnrollment?.endDate
+      || student.assignment_end_date
+      || student.assignmentEndDate
+      || schedule?.endDate
+      || null;
     const classStartDateLabel = classStartDate
       ? DateHelper.format(`${String(classStartDate).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY')
+      : 'Sin fecha asignada';
+    const classEndDateLabel = classEndDate
+      ? DateHelper.format(`${String(classEndDate).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY')
       : 'Sin fecha asignada';
     const isExamOnly = schedule?.type === 'exam_only' || schedule?.appointmentType === 'EXAM_ONLY';
     const isAdditionalPracticeOnly = student.registrationType === 'ADDITIONAL_PRACTICE'
@@ -237,6 +250,8 @@ class StudentProfileView extends Component {
                     <div class="info-item"><span class="info-label">Curso</span><span class="info-value">${student.course || 'Sin curso asignado'}</span></div>
                     <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${student.instructorName || schedule?.instructor || 'Sin instructor asignado'}${isExamOnly ? ' <span class="student-exam-inline">Intensivo</span>' : ''}</span></div>
                     <div class="info-item"><span class="info-label">Inicio de clases</span><span class="info-value">${classStartDateLabel}</span></div>
+                    <div class="info-item"><span class="info-label">Fin de clases</span><span class="info-value">${classEndDateLabel}</span></div>
+                    <div class="info-item"><span class="info-label">Hora</span><span class="info-value">${schedule?.time || 'Sin horario asignado'}</span></div>
                   `}
                   <div class="info-item">
                     <span class="info-label">Estado</span>
@@ -440,6 +455,14 @@ class StudentProfileView extends Component {
                       <div class="info-item">
                         <span class="info-label">Curso</span>
                         <span class="info-value">${schedule.course}</span>
+                      </div>
+                      <div class="info-item">
+                        <span class="info-label">Inicio del curso</span>
+                        <span class="info-value">${classStartDateLabel}</span>
+                      </div>
+                      <div class="info-item">
+                        <span class="info-label">Fin del curso</span>
+                        <span class="info-value">${classEndDateLabel}</span>
                       </div>
                     </div>
                     ${isExamOnly ? '' : '<button class="btn btn-secondary" id="change-schedule-btn">Cambiar pr&aacute;cticas</button>'}

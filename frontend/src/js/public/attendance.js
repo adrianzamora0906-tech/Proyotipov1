@@ -3,6 +3,7 @@ import { OfflineAttendanceQueue, registerAttendanceOfflineSupport } from '../lib
 const content = document.getElementById('attendance-content');
 const params = new URLSearchParams(window.location.search);
 const token = params.get('token');
+const numericCode = params.get('code');
 const offlinePayloadValue = params.get('offline');
 const apiBases = [window.__SPORTMANCAR_CONFIG__?.API_BASE_URL || 'http://localhost:5000/api'];
 let authorizedLocation = null;
@@ -13,6 +14,11 @@ registerAttendanceOfflineSupport();
 
 function isExitPhase() {
   return attendancePhase === 'EXIT';
+}
+
+function attendancePath(action) {
+  if (numericCode) return `/attendance/code/${encodeURIComponent(numericCode)}/${action}`;
+  return `/attendance/${encodeURIComponent(token)}/${action}`;
 }
 
 function renderCompleted() {
@@ -76,13 +82,13 @@ async function request(path, options = {}) {
 
 async function loadChallenge() {
   if (offlinePayloadValue) return loadOfflineChallenge();
-  if (!token) return renderError('El enlace no contiene un código válido.');
+  if (!token && !numericCode) return renderError('Ingresa o escanea un codigo de asistencia valido.');
   try {
     if (!getAuthToken()) {
       content.innerHTML = `<div class="attendance-icon attendance-icon-error">!</div><h1>Inicia sesion</h1><p>Debes abrir este QR desde la sesion del estudiante matriculado.</p><a class="attendance-login" href="/?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}">Ir a iniciar sesion</a><small>Luego vuelve a escanear el codigo vigente.</small>`;
       return;
     }
-    const response = await request(`/attendance/${encodeURIComponent(token)}/claim`, {
+    const response = await request(attendancePath('claim'), {
       method: 'POST',
       body: JSON.stringify({}),
     });
@@ -129,7 +135,7 @@ async function validateLocationBeforeIdentification() {
   content.innerHTML = `<div class="attendance-location-step"><div class="attendance-location-spinner"></div><h1>Capturando ubicación</h1><p>Necesitamos tu GPS como evidencia para la asistencia; la geocerca se usará como referencia y no bloquea el registro.</p></div>`;
   try {
     const location = await getCurrentLocation();
-    const response = await request(`/attendance/${encodeURIComponent(token)}/location`, {
+    const response = await request(attendancePath('location'), {
       method: 'POST',
       body: JSON.stringify({ latitude: location.coords.latitude, longitude: location.coords.longitude, accuracy: location.coords.accuracy }),
     });
@@ -220,14 +226,14 @@ async function confirmAttendance(event) {
     }
 
     try {
-      await request(`/attendance/${encodeURIComponent(token)}/confirm`, {
+      await request(attendancePath('confirm'), {
         method: 'POST',
         body: JSON.stringify(payload),
       });
       renderCompleted();
       return;
     } catch (error) {
-      if (!navigator.onLine) {
+      if (!navigator.onLine && token) {
         await OfflineAttendanceQueue.add({
           action: 'confirm',
           token,

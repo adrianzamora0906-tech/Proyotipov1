@@ -2299,8 +2299,16 @@ class StudentsView extends Component {
     }));
     host.querySelectorAll('.enrollment-cycle-set').forEach(set => {
       const previousCycleId = activeCycleIds.get(`${set.dataset.course || ''}|${set.dataset.modality || ''}`);
+      const calendars = [...set.querySelectorAll(':scope > .enrollment-calendar')];
+      const selectedInstructorCalendar = selectedInstructorId ? calendars.find(calendar =>
+        [...calendar.querySelectorAll('[data-course-instructor-id]')].some(button =>
+          String(button.dataset.courseInstructorId || '') === String(selectedInstructorId))) : null;
+      if (selectedInstructorCalendar) {
+        set.dataset.activeCycleIndex = selectedInstructorCalendar.dataset.cycleIndex || '0';
+        return;
+      }
       if (!previousCycleId) return;
-      const matchingCalendar = [...set.querySelectorAll(':scope > .enrollment-calendar')]
+      const matchingCalendar = calendars
         .find(calendar => String(calendar.dataset.cycleId || '') === String(previousCycleId));
       if (matchingCalendar) set.dataset.activeCycleIndex = matchingCalendar.dataset.cycleIndex || '0';
     });
@@ -3662,11 +3670,11 @@ class StudentsView extends Component {
       .find(button => button.closest('.enrollment-calendar')?.style.display !== 'none');
     const preferredInstructorId = examOnly
       ? activeInstructorButton?.dataset.courseInstructorId || this.scheduleInstructorFilterId || preferredSelect?.value || null
-      : preferredSelect?.value || null;
+      : activeInstructorButton?.dataset.courseInstructorId || this.scheduleInstructorFilterId || preferredSelect?.value || null;
     const preferredName = examOnly
       ? activeInstructorButton?.textContent?.trim() || preferredSelect?.selectedOptions?.[0]?.textContent?.trim() || ''
       : preferredInstructorId
-        ? preferredSelect.selectedOptions?.[0]?.textContent?.trim()
+        ? activeInstructorButton?.textContent?.trim() || preferredSelect.selectedOptions?.[0]?.textContent?.trim()
         : '';
     if (examOnly && preferredInstructorId) {
       preview.hidden = false;
@@ -3948,7 +3956,7 @@ class StudentsView extends Component {
       .find(button => button.closest('.enrollment-calendar')?.style.display !== 'none');
     const preferredInstructorId = examOnly
       ? activeInstructorButton?.dataset.courseInstructorId || this.scheduleInstructorFilterId || formData.get('preferredInstructorId') || null
-      : formData.get('preferredInstructorId') || this.scheduleInstructorFilterId || null;
+      : activeInstructorButton?.dataset.courseInstructorId || this.scheduleInstructorFilterId || formData.get('preferredInstructorId') || null;
     const advancedPracticalStartEnabled = formData.get('advancedPracticalStartEnabled') === 'on';
     const practicalStartDate = advancedPracticalStartEnabled ? String(formData.get('practicalStartDate') || '') : '';
     if (advancedPracticalStartEnabled && !practicalStartDate) {

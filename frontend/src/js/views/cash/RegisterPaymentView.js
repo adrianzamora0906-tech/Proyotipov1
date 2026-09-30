@@ -73,6 +73,7 @@ class RegisterPaymentView extends Component {
                 </div>
               </div>
               <div class="form-group"><label class="form-label">Número de transferencia / referencia</label><input name="reference" class="form-input" placeholder="Número del comprobante o transferencia"></div>
+              <div class="form-group" id="register-card-batch-group" hidden><label class="form-label required">Lote de tarjeta</label><input name="cardBatch" class="form-input" placeholder="Ej. 000123" maxlength="80"></div>
 
               <div class="form-footer">
                 <button type="button" class="btn btn-secondary" id="cancel-payment">Cancelar</button>
@@ -84,6 +85,17 @@ class RegisterPaymentView extends Component {
       `;
 
       const form = document.getElementById('payment-form');
+      const methodSelect = form.elements.method;
+      const cardBatchGroup = document.getElementById('register-card-batch-group');
+      const cardBatchInput = form.elements.cardBatch;
+      const toggleCardBatch = () => {
+        const isCard = String(methodSelect?.value || '').toLowerCase() === 'tarjeta';
+        if (cardBatchGroup) cardBatchGroup.hidden = !isCard;
+        if (cardBatchInput) cardBatchInput.required = isCard;
+        if (!isCard && cardBatchInput) cardBatchInput.value = '';
+      };
+      methodSelect?.addEventListener('change', toggleCardBatch);
+      toggleCardBatch();
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const fd = new FormData(form);
@@ -91,9 +103,10 @@ class RegisterPaymentView extends Component {
         const method = fd.get('method');
         const selectedMethod = form.elements.method.selectedOptions[0];
         if (selectedMethod?.dataset.requiresReference === 'true' && !String(fd.get('reference') || '').trim()) { alert('La referencia es obligatoria para este método de pago.'); return; }
+        if (String(method || '').toLowerCase() === 'tarjeta' && !String(fd.get('cardBatch') || '').trim()) { alert('Ingresa el lote de la tarjeta.'); return; }
         const cashier = (sessionStorage.getItem('erp_session') && JSON.parse(sessionStorage.getItem('erp_session')).username) || 'cajera';
 
-        const res = await PaymentService.registerPayment({ studentId: student.id, amount, method, reference:fd.get('reference'), cedula:student.cedula, cashier });
+        const res = await PaymentService.registerPayment({ studentId: student.id, amount, method, reference:fd.get('reference'), cardBatch:fd.get('cardBatch'), cedula:student.cedula, cashier });
         if (!res.success) {
           alert(res.error);
           return;

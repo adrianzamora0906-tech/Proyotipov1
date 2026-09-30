@@ -3,7 +3,16 @@ import SidebarLayout from '../../layouts/SidebarLayout.js';
 import AdminService from '../../services/AdminService.js';
 
 const esc = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
-const labels = { REGISTRATION: ['Inscripción', 'registration'], SCHEDULE: ['Horario', 'schedule'], INSTRUCTOR: ['Instructor', 'instructor'], PAYMENT: ['Pago', 'payment'], DOCUMENT: ['Documento', 'document'], ACCESS: ['Credenciales', 'access'] };
+const labels = { REGISTRATION: ['Inscripción', 'registration'], SCHEDULE: ['Horario', 'schedule'], INSTRUCTOR: ['Instructor', 'instructor'], PAYMENT: ['Pago', 'payment'], DOCUMENT: ['Documento', 'document'], ACCESS: ['Credenciales', 'access'], MODIFICATION: ['Modificación', 'modification'], DELETION: ['Eliminación', 'deletion'] };
+const auditLabel = row => {
+  const text = `${row.detail || ''} ${row.title || ''}`.toUpperCase();
+  if (text.includes('STUDENT_DOCUMENT') || text.includes('DOCUMENT')) return ['Documentación', 'Documento del estudiante'];
+  if (text.includes('PAYMENT')) return ['Financiero', 'Movimiento de pago'];
+  if (text.includes('USER') || text.includes('PERMISO') || text.includes('PERMISSION')) return ['Accesos', 'Usuario o permisos'];
+  if (text.includes('COURSE') || text.includes('CURSO') || text.includes('THEORY')) return ['Académico', 'Curso u horario'];
+  if (text.includes('BRANCH') || text.includes('SUCURSAL')) return ['Sucursales', 'Configuración de sucursal'];
+  return ['Operación', 'Cambio registrado'];
+};
 const time = value => new Date(value).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' });
 const day = value => new Date(value).toLocaleDateString('es-EC', { weekday: 'short', day: '2-digit', month: 'short' });
 
@@ -16,7 +25,7 @@ export default class ManagerEnrollmentMonitorView extends Component {
         <header class="enrollment-monitor__header"><div><span>OPERACIÓN EN TIEMPO REAL</span><h1>Monitoreo de inscripciones</h1><p>Sigue cada paso del registro de estudiantes en todas las sucursales.</p></div><div class="enrollment-monitor__live"><i></i><strong>En vivo</strong><small id="monitor-updated">Conectando…</small></div></header>
         <section class="enrollment-monitor__toolbar">
           <label>Sucursal<select id="monitor-branch"><option value="">Todas las sucursales</option></select></label>
-          <label>Actividad<select id="monitor-type"><option value="">Todo el proceso</option><option value="REGISTRATION">Inscripciones</option><option value="SCHEDULE">Horarios</option><option value="INSTRUCTOR">Instructores</option><option value="PAYMENT">Pagos</option><option value="DOCUMENT">Documentos</option><option value="ACCESS">Credenciales</option></select></label>
+          <label>Actividad<select id="monitor-type"><option value="">Todo el proceso</option><option value="REGISTRATION">Inscripciones</option><option value="SCHEDULE">Horarios</option><option value="INSTRUCTOR">Instructores</option><option value="PAYMENT">Pagos</option><option value="DOCUMENT">Documentos</option><option value="ACCESS">Credenciales</option><option value="MODIFICATION">Modificaciones</option><option value="DELETION">Eliminaciones</option></select></label>
           <button class="btn btn-secondary" id="monitor-toggle" type="button">Pausar monitor</button><button class="btn btn-primary" id="monitor-refresh" type="button">Actualizar ahora</button>
         </section>
         <section class="enrollment-monitor__kpis" id="monitor-kpis"></section>
@@ -52,6 +61,11 @@ export default class ManagerEnrollmentMonitorView extends Component {
     const target = document.getElementById('monitor-feed'); const count = document.getElementById('monitor-count'); if (count) count.textContent = `${events.length} movimientos recientes`; if (!target) return;
     if (!events.length) { target.innerHTML = '<div class="dashboard-empty">Aún no hay movimientos para estos filtros.</div>'; return; }
     const previous = reset ? new Set() : this.known;
+    events = events.map(row => {
+      if (row.event_type !== 'MODIFICATION' && row.event_type !== 'DELETION') return row;
+      const [group, detail] = auditLabel(row);
+      return { ...row, title: group, student_name: row.title, detail, identification: row.branch_name?.trim() || 'Sistema', branch_name: 'Auditoría', course_name: null };
+    });
     target.innerHTML = events.map(row => { const [label, tone] = labels[row.event_type] || ['Actividad', 'default']; const key = `${row.event_type}-${row.event_id}`; const fresh = previous.size && !previous.has(key); return `<article class="enrollment-monitor__event ${fresh ? 'is-new' : ''}"><div class="enrollment-monitor__when"><strong>${time(row.event_at)}</strong><span>${day(row.event_at)}</span></div><div class="enrollment-monitor__marker ${tone}"><i></i></div><div class="enrollment-monitor__body"><div><span class="enrollment-monitor__badge ${tone}">${label}</span><strong>${esc(row.title)}</strong></div><h3>${esc(row.student_name)}</h3><p>${esc(row.detail || row.course_name || '')}</p><small>${esc(row.identification)} · ${esc(row.branch_name?.trim())}${row.course_name ? ` · ${esc(row.course_name)}` : ''}</small></div><div class="enrollment-monitor__actor"><small>Responsable</small><strong>${esc(row.actor_name)}</strong></div></article>`; }).join('');
     this.known = new Set(events.map(row => `${row.event_type}-${row.event_id}`));
   }

@@ -51,7 +51,7 @@ import ManagerDashboardView from "./views/manager/ManagerDashboardView.js";
 import ManagerFinanceView from "./views/manager/ManagerFinanceView.js";
 import ManagerAcademicView from "./views/manager/ManagerAcademicView.js";
 import ManagerAuditView from "./views/manager/ManagerAuditView.js?v=auditoria-responsables-20260812";
-import ManagerEnrollmentMonitorView from "./views/manager/ManagerEnrollmentMonitorView.js?v=monitor-inscripciones-20260824";
+import ManagerEnrollmentMonitorView from "./views/manager/ManagerEnrollmentMonitorView.js?v=monitor-gerencia-20260930";
 import StudentPortalView from "./views/student-portal/StudentPortalView.js?v=inicio-teoria-20260910";
 
 class App {

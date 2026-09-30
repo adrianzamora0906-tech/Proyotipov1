@@ -190,6 +190,7 @@ class PendingPaymentsView extends Component {
                 </div>
               </div>
               <div class="form-group"><label class="form-label">Número de transferencia / referencia</label><input name="reference" class="form-input" placeholder="Número del comprobante o transferencia"></div>
+              <div class="form-group" id="payment-card-batch-group" hidden><label class="form-label required">Lote de tarjeta</label><input name="cardBatch" class="form-input" placeholder="Ej. 000123" maxlength="80"></div>
               <div class="form-group">
                 <label class="form-label">Comentario</label>
                 <textarea name="note" class="form-input" rows="3" placeholder="Opcional"></textarea>
@@ -203,6 +204,18 @@ class PendingPaymentsView extends Component {
         </div>
       `;
       modal.classList.add('active');
+      const form = modal.querySelector('#payment-modal-form');
+      const methodSelect = form?.elements.method;
+      const cardBatchGroup = modal.querySelector('#payment-card-batch-group');
+      const cardBatchInput = form?.elements.cardBatch;
+      const toggleCardBatch = () => {
+        const isCard = String(methodSelect?.value || '').toLowerCase() === 'tarjeta';
+        if (cardBatchGroup) cardBatchGroup.hidden = !isCard;
+        if (cardBatchInput) cardBatchInput.required = isCard;
+        if (!isCard && cardBatchInput) cardBatchInput.value = '';
+      };
+      methodSelect?.addEventListener('change', toggleCardBatch);
+      toggleCardBatch();
 
       const closeModal = () => {
         modal.classList.remove('active');
@@ -216,7 +229,6 @@ class PendingPaymentsView extends Component {
       });
 
       modal.querySelector('#modal-pay')?.addEventListener('click', async () => {
-        const form = modal.querySelector('#payment-modal-form');
         const fd = new FormData(form);
         const amount = fd.get('amount');
         const method = fd.get('method');
@@ -225,6 +237,7 @@ class PendingPaymentsView extends Component {
         if (!method) { this.showMessageModal('Selecciona un método de pago.', { title: 'Falta información', type: 'warning' }); return; }
         const selectedMethod = form.elements && form.elements.method && form.elements.method.selectedOptions ? form.elements.method.selectedOptions[0] : null;
         if (selectedMethod?.dataset.requiresReference === 'true' && !String(fd.get('reference') || '').trim()) { this.showMessageModal('El número de transferencia o referencia es obligatorio para este método de pago.', { title: 'Falta información', type: 'warning' }); return; }
+        if (String(method || '').toLowerCase() === 'tarjeta' && !String(fd.get('cardBatch') || '').trim()) { this.showMessageModal('Ingresa el lote de la tarjeta.', { title: 'Falta información', type: 'warning' }); return; }
 
         const result = await PaymentService.registerPayment({
           studentId: student.id,
@@ -233,6 +246,7 @@ class PendingPaymentsView extends Component {
           amount,
           method: method.toLowerCase(),
           reference: fd.get('reference'),
+          cardBatch: fd.get('cardBatch'),
           cashier,
           notify: false,
         });

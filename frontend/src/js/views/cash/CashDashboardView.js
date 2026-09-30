@@ -128,6 +128,7 @@ class CashDashboardView extends Component {
             <label>Monto a pagar <span>*</span><input class="form-input" type="number" name="amount" value="${Number(payment.balance || 0).toFixed(2)}" min="0.01" max="${Number(payment.balance || 0).toFixed(2)}" step="0.01" required></label>
             <label>Método <span>*</span><select class="form-select" name="method" required>${methodOptions || '<option value="">No hay métodos configurados</option>'}</select></label>
             <label class="cash-charge-form__wide">Número de transferencia / referencia<input class="form-input" name="reference" placeholder="Número del comprobante o transferencia"></label>
+            <label class="cash-charge-form__wide cash-card-batch-field" hidden>Lote de tarjeta <span>*</span><input class="form-input" name="cardBatch" placeholder="Ej. 000123" maxlength="80"></label>
             <label class="cash-charge-form__wide">Comentario<textarea class="form-textarea" name="note" rows="3" placeholder="Opcional"></textarea></label>
           </form>
           <div class="cash-charge-message" id="cash-charge-message" role="alert"></div>
@@ -136,20 +137,32 @@ class CashDashboardView extends Component {
       </div>`;
     overlay.classList.add('active');
     overlay.setAttribute('aria-hidden', 'false');
+    const form = overlay.querySelector('#cash-charge-form');
+    const methodSelect = form?.elements.method;
+    const cardBatchField = overlay.querySelector('.cash-card-batch-field');
+    const cardBatchInput = form?.elements.cardBatch;
+    const toggleCardBatch = () => {
+      const isCard = String(methodSelect?.value || '').toLowerCase() === 'tarjeta';
+      if (cardBatchField) cardBatchField.hidden = !isCard;
+      if (cardBatchInput) cardBatchInput.required = isCard;
+      if (!isCard && cardBatchInput) cardBatchInput.value = '';
+    };
+    methodSelect?.addEventListener('change', toggleCardBatch);
+    toggleCardBatch();
     const close = () => { overlay.classList.remove('active'); overlay.setAttribute('aria-hidden', 'true'); overlay.innerHTML = ''; };
     overlay.querySelectorAll('[data-close-charge]').forEach(button => button.addEventListener('click', close));
     overlay.querySelector('#cash-register-payment')?.addEventListener('click', async event => {
       const submit = event.currentTarget;
-      const form = overlay.querySelector('#cash-charge-form');
       const message = overlay.querySelector('#cash-charge-message');
       const data = new FormData(form);
       const amount = Number(data.get('amount'));
-      const methodSelect = form.elements.method;
       const selectedMethod = methodSelect.selectedOptions[0];
       const reference = String(data.get('reference') || '').trim();
+      const cardBatch = String(data.get('cardBatch') || '').trim();
       if (!form.reportValidity()) return;
       if (!amount || amount > Number(payment.balance || 0)) { message.textContent = 'El monto debe ser mayor a cero y no superar el saldo pendiente.'; message.className = 'cash-charge-message error'; return; }
       if (selectedMethod?.dataset.requiresReference === 'true' && !reference) { message.textContent = 'La referencia es obligatoria para este método de pago.'; message.className = 'cash-charge-message error'; return; }
+      if (String(data.get('method') || '').toLowerCase() === 'tarjeta' && !cardBatch) { message.textContent = 'Ingresa el lote de la tarjeta.'; message.className = 'cash-charge-message error'; return; }
       submit.disabled = true;
       submit.textContent = 'Registrando...';
       let result;
@@ -160,6 +173,7 @@ class CashDashboardView extends Component {
           amount,
           method: String(data.get('method') || '').toLowerCase(),
           reference,
+          cardBatch,
           note: data.get('note'),
           cashier: authService.getCurrentUser()?.username || 'cajera',
           notify: false,

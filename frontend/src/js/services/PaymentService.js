@@ -78,7 +78,7 @@ class PaymentService {
       .sort((a, b) => new Date(b.date) - new Date(a.date));
   }
 
-  static async registerPayment({ studentId, serviceTransactionId, amount, method, reference, cedula, cashier, notify = true }) {
+  static async registerPayment({ studentId, serviceTransactionId, amount, method, reference, cardBatch, cedula, cashier, notify = true }) {
     if (this.useApi) {
       try {
         const result = await ApiService.registerPayment({
@@ -86,6 +86,7 @@ class PaymentService {
           amount: Number(amount),
           method,
           reference: reference || null,
+          cardBatch: cardBatch || null,
           cashier: cashier || 'Cajero',
           serviceTransactionId: serviceTransactionId || null,
         });
@@ -114,6 +115,7 @@ class PaymentService {
       amount: Number(amount),
       method,
       reference: reference || null,
+      cardBatch: cardBatch || null,
       cashier,
       date: new Date().toISOString(),
       status: 'confirmado',

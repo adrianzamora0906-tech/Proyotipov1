@@ -48,11 +48,11 @@ class StudentService {
       || ['EN_CURSO','COMPLETADA'].includes(sessionStatus);
     const hasExit = Boolean(row.actual_end) || sessionStatus === 'COMPLETADA';
     const phase = hasEntry && !hasExit ? 'EXIT' : 'ENTRY';
+    const attendanceWindowStart = new Date(new Date(row.scheduled_start).getTime() - 10 * 60 * 1000);
     const entryWindowEnd = new Date(row.scheduled_end);
     const exitWindowEnd = new Date(entryWindowEnd.getTime() + 30 * 60 * 1000);
-    const attendanceWindowStart = new Date(new Date(row.scheduled_start).getTime() - 10 * 60 * 1000);
-    const isOpenSession = phase === 'EXIT' && sessionStatus === 'EN_CURSO' && !row.actual_end;
-    const withinWindow = isOpenSession || (attendanceWindowStart <= now && now <= (phase === 'EXIT' ? exitWindowEnd : entryWindowEnd));
+    const attendanceWindowEnd = phase === 'EXIT' ? exitWindowEnd : entryWindowEnd;
+    const withinWindow = attendanceWindowStart <= now && now <= attendanceWindowEnd;
     const completed = hasEntry && hasExit;
     return { hasClass: true, canRegister: withinWindow && !completed, phase,
       hasEntry, hasExit, completed, sessionId: row.session_id, assignmentId: row.assignment_id,

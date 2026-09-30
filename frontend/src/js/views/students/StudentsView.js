@@ -3583,14 +3583,24 @@ class StudentsView extends Component {
     const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';
     if (calendar && plan.length && !examOnly && !this.isRotationEnabled(calendar)) {
       const requiredClasses = Number(calendar.dataset.requiredClasses || calendar.dataset.dayCount || 1);
-      const first = [...plan].sort((left, right) => String(left.date).localeCompare(String(right.date)))[0];
+      const orderedPlan = [...plan].sort((left, right) => String(left.date).localeCompare(String(right.date)));
+      const first = orderedPlan[0];
       const dates = [];
-      const cursor = new Date(`${first.date}T12:00:00`);
-      let guard = 0;
-      while (dates.length < requiredClasses && guard < 60) {
-        if (cursor.getDay() >= 1 && cursor.getDay() <= 5) dates.push(cursor.toISOString().slice(0, 10));
-        cursor.setDate(cursor.getDate() + 1);
-        guard += 1;
+      const selectedDates = [...new Set(orderedPlan
+        .filter(item => item.time === first.time)
+        .map(item => item.date)
+        .filter(Boolean))]
+        .sort();
+      if (selectedDates.length >= requiredClasses) {
+        dates.push(...selectedDates.slice(0, requiredClasses));
+      } else {
+        const cursor = new Date(`${first.date}T12:00:00`);
+        let guard = 0;
+        while (dates.length < requiredClasses && guard < 60) {
+          if (cursor.getDay() >= 1 && cursor.getDay() <= 5) dates.push(cursor.toISOString().slice(0, 10));
+          cursor.setDate(cursor.getDate() + 1);
+          guard += 1;
+        }
       }
       plan = dates.map((date, index) => ({
         ...first,
@@ -4024,8 +4034,11 @@ class StudentsView extends Component {
     schedulePlan.theoryConfirmationAccepted = theoryConfirmationAccepted;
     schedulePlan.practicalMode = examOnly ? 'exam_only' : 'classes';
     schedulePlan.preferredInstructorId = preferredInstructorId;
+    const selectedScheduleModality = schedulePlan.selections[0]?.modality
+      || document.querySelector(`.enrollment-calendar[data-cycle-id="${schedulePlan.selections[0]?.cycleId || ''}"]`)?.dataset?.modality
+      || 'normal';
     schedulePlan.practicalStartDate = practicalStartDate
-      || schedulePlan.selections[0]?.practicalStartDate
+      || (selectedScheduleModality === 'normal' ? schedulePlan.selections[0]?.practicalStartDate : null)
       || null;
     schedulePlan.practicalStartReason = practicalStartDate ? String(formData.get('practicalStartReason') || '').trim() : null;
 

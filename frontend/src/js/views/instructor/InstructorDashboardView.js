@@ -31,7 +31,7 @@ class InstructorDashboardView extends Component {
             ${this.renderStat(dashboard.summary.scheduledToday, 'Clases de hoy', 'today')}
             ${this.renderStat(dashboard.summary.monthlyCompletedSessions, 'Clases completadas este mes', 'completed')}
             ${this.renderStat(`${dashboard.summary.monthlyHours} h`, 'Horas impartidas este mes', 'hours')}
-            ${this.renderStat(dashboard.summary.openIncidents, 'Incidencias abiertas', 'incidents')}
+            ${this.renderStat(`${dashboard.scheduleCourses?.length || 0} curso${dashboard.scheduleCourses?.length === 1 ? '' : 's'}`, 'Mi horario', 'schedule')}
           </div>
 
           ${this.renderNextSession(dashboard.summary.nextSession)}
@@ -72,11 +72,66 @@ class InstructorDashboardView extends Component {
     `;
   }
 
+  renderScheduleCourse(course, instructorName) {
+    const students = course?.students || [];
+    const courseType = /moto/i.test(course?.course || '') ? 'Moto' : 'Automóvil';
+    return `<div class="instructor-schedule-course">
+      <div class="instructor-students-summary">
+        <span class="matriculated">${students.length} matriculado${students.length === 1 ? '' : 's'}</span>
+        <span class="reserved">${escapeHtml(course?.code || '')}</span>
+      </div>
+      ${students.length ? `<div class="instructor-students-list">${students.map(student => `
+        <article class="instructor-student-row">
+          <div class="instructor-student-avatar">${escapeHtml(student.name.split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase())}</div>
+          <div class="instructor-student-person">
+            <strong>${escapeHtml(student.name)}</strong>
+            <span>Cédula: ${escapeHtml(student.identification || 'Pendiente')}${student.phone ? ` · ${escapeHtml(student.phone)}` : ''}</span>
+            <small>${escapeHtml(student.startTime)}–${escapeHtml(student.endTime)} · ${student.classDays} ${student.classDays === 1 ? 'día' : 'días'}</small>
+          </div>
+          <span class="instructor-student-status matriculado">${escapeHtml(student.startTime)}–${escapeHtml(student.endTime)} · ${courseType}</span>
+        </article>`).join('')}</div>` : this.renderEmpty(`${instructorName} no tiene estudiantes matriculados en este curso.`)}
+    </div>`;
+  }
+
+  openScheduleModal(initialCourseId = null) {
+    const dashboard = this.dashboardData || {};
+    const courses = dashboard.scheduleCourses || [];
+    const instructorName = dashboard.instructor?.name || 'Instructor';
+    let selected = courses.find(course => String(course.id) === String(initialCourseId)) || courses[0] || null;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay modal-overlay-secondary active instructor-students-overlay';
+    const render = () => {
+      const dateText = selected ? `${String(selected.startDate).slice(0, 10)} al ${String(selected.endDate).slice(0, 10)}` : 'Sin cursos vigentes';
+      overlay.innerHTML = `<div class="modal instructor-students-modal" role="dialog" aria-modal="true" aria-labelledby="instructor-schedule-title">
+        <div class="modal-header"><div><h3 class="modal-title" id="instructor-schedule-title">Estudiantes de ${escapeHtml(instructorName)}</h3><p class="card-subtitle">${selected ? `${escapeHtml(selected.course)} · ${escapeHtml(selected.code)} · ${escapeHtml(dateText)}` : escapeHtml(dateText)}</p></div><button type="button" class="modal-close" data-close-schedule>&times;</button></div>
+        <div class="modal-body">
+          ${courses.length > 1 ? `<div class="instructor-schedule-tabs">${courses.map(course => `<button type="button" class="${course.id === selected?.id ? 'is-active' : ''}" data-schedule-course="${escapeHtml(course.id)}"><strong>${escapeHtml(course.code)}</strong><span>${escapeHtml(course.course)}</span></button>`).join('')}</div>` : ''}
+          ${selected ? this.renderScheduleCourse(selected, instructorName) : this.renderEmpty('No tienes cursos vigentes con estudiantes asignados.')}
+        </div>
+      </div>`;
+      overlay.querySelector('[data-close-schedule]')?.addEventListener('click', close);
+      overlay.querySelectorAll('[data-schedule-course]').forEach(button => button.addEventListener('click', () => {
+        selected = courses.find(course => String(course.id) === button.dataset.scheduleCourse) || selected;
+        render();
+      }));
+    };
+    const close = () => {
+      document.removeEventListener('keydown', onKeyDown);
+      overlay.remove();
+      document.body.classList.remove('modal-open');
+    };
+    const onKeyDown = event => { if (event.key === 'Escape') close(); };
+    overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
+    document.addEventListener('keydown', onKeyDown);
+    document.body.classList.add('modal-open');
+    document.body.appendChild(overlay);
+    render();
+  }
+
   openStatsModal(action) {
     const dashboard = this.dashboardData || {};
     const todayItems = dashboard.todayAgenda || [];
     const completedItems = dashboard.completedMonth || [];
-    const incidents = dashboard.openIncidents || [];
     let title = '';
     let body = '';
 
@@ -101,9 +156,6 @@ class InstructorDashboardView extends Component {
         return result;
       }, {});
       body = Object.keys(totals).length ? `<div class="dashboard-hours-list">${Object.entries(totals).map(([course, hours]) => `<article><span>${escapeHtml(course)}</span><strong>${hours.toFixed(1)} h</strong></article>`).join('')}<article class="is-total"><span>Total del mes</span><strong>${escapeHtml(dashboard.summary?.monthlyHours || 0)} h</strong></article></div>` : this.renderEmpty('Todavía no hay horas impartidas este mes.');
-    } else if (action === 'incidents') {
-      title = 'Incidencias abiertas';
-      body = incidents.length ? `<div class="dashboard-detail-list">${incidents.map(item => `<article><div><strong>${escapeHtml(item.type)}</strong><small>${escapeHtml(item.studentName || 'Sin estudiante')} · ${formatDateTime(item.reportedAt)}</small><p>${escapeHtml(item.description)}</p></div><div class="dashboard-detail-meta"><span class="badge ${item.priority === 'ALTA' ? 'badge-danger' : 'badge-warning'}">${escapeHtml(item.priority)}</span><small>${escapeHtml(item.status)}</small></div></article>`).join('')}</div>` : this.renderEmpty('No tienes incidencias abiertas.');
     }
 
     const overlay = document.createElement('div');
@@ -238,6 +290,10 @@ class InstructorDashboardView extends Component {
       card.addEventListener('click', () => {
         if (card.dataset.dashboardStat === 'next') {
           document.querySelector('.next-class-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+        if (card.dataset.dashboardStat === 'schedule') {
+          this.openScheduleModal();
           return;
         }
         this.openStatsModal(card.dataset.dashboardStat);

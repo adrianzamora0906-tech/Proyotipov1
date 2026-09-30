@@ -47,7 +47,7 @@ class InstructorAgendaView extends Component {
             <div>
               <span class="agenda-eyebrow">Plan de trabajo</span>
               <h1>Mi agenda</h1>
-              <p>${escapeHtml(periodLabel)} · organiza tus clases, rutas y estudiantes desde un solo lugar.</p>
+              <p>${escapeHtml(periodLabel)} · organiza tus clases y estudiantes desde un solo lugar.</p>
             </div>
             <div class="agenda-hero__actions"><a href="/instructor/agenda?view=day&date=${today}" class="btn btn-secondary">Hoy</a><a href="/instructor/agenda?view=upcoming" class="btn btn-primary">Próximas clases</a></div>
           </header>
@@ -89,7 +89,7 @@ class InstructorAgendaView extends Component {
             </div>
           </form></section>
 
-          ${nextSession ? `<section class="agenda-next"><div><span>Próxima clase</span><strong>${escapeHtml(nextSession.studentName)}</strong><small>${escapeHtml(nextSession.course)} · Clase ${escapeHtml(nextSession.sessionNumber || 'N/A')} · ${formatDateTime(nextSession.scheduledStart)}</small></div><div class="agenda-next__route"><small>Ruta</small><strong>${escapeHtml(nextSession.recommendedRoute?.name || 'Pendiente de asignar')}</strong></div><a class="btn btn-primary" href="/instructor/agenda?view=day&date=${String(nextSession.scheduledStart).slice(0,10)}">Ver jornada</a></section>` : ''}
+          ${nextSession ? `<section class="agenda-next"><div><span>Próxima clase</span><strong>${escapeHtml(nextSession.studentName)}</strong><small>${escapeHtml(nextSession.course)} · Clase ${escapeHtml(nextSession.sessionNumber || 'N/A')} · ${formatDateTime(nextSession.scheduledStart)}</small></div><a class="btn btn-primary" href="/instructor/agenda?view=day&date=${String(nextSession.scheduledStart).slice(0,10)}">Ver jornada</a></section>` : ''}
 
           <section class="agenda-list-card">
             <div class="agenda-list-card__header">
@@ -131,7 +131,6 @@ class InstructorAgendaView extends Component {
           <dl class="agenda-class-grid">
             <div><dt>Fecha y horario</dt><dd id="agenda-class-schedule"></dd></div>
             <div><dt>Número de clase</dt><dd id="agenda-class-number"></dd></div>
-            <div><dt>Ruta recomendada</dt><dd id="agenda-class-route"></dd></div>
           </dl>
           <div class="agenda-class-recommendation" id="agenda-class-recommendation" hidden>
             <small>Recomendaciones de Secretaría</small>
@@ -146,7 +145,6 @@ class InstructorAgendaView extends Component {
         </div>
         <footer class="agenda-class-sheet__footer">
           <button type="button" class="btn btn-secondary" id="agenda-class-evaluation-toggle" hidden>Ver evaluación</button>
-          <a class="btn btn-primary" id="agenda-class-map" href="#" target="_blank" rel="noopener">Abrir ruta</a>
         </footer>
       </section>
     </div>`;
@@ -203,7 +201,7 @@ class InstructorAgendaView extends Component {
 
   renderSessions(items) {
     const groups=items.reduce((result,item)=>{const key=String(item.scheduledStart).slice(0,10);(result[key]||=[]).push(item);return result;},{});
-    return Object.entries(groups).map(([date,sessions])=>`<section class="agenda-day"><header><div class="agenda-day__date"><strong>${new Date(`${date}T12:00:00`).toLocaleDateString('es-EC',{weekday:'long'})}</strong><span>${new Date(`${date}T12:00:00`).toLocaleDateString('es-EC',{day:'numeric',month:'long',year:'numeric'})}</span></div><em>${sessions.length} actividades</em></header><div class="agenda-session-list">${sessions.map(item=>`<article class="agenda-session ${item.isExamOnly?'exam-only-session':''}"><time><strong>${formatTime(item.scheduledStart)}</strong><span>${formatTime(item.scheduledEnd)}</span></time><div class="agenda-session__student"><strong>${escapeHtml(item.studentName)}</strong><span>${escapeHtml(item.course)} · ${item.isExamOnly?'<b class="exam-only-badge">Formación intensiva</b>':`Clase ${escapeHtml(item.sessionNumber||'N/A')}`}</span><small>${escapeHtml(item.branch||'')}</small></div><div class="agenda-session__details">${item.isExamOnly?'<span><small>Tipo</small><strong>Curso intensivo</strong></span>':`<span><small>Vehículo</small><strong>${escapeHtml(item.vehicle||'Sin asignar')}</strong></span><span><small>Ruta</small>${item.recommendedRoute?`<a href="${item.recommendedRoute.mapsUrl}" target="_blank" rel="noopener">${escapeHtml(item.recommendedRoute.name)}</a>`:'<strong class="is-pending">Sin ruta</strong>'}</span>`}</div><span class="badge ${badgeClass(item.status)}">${escapeHtml(item.status)}</span><div class="agenda-session__actions">${this.renderActions(item)}</div></article>`).join('')}</div></section>`).join('');
+    return Object.entries(groups).map(([date,sessions])=>`<section class="agenda-day"><header><div class="agenda-day__date"><strong>${new Date(`${date}T12:00:00`).toLocaleDateString('es-EC',{weekday:'long'})}</strong><span>${new Date(`${date}T12:00:00`).toLocaleDateString('es-EC',{day:'numeric',month:'long',year:'numeric'})}</span></div><em>${sessions.length} actividades</em></header><div class="agenda-session-list">${sessions.map(item=>`<article class="agenda-session ${item.isExamOnly?'exam-only-session':''}"><time><strong>${formatTime(item.scheduledStart)}</strong><span>${formatTime(item.scheduledEnd)}</span></time><div class="agenda-session__student"><strong>${escapeHtml(item.studentName)}</strong><span>${escapeHtml(item.course)} · ${item.isExamOnly?'<b class="exam-only-badge">Formación intensiva</b>':`Clase ${escapeHtml(item.sessionNumber||'N/A')}`}</span><small>${escapeHtml(item.branch||'')}</small></div><span class="badge ${badgeClass(item.status)}">${escapeHtml(item.status)}</span><div class="agenda-session__actions">${this.renderActions(item)}</div></article>`).join('')}</div></section>`).join('');
   }
 
   renderActions(item) {
@@ -365,7 +363,6 @@ class InstructorAgendaView extends Component {
         status.className = `badge ${badgeClass(item.status)}`;
         document.getElementById('agenda-class-schedule').textContent = `${formatDateTime(item.scheduledStart)} – ${formatTime(item.scheduledEnd)}`;
         document.getElementById('agenda-class-number').textContent = item.isExamOnly ? 'Curso intensivo' : (item.sessionNumber ? `Clase ${item.sessionNumber}` : 'Sin especificar');
-        document.getElementById('agenda-class-route').textContent = item.recommendedRoute?.name || 'Pendiente de asignar';
         const recommendation = document.getElementById('agenda-class-recommendation');
         recommendation.hidden = !item.secretaryRecommendations;
         recommendation.querySelector('p').textContent = item.secretaryRecommendations || '';
@@ -390,9 +387,6 @@ class InstructorAgendaView extends Component {
         const evaluationNote = evaluation.querySelector('.agenda-class-evaluation__note');
         evaluationNote.hidden = !item.observations;
         evaluationNote.querySelector('p').textContent = item.observations || '';
-        const map = document.getElementById('agenda-class-map');
-        map.hidden = !item.recommendedRoute?.mapsUrl;
-        map.href = item.recommendedRoute?.mapsUrl || '#';
         classModal.hidden = false;
         document.body.classList.add('modal-open');
       });

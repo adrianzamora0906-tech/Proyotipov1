@@ -22,6 +22,7 @@ test('la asistencia administrativa conserva horario, sucursal y auditoria', () =
   assert.match(backend, /assignment\.schedule_date=\(NOW\(\) AT TIME ZONE 'America\/Guayaquil'\)::date/);
   assert.match(backend, /exitWindowEnd = new Date\(entryWindowEnd\.getTime\(\) \+ 30 \* 60 \* 1000\)/);
   assert.match(backend, /scheduled_start\)\.getTime\(\) - 10 \* 60 \* 1000/);
+  assert.match(backend, /attendanceWindowEnd = phase === 'EXIT' \? exitWindowEnd : entryWindowEnd/);
   assert.match(backend, /BRANCH_ADMIN_ATTENDANCE_ENTRY_REGISTERED/);
   assert.match(backend, /BRANCH_ADMIN_ATTENDANCE_EXIT_REGISTERED/);
   assert.match(backend, /SET status='COMPLETADA',actual_end=NOW\(\)/);

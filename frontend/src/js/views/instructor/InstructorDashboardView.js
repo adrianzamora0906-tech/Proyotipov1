@@ -73,24 +73,50 @@ class InstructorDashboardView extends Component {
   }
 
   renderScheduleCourse(course, instructorName) {
-    const students = course?.students || [];
+    const entries = course?.students || [];
+    const students = entries.filter(item => item.type !== 'block');
+    const occupations = entries.filter(item => item.type === 'block');
     const courseType = /moto/i.test(course?.course || '') ? 'Moto' : 'Automóvil';
     return `<div class="instructor-schedule-course">
       <div class="instructor-students-summary">
         <span class="matriculated">${students.length} matriculado${students.length === 1 ? '' : 's'}</span>
+        ${occupations.length ? `<span class="transport">${occupations.length} ocupaci${occupations.length === 1 ? 'on' : 'ones'}</span>` : ''}
         <span class="reserved">${escapeHtml(course?.code || '')}</span>
       </div>
-      ${students.length ? `<div class="instructor-students-list">${students.map(student => `
-        <article class="instructor-student-row">
-          <div class="instructor-student-avatar">${escapeHtml(student.name.split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase())}</div>
-          <div class="instructor-student-person">
-            <strong>${escapeHtml(student.name)}</strong>
-            <span>Cédula: ${escapeHtml(student.identification || 'Pendiente')}${student.phone ? ` · ${escapeHtml(student.phone)}` : ''}</span>
-            <small>${escapeHtml(student.startTime)}–${escapeHtml(student.endTime)} · ${student.classDays} ${student.classDays === 1 ? 'día' : 'días'}</small>
-          </div>
-          <span class="instructor-student-status matriculado">${escapeHtml(student.startTime)}–${escapeHtml(student.endTime)} · ${courseType}</span>
-        </article>`).join('')}</div>` : this.renderEmpty(`${instructorName} no tiene estudiantes matriculados en este curso.`)}
+      ${entries.length ? `<div class="instructor-students-list">${entries.map(student => this.renderScheduleEntry(student, courseType)).join('')}</div>` : this.renderEmpty(`${instructorName} no tiene estudiantes ni ocupaciones en este curso.`)}
     </div>`;
+  }
+
+  renderScheduleEntry(student, courseType) {
+    const cleanObservation = value => String(value || '')
+      .replace(/(?:[-;|]\s*)?\bIMPORT_[A-Z0-9_]+_IMAGE\b\s*:?/g, '')
+      .replace(/\s*[-;|]\s*$/, '')
+      .trim();
+    const isBlock = student.type === 'block';
+    const observation = isBlock ? '' : cleanObservation(student.notes);
+    const statusLabel = student.status === 'transporte' ? 'Transporte' : student.status === 'ocupacion' ? 'Ocupado' : 'Matriculado';
+    const displayName = isBlock ? (student.name || statusLabel) : student.name;
+    const avatar = String(displayName || '')
+      .split(/\s+/)
+      .map(part => part[0])
+      .slice(0, 2)
+      .join('')
+      .toUpperCase();
+    const detail = isBlock
+      ? escapeHtml(cleanObservation(student.blockReason) || 'Bloque de disponibilidad')
+      : `Cedula: ${escapeHtml(student.identification || 'Pendiente')}${student.phone ? ` - ${escapeHtml(student.phone)}` : ''}`;
+    const badgeText = isBlock ? statusLabel : `${student.startTime}-${student.endTime} - ${courseType}`;
+    return `
+      <article class="instructor-student-row">
+        <div class="instructor-student-avatar">${escapeHtml(avatar)}</div>
+        <div class="instructor-student-person">
+          <strong>${escapeHtml(displayName)}</strong>
+          <span>${detail}</span>
+          <small>${escapeHtml(student.startTime)}-${escapeHtml(student.endTime)} - ${student.classDays} ${student.classDays === 1 ? 'dia' : 'dias'}</small>
+          ${observation ? `<p class="instructor-student-observation"><b>Observaci&oacute;n:</b> ${escapeHtml(observation)}</p>` : ''}
+        </div>
+        <span class="instructor-student-status ${escapeHtml(student.status)}">${escapeHtml(badgeText)}</span>
+      </article>`;
   }
 
   openScheduleModal(initialCourseId = null) {
@@ -101,12 +127,12 @@ class InstructorDashboardView extends Component {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay modal-overlay-secondary active instructor-students-overlay';
     const render = () => {
-      const dateText = selected ? `${String(selected.startDate).slice(0, 10)} al ${String(selected.endDate).slice(0, 10)}` : 'Sin cursos vigentes';
+      const dateText = selected ? `${String(selected.startDate).slice(0, 10)} al ${String(selected.endDate).slice(0, 10)}` : 'Sin cursos actuales o próximos';
       overlay.innerHTML = `<div class="modal instructor-students-modal" role="dialog" aria-modal="true" aria-labelledby="instructor-schedule-title">
         <div class="modal-header"><div><h3 class="modal-title" id="instructor-schedule-title">Estudiantes de ${escapeHtml(instructorName)}</h3><p class="card-subtitle">${selected ? `${escapeHtml(selected.course)} · ${escapeHtml(selected.code)} · ${escapeHtml(dateText)}` : escapeHtml(dateText)}</p></div><button type="button" class="modal-close" data-close-schedule>&times;</button></div>
         <div class="modal-body">
           ${courses.length > 1 ? `<div class="instructor-schedule-tabs">${courses.map(course => `<button type="button" class="${course.id === selected?.id ? 'is-active' : ''}" data-schedule-course="${escapeHtml(course.id)}"><strong>${escapeHtml(course.code)}</strong><span>${escapeHtml(course.course)}</span></button>`).join('')}</div>` : ''}
-          ${selected ? this.renderScheduleCourse(selected, instructorName) : this.renderEmpty('No tienes cursos vigentes con estudiantes asignados.')}
+          ${selected ? this.renderScheduleCourse(selected, instructorName) : this.renderEmpty('No tienes cursos actuales o próximos con estudiantes asignados.')}
         </div>
       </div>`;
       overlay.querySelector('[data-close-schedule]')?.addEventListener('click', close);
@@ -193,6 +219,10 @@ class InstructorDashboardView extends Component {
   }
 
   renderNextSession(session) {
+    const registrationNotes = String(session?.secretaryRecommendations || '')
+      .replace(/(?:[-;|]\s*)?\bIMPORT_[A-Z0-9_]+_IMAGE\b\s*:?/g, '')
+      .replace(/\s*[-;|]\s*$/, '')
+      .trim();
     if (!session) {
       return `<div class="card"><div class="card-header"><h3 class="card-title">Próxima clase</h3></div><div class="card-body"><div class="instructor-empty">No tienes clases próximas programadas.</div></div></div>`;
     }
@@ -206,6 +236,10 @@ class InstructorDashboardView extends Component {
           <div class="next-class-summary">
             <div class="next-class-student"><span class="info-label">Estudiante</span><strong>${escapeHtml(session.studentName)}</strong><small>${escapeHtml(session.course)} · Clase ${escapeHtml(session.sessionNumber || 'N/A')}</small></div>
             <div><span class="info-label">Horario</span><strong>${formatDateTime(session.scheduledStart)} – ${formatTime(session.scheduledEnd)}</strong></div>
+          </div>
+          <div class="next-class-details">
+            <div class="next-class-observations"><span class="info-label">Recoger en</span><p>${escapeHtml(session.pickupBranchName || 'Sin lugar registrado')}</p></div>
+            ${registrationNotes ? `<div class="next-class-observations"><span class="info-label">Observaciones de inscripci&oacute;n</span><p>${escapeHtml(registrationNotes)}</p></div>` : ''}
           </div>
           <div class="next-class-actions">
             ${this.renderSessionActions(session)}
@@ -266,7 +300,7 @@ class InstructorDashboardView extends Component {
   renderSessionActions(item) {
     const buttons=[];
     if (item.isScheduleOnly) return `<div class="instructor-actions"><a href="/instructor/students?enrollment=${item.enrollmentId}" class="btn btn-secondary btn-small">Ver estudiante</a></div>`;
-    if (item.isExamOnly) return '<div class="instructor-actions"><a href="/instructor/evaluations" class="btn btn-primary btn-small">Evaluar</a><a href="/instructor/agenda" class="btn btn-secondary btn-small">Ver detalle</a></div>';
+    if (item.isExamOnly && item.actualEnd) return `<div class="instructor-actions"><a href="/instructor/evaluations?session=${encodeURIComponent(item.id)}&enrollment=${encodeURIComponent(item.enrollmentId)}" class="btn btn-primary btn-small">Evaluar</a></div>`;
     if (item.isExpired) buttons.push(`<a href="/instructor/agenda?session=${item.id}" class="btn btn-secondary btn-small">Registrar asistencia</a>`);
     else if (item.canStart) buttons.push(`<button class="btn btn-primary btn-small js-start-session" data-id="${item.id}">Iniciar</button>`);
     else if (item.status === 'EN_CURSO') buttons.push(`<button class="btn btn-success btn-small js-complete-session" data-id="${item.id}">Registrar salida</button>`);

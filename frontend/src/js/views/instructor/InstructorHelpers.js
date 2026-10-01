@@ -9,12 +9,20 @@ export function escapeHtml(value) {
 
 export function formatDateTime(value) {
   if (!value) return 'N/A';
-  return new Date(value).toLocaleString('es-EC', { dateStyle: 'short', timeStyle: 'short' });
+  return new Date(value).toLocaleString('es-EC', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'America/Guayaquil',
+  });
 }
 
 export function formatTime(value) {
   if (!value) return 'N/A';
-  return new Date(value).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' });
+  return new Date(value).toLocaleTimeString('es-EC', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Guayaquil',
+  });
 }
 
 export function badgeClass(status) {

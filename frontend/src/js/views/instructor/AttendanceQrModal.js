@@ -25,6 +25,13 @@ function encodeOfflinePayload(payload) {
 
 export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENTRY') {
   const isExit = phase === 'EXIT';
+  if (isExit) {
+    const { data: session } = await PracticalSessionService.getSession(sessionId);
+    if (session.isExamOnly) onConfirmed = () => {
+      window.history.pushState({}, '', `/instructor/evaluations?session=${encodeURIComponent(sessionId)}&enrollment=${encodeURIComponent(session.enrollmentId)}`);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    };
+  }
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay active attendance-qr-overlay';
   overlay.innerHTML = `

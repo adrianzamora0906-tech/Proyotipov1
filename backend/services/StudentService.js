@@ -594,7 +594,7 @@ class StudentService {
       cityId = branchLocation.rows[0].city_id;
     }
 
-    const pickupBranchId = data.pickupBranchId || branchId;
+    const pickupBranchId = data.pickupBranchId || user.branch_id || branchId;
     const pickupBranch = await db.query(
       'SELECT id FROM branches WHERE id=$1 AND active=TRUE',
       [pickupBranchId]

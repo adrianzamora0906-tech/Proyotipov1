@@ -15,11 +15,12 @@ class InstructorEvaluationsView extends Component {
       this.isExoneration = params.get('mode') === 'exoneration';
       const [evaluations, sessionResult] = await Promise.all([
         EvaluationService.getEvaluations(),
-        this.isExoneration && this.practicalSessionId
+        this.practicalSessionId
           ? PracticalSessionService.getSession(this.practicalSessionId)
           : Promise.resolve(null),
       ]);
       const currentCourse = sessionResult?.data?.course || '';
+      this.isExamOnly = Boolean(sessionResult?.data?.isExamOnly);
       const students = await InstructorStudentService.getStudents({
         limit: 100,
         ...(currentCourse ? { course: currentCourse } : {}),
@@ -102,6 +103,7 @@ class InstructorEvaluationsView extends Component {
           `).join('')}
         </div>
         <div class="alert alert-info" id="evaluation-total">Total: 0%</div>
+        ${this.isExamOnly ? '<div class="form-group"><label class="form-label required">Kilometraje final</label><input class="form-input" name="endMileage" inputmode="numeric" pattern="[0-9]{1,7}" maxlength="7" required></div>' : ''}
         <button class="btn btn-primary evaluation-submit" type="submit">${this.isExoneration ? 'Registrar exoneración' : 'Registrar evaluación'}</button>
       </form>
     `;
@@ -203,6 +205,7 @@ class InstructorEvaluationsView extends Component {
           practicalSessionId: formData.get('practicalSessionId') || null,
           evaluationType: formData.get('evaluationType') || 'PRACTICA',
           generalObservations: null,
+          endMileage: formData.get('endMileage'),
           scores,
         });
         window.dispatchEvent(new PopStateEvent('popstate'));

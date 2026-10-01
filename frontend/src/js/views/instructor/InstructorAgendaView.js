@@ -31,6 +31,7 @@ class InstructorAgendaView extends Component {
           startDate: today,
           endDate: examRangeEnd.toISOString().slice(0, 10),
           appointmentType: 'EXAM_ONLY',
+          includePendingExams: '1',
         }),
       ]);
       const sessions = result.data || [];
@@ -119,7 +120,7 @@ class InstructorAgendaView extends Component {
     return `<div class="agenda-class-modal" id="agenda-class-modal" hidden>
       <section class="agenda-class-sheet" role="dialog" aria-modal="true" aria-labelledby="agenda-class-title">
         <header class="agenda-class-sheet__header">
-          <div><small>Resumen de la clase</small><h2 id="agenda-class-title">Detalle</h2></div>
+          <div><small>Resumen de la clase</small><h2 id="agenda-class-title">Observaciones</h2></div>
           <button type="button" class="agenda-class-close" aria-label="Cerrar">×</button>
         </header>
         <div class="agenda-class-sheet__body">
@@ -133,7 +134,7 @@ class InstructorAgendaView extends Component {
             <div><dt>Número de clase</dt><dd id="agenda-class-number"></dd></div>
           </dl>
           <div class="agenda-class-recommendation" id="agenda-class-recommendation" hidden>
-            <small>Recomendaciones de Secretaría</small>
+            <small>Observación</small>
             <p></p>
           </div>
           <div class="agenda-class-observation" id="agenda-class-observation" hidden><small>Observaciones</small><p></p></div>
@@ -181,9 +182,7 @@ class InstructorAgendaView extends Component {
             <div class="agenda-exam-date"><small>${index === 0 ? 'Siguiente intensivo' : 'Formaci&oacute;n intensiva'}</small><strong>${formatDateTime(exam.scheduledStart)}</strong><span>${formatTime(exam.scheduledStart)}&ndash;${formatTime(exam.scheduledEnd)}</span></div>
             <div class="agenda-exam-student"><strong>${escapeHtml(exam.studentName)}</strong><span>${escapeHtml(exam.course)}</span><small>${escapeHtml(exam.secretaryRecommendations || 'Sin observaciones de Secretaría')}</small></div>
             <span class="exam-only-badge">Curso de formaci&oacute;n intensiva</span>
-            ${this.isExamToday(exam)
-              ? `<a class="btn btn-primary btn-small" href="/instructor/evaluations?session=${encodeURIComponent(exam.id)}&enrollment=${encodeURIComponent(exam.enrollmentId)}">Evaluar</a>`
-              : `<span class="agenda-exam-wait">Disponible el ${new Date(exam.scheduledStart).toLocaleDateString('es-EC')}</span>`}
+            ${this.renderActions(exam)}
           </article>`).join('') : '<div class="instructor-empty"><strong>No tienes ex&aacute;menes futuros asignados.</strong></div>'}
         </div>
       </section>
@@ -205,13 +204,13 @@ class InstructorAgendaView extends Component {
   }
 
   renderActions(item) {
-    const buttons = [`<button class="btn btn-secondary btn-small js-session-detail" data-id="${item.id}">Detalle</button>`];
+    const buttons = [`<button class="btn btn-secondary btn-small js-session-detail" data-id="${item.id}">Observaciones</button>`];
     if (item.isScheduleOnly) {
       buttons.push('<span class="badge badge-warning">Asistencia pendiente de sincronizacion</span>');
       buttons.push(`<a class="btn btn-secondary btn-small" href="/instructor/students?enrollment=${encodeURIComponent(item.enrollmentId)}">Ver estudiante</a>`);
       return `<div class="instructor-actions">${buttons.join('')}</div>`;
     }
-    if (item.isExamOnly) {
+    if (item.isExamOnly && (item.actualEnd || item.status === 'COMPLETADA')) {
       if (this.isExamToday(item)) buttons.push(`<a class="btn btn-primary btn-small" href="/instructor/evaluations?session=${encodeURIComponent(item.id)}&enrollment=${encodeURIComponent(item.enrollmentId)}">Evaluar</a>`);
       else buttons.push(`<span class="agenda-exam-wait">Disponible el ${new Date(item.scheduledStart).toLocaleDateString('es-EC')}</span>`);
       return `<div class="instructor-actions">${buttons.join('')}</div>`;
@@ -222,7 +221,7 @@ class InstructorAgendaView extends Component {
     const sessionDay = String(item.scheduledStart || '').slice(0, 10);
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    if (sessionDay <= today && !['CANCELADA', 'REPROGRAMADA'].includes(item.status)) {
+    if (!item.isExamOnly && sessionDay <= today && !['CANCELADA', 'REPROGRAMADA'].includes(item.status)) {
       buttons.push(`<a class="btn btn-secondary btn-small" href="/instructor/evaluations?mode=exoneration&session=${encodeURIComponent(item.id)}&enrollment=${encodeURIComponent(item.enrollmentId)}">Exonerar</a>`);
     }
     if (item.isQrTest) buttons.push(`<button class="btn btn-secondary btn-small js-reset-qr-test" data-id="${item.id}">Restablecer prueba</button>`);
@@ -354,7 +353,7 @@ class InstructorAgendaView extends Component {
         const item = this.agendaSessions.find(session => String(session.id) === String(button.dataset.id));
         if (!item) return;
         const initials = item.studentName.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
-        document.getElementById('agenda-class-title').textContent = item.isExamOnly ? 'Curso de formación intensiva' : `Clase ${item.sessionNumber || ''}`;
+        document.getElementById('agenda-class-title').textContent = 'Observaciones';
         document.getElementById('agenda-class-avatar').textContent = initials;
         document.getElementById('agenda-class-student').textContent = item.studentName;
         document.getElementById('agenda-class-course').textContent = item.course;
@@ -364,8 +363,12 @@ class InstructorAgendaView extends Component {
         document.getElementById('agenda-class-schedule').textContent = `${formatDateTime(item.scheduledStart)} – ${formatTime(item.scheduledEnd)}`;
         document.getElementById('agenda-class-number').textContent = item.isExamOnly ? 'Curso intensivo' : (item.sessionNumber ? `Clase ${item.sessionNumber}` : 'Sin especificar');
         const recommendation = document.getElementById('agenda-class-recommendation');
-        recommendation.hidden = !item.secretaryRecommendations;
-        recommendation.querySelector('p').textContent = item.secretaryRecommendations || '';
+        const studentObservation = (item.secretaryRecommendations || '')
+          .replace(/IMPORT_BENITO_NORMAL_MOTO_20260928_1005_IMAGE\b\s*:?/g, '')
+          .replace(/\s*[-;|]\s*$/, '')
+          .trim();
+        recommendation.hidden = !studentObservation;
+        recommendation.querySelector('p').textContent = studentObservation;
         const observation = document.getElementById('agenda-class-observation');
         observation.hidden = !item.observations;
         observation.querySelector('p').textContent = item.observations || '';

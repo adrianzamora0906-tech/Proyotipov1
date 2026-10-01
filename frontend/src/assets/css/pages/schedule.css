@@ -668,6 +668,14 @@ button.calendar-slot {
   }
 }
 
+.instructor-student-person .instructor-student-observation {
+  margin: .35rem 0 0;
+  color: #08664d;
+  font-size: .75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .weekly-calendar {
   --calendar-time-width: 96px;
   --calendar-day-width: 118px;
@@ -813,6 +821,11 @@ button.calendar-slot {
 .instructor-student-status.transporte {
   background: #e0f2fe;
   color: #075985;
+}
+
+.instructor-student-status.ocupacion {
+  background: #fee2e2;
+  color: #b42318;
 }
 
 .calendar-slot.unavailable .slot-status {

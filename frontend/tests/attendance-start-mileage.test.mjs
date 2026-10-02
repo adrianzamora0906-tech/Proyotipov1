@@ -31,5 +31,5 @@ test('la encuesta de salida exige kilometraje final despues de observaciones', (
   assert.ok(observationsPosition >= 0 && mileagePosition > observationsPosition);
   assert.match(completion, /name="endMileage"[^>]+inputmode="numeric"/);
   assert.match(completion, /mileageInput\.value\.replace\(\/\\D\/g,''\)/);
-  assert.match(backend, /endMileage < Number\(session\.start_mileage\)/);
+  assert.match(backend, /endMileage !== null && session\.start_mileage !== null && endMileage < Number\(session\.start_mileage\)/);
 });

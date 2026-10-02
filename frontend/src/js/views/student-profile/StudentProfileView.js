@@ -326,7 +326,16 @@ class StudentProfileView extends Component {
               <div class="card-body">
                 <div class="form-row" style="margin-bottom: 1.5rem;">
                   ${this.renderCedulaPdfUpload(documents)}
-                  ${this.renderDocumentUpload('certificado_bachiller', 'Certificado de estudio', 'application/pdf,image/*', documents)}
+                  <div style="flex:1; min-width:min(100%,220px);" id="profile-study-document">
+                    <label class="registration-bachiller-check">
+                      <input type="checkbox" id="profile-cedula-bachiller"
+                        ${documents.some(doc => doc.type === 'certificado_bachiller' && doc.file_url && doc.observations === 'La cedula indica bachiller. No requiere certificado de estudio.') ? 'checked disabled' : ''}>
+                      La cédula indica bachiller
+                    </label>
+                    <div id="profile-study-document-status" role="status">
+                      ${this.renderDocumentUpload('certificado_bachiller', 'Certificado de estudio', 'application/pdf,image/*', documents)}
+                    </div>
+                  </div>
                 </div>
                 ${documents.length > 0 ? `
                   <div class="documents-list">
@@ -616,6 +625,30 @@ class StudentProfileView extends Component {
         paymentId: button.dataset.paymentId,
         amount: Number(button.dataset.paymentAmount || 0),
       }));
+    });
+
+    document.getElementById('profile-cedula-bachiller')?.addEventListener('change', async event => {
+      const checkbox = event.currentTarget;
+      if (!checkbox.checked) return;
+      checkbox.disabled = true;
+      try {
+        const response = await ApiService.createDocument(studentId, {
+          type: 'certificado_bachiller', cedulaIndicatesBachiller: true,
+        });
+        if (!response.success) throw new Error(response.error || 'No se pudo guardar la confirmacion.');
+        const status = document.getElementById('profile-study-document-status');
+        if (status) status.innerHTML = this.renderDocumentUpload(
+          'certificado_bachiller', 'Certificado de estudio', 'application/pdf,image/*',
+          [{ ...response.data, type: 'certificado_bachiller' }],
+        );
+        window.dispatchEvent(new CustomEvent('erp:dataChanged', {
+          detail: { collection: 'documents', action: 'upload' },
+        }));
+      } catch (error) {
+        checkbox.checked = false;
+        checkbox.disabled = false;
+        alert(error.message || 'No se pudo guardar la confirmacion.');
+      }
     });
 
     document.querySelectorAll('.document-upload-input').forEach(input => {
@@ -1824,6 +1857,15 @@ class StudentProfileView extends Component {
 
   renderDocumentUpload(type, label, accept, documents) {
     const uploaded = documents.find(document => document.type === type && document.file_url);
+    if (uploaded && type === 'certificado_bachiller' && uploaded.observations === 'La cedula indica bachiller. No requiere certificado de estudio.') {
+      return `
+        <div class="form-group" style="flex: 1; min-width: 220px;">
+          <label class="form-label">${label}</label>
+          <small style="display:block; color:#047857; font-weight:700;">Cumplido: la cédula indica bachiller</small>
+          <small>No requiere certificado de estudio.</small>
+        </div>
+      `;
+    }
     if (uploaded) {
       return `
         <div class="form-group" style="flex: 1; min-width: 220px;">

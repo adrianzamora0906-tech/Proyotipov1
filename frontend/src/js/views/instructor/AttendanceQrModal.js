@@ -75,7 +75,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
   };
   overlay.querySelectorAll('[data-close-attendance]').forEach(button => button.addEventListener('click', close));
 
-  const showMileageForm = () => {
+  const showMileageForm = (required = true) => {
     if (closed || isExit || mileageFormVisible) return;
     mileageFormVisible = true;
     clearTimers();
@@ -85,14 +85,19 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       <strong>Registrar kilometraje inicial</strong>
       <p>Ingresa el kilometraje que marca el vehiculo antes de iniciar la practica.</p>
       <form data-start-mileage-form>
-        <label for="start-mileage">Kilometraje inicial</label>
+        <label for="start-mileage">Kilometraje inicial${required ? '' : ' (opcional)'}</label>
         <input id="start-mileage" name="startMileage" type="text" inputmode="numeric"
-          pattern="[0-9]+" maxlength="7" autocomplete="off" placeholder="Ej. 45820" required>
+          pattern="[0-9]+" maxlength="7" autocomplete="off" placeholder="Ej. 45820" ${required ? 'required' : ''}>
         <div class="attendance-error" data-start-mileage-error aria-live="polite"></div>
         <button type="submit" class="btn btn-primary">Guardar e iniciar</button>
+        ${required ? '' : '<button type="button" class="btn btn-secondary" data-skip-mileage>Continuar sin kilometraje</button>'}
       </form>`;
     const form = body.querySelector('[data-start-mileage-form]');
     const input = form.elements.startMileage;
+    form.querySelector('[data-skip-mileage]')?.addEventListener('click', () => {
+      close();
+      onConfirmed?.();
+    });
     input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, 7); });
     form.addEventListener('submit', async event => {
       event.preventDefault();
@@ -224,8 +229,8 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       const response = await PracticalSessionService.getAttendanceQrStatus(sessionId, phase);
       const confirmed = isExit ? response.data.exitConfirmed : response.data.started;
       if (!confirmed) return;
-      if (!isExit && response.data.requiresStartMileage) {
-        showMileageForm();
+      if (!isExit && response.data.canRegisterStartMileage) {
+        showMileageForm(response.data.requiresStartMileage);
         return;
       }
       clearTimers();

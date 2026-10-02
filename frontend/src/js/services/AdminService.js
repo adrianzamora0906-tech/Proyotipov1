@@ -8,6 +8,12 @@ const query = (params) => {
   return s ? `?${s}` : "";
 };
 export default class AdminService {
+  static branchIncidents(id) {
+    return apiClient.get(`/admin/branches/${encodeURIComponent(id)}/incidents`);
+  }
+  static reviewBranchIncident(branchId, incidentId) {
+    return apiClient.patch(`/admin/branches/${encodeURIComponent(branchId)}/incidents/${encodeURIComponent(incidentId)}/review`);
+  }
   static universalReport(params = {}) {
     return apiClient.get(`/admin/reports/universal${query(params)}`);
   }

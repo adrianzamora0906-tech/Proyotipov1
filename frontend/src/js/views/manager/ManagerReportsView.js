@@ -178,6 +178,7 @@ export default class ManagerReportsView extends Component {
     </main>`);
   }
   async mount() {
+    this.injectReportStyles();
     document
       .getElementById("universal-report-filters")
       .addEventListener("submit", (event) => {
@@ -190,6 +191,9 @@ export default class ManagerReportsView extends Component {
       "beforeend",
       `<div class="modal-overlay" id="report-cycle-students-modal" aria-hidden="true"><div class="modal cycle-students-modal" role="dialog" aria-modal="true"><div class="modal-header"><div><h2 class="modal-title" id="report-cycle-students-title">Estudiantes matriculados</h2><p class="manager-modal-subtitle" id="report-cycle-students-summary"></p></div><button type="button" class="modal-close" id="report-cycle-students-close">&times;</button></div><div class="modal-body"><div class="cycle-modal-meta" id="report-cycle-students-meta"></div><div class="dashboard-table-wrap" id="report-cycle-students-table"></div><div class="manager-people-pagination" id="report-cycle-students-pagination"></div></div><div class="modal-footer"><button type="button" class="btn btn-primary" id="report-cycle-students-export">Exportar reporte completo</button><button type="button" class="btn btn-secondary" id="report-cycle-students-done">Cerrar</button></div></div></div>`,
     );
+    document
+      .querySelector(".report-panel-head")
+      ?.insertAdjacentHTML("afterend", '<div class="report-summary" id="report-summary"></div>');
     const cycleModalPanel = document.querySelector("#report-cycle-students-modal .cycle-students-modal");
     cycleModalPanel.style.width = "min(1400px, calc(100vw - 24px))";
     cycleModalPanel.style.maxWidth = "none";
@@ -316,6 +320,24 @@ export default class ManagerReportsView extends Component {
       });
     await this.load();
   }
+  injectReportStyles() {
+    if (document.getElementById("manager-report-usability-styles")) return;
+    const style = document.createElement("style");
+    style.id = "manager-report-usability-styles";
+    style.textContent = `
+      .report-summary{display:none;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;padding:0 18px 16px}
+      .report-summary.show{display:grid}
+      .report-summary span{display:grid;gap:3px;padding:11px 12px;border:1px solid #e4e7ec;border-radius:9px;background:#fbfcff;color:#475467;font-size:12px}
+      .report-summary strong{color:#101828;font-size:18px}
+      .report-row-action{cursor:pointer}
+      .report-row-action:hover td{background:#f7f5ff}
+      .report-detail-btn{height:32px;padding:0 12px;border:1px solid #d0d5dd;border-radius:8px;background:#fff;color:#344054;font-weight:700;cursor:pointer}
+      .report-detail-btn:hover{border-color:#5b4df5;color:#4f46e5;background:#f7f5ff}
+      @media(max-width:800px){.report-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+      @media(max-width:650px){.report-summary{grid-template-columns:1fr}}
+    `;
+    document.head.appendChild(style);
+  }
   readFilters() {
     const form = new FormData(
       document.getElementById("universal-report-filters"),
@@ -430,11 +452,20 @@ export default class ManagerReportsView extends Component {
         "Datos detallados de desempeño e impacto académico de los instructores de tu sucursal.";
       return;
     }
+    this.paintReportSummary([]);
     this.paintTable();
     const item = types[this.filters.type];
     document.getElementById("report-title").textContent = item.label;
     document.getElementById("report-description").textContent =
       item.description;
+  }
+  paintReportSummary(items = []) {
+    const summary = document.getElementById("report-summary");
+    if (!summary) return;
+    summary.classList.toggle("show", Boolean(items.length));
+    summary.innerHTML = items
+      .map(([label, value]) => `<span>${esc(label)}<strong>${esc(value)}</strong></span>`)
+      .join("");
   }
   paintKpis() {
     const s = this.result.summary || {};
@@ -466,6 +497,22 @@ export default class ManagerReportsView extends Component {
   }
   paintBranchInstructorTable() {
     const rows = this.result.rows || [];
+    const totals = rows.reduce(
+      (acc, row) => {
+        acc.courses += Number(row.courses || 0);
+        acc.students += Number(row.students || 0);
+        acc.classes += Number(row.scheduled_classes || 0);
+        acc.hours += Number(row.taught_hours || 0);
+        return acc;
+      },
+      { courses: 0, students: 0, classes: 0, hours: 0 },
+    );
+    this.paintReportSummary([
+      ["Cursos asignados", number(totals.courses)],
+      ["Estudiantes", number(totals.students)],
+      ["Clases programadas", number(totals.classes)],
+      ["Horas impartidas", `${number(totals.hours)} h`],
+    ]);
     document.getElementById("report-table-head").innerHTML =
       `<tr><th>Instructor</th><th>Sucursal</th><th>Cursos</th><th>Estudiantes</th><th>Clases programadas</th><th>Horas impartidas</th><th>Clases prácticas</th><th>Área</th></tr>`;
     document.getElementById("report-table-body").innerHTML =

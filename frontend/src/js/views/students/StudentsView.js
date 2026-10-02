@@ -729,6 +729,10 @@ class StudentsView extends Component {
                   <input type="hidden" name="certificadoBachillerMobileFileUrl">
                 </div>
                 <small class="registration-document-saved-status" id="registration-documents-status"></small>
+                <label class="registration-bachiller-check regular-enrollment-only">
+                  <input type="checkbox" name="cedulaIndicatesBachiller">
+                  La cédula indica bachiller
+                </label>
 
                 <label class="registration-document-field registration-certificate-field registration-file-dropzone regular-enrollment-only" data-file-dropzone>
                   <span class="form-label">Certificado de estudio <small>(opcional)</small></span>
@@ -973,6 +977,14 @@ class StudentsView extends Component {
     const branchSelect = document.getElementById('modal-branch-select');
     this.prepareScheduleFirstLayout();
     this.bindRegistrationFileDropzones(form);
+    form?.querySelector('[name="cedulaIndicatesBachiller"]')?.addEventListener('change', event => {
+      form.querySelectorAll('[name="certificadoBachillerFile"]').forEach(input => {
+        input.disabled = event.target.checked;
+        const field = input.closest('label') || input.parentElement;
+        field.hidden = event.target.checked;
+        field.style.display = event.target.checked ? 'none' : '';
+      });
+    });
 
     // Se conecta antes de cualquier await para impedir que el navegador haga
     // un envío HTML tradicional y cierre el modal si una carga inicial tarda.
@@ -3948,6 +3960,12 @@ class StudentsView extends Component {
       if (!bloodTypeCardDoc.valid) return;
     }
 
+    if (formData.get('cedulaIndicatesBachiller') && !(cedulaDoc?.hasMobile || cedulaDoc?.hasPdf || cedulaDoc?.hasImages)) {
+      this.showModalAlert('error', 'Carga la cedula para confirmar que indica bachiller.');
+      this.goToModalStep(3);
+      return;
+    }
+
     const scheduleId = formData.get('scheduleId');
     const schedulePlan = this.parseSchedulePlan(formData.get('schedulePlan'));
     const normalizePendingTheorySchedule = value => {
@@ -4163,7 +4181,13 @@ class StudentsView extends Component {
         await this.saveTwoSideDocument(student.id, 'cedula', cedulaDoc, `cedula-${student.id}.pdf`, 'Cédula de Identidad');
         await this.saveTwoSideDocument(student.id, 'carnet_tipo_sangre', bloodTypeCardDoc, `carnet-tipo-sangre-${student.id}.pdf`, 'Carnet de Tipo de Sangre');
       }
-      if (formData.get('certificadoBachillerMobileFileUrl')) {
+      if (formData.get('cedulaIndicatesBachiller')) {
+        const response = await ApiService.createDocument(student.id, {
+          type: 'certificado_bachiller',
+          cedulaIndicatesBachiller: true,
+        });
+        if (!response.success) throw new Error(response.error || 'No se pudo guardar la confirmacion de bachiller.');
+      } else if (formData.get('certificadoBachillerMobileFileUrl')) {
         await this.uploadModalDocumentFromDataUrl(student.id, 'certificado_bachiller', formData.get('certificadoBachillerMobileFileUrl'), 'Certificado de estudio');
       } else {
         await this.uploadModalDocument(student.id, 'certificado_bachiller', formData.get('certificadoBachillerFile'), 'Certificado de estudio');

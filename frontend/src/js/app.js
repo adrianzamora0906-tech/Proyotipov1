@@ -4,6 +4,7 @@
  */
 
 import Router from "./core/router/Router.js";
+import BranchIncidentsView from './views/admin/BranchIncidentsView.js';
 import { authService } from "./core/auth/AuthService.js";
 import { storageService } from "./core/storage/StorageService.js";
 import StudentService from "./services/StudentService.js";
@@ -177,6 +178,7 @@ class App {
     this.router.register('/manager/referrals', AdminReferralCampaignView, 'manager-referrals');
     this.router.register("/reports", ManagerReportsView, "course-reports");
     this.router.register("/branch-access", AdminBranchesView, "branch-access");
+    this.router.register('/branch-incidents', BranchIncidentsView, 'branch-incidents');
     this.router.register(
       "/atm-authorizations",
       AtmAuthorizationView,
@@ -270,6 +272,7 @@ class App {
         "cash-operations": "PAYMENT_VIEW",
         "course-reports": "REPORT_VIEW",
         "branch-access": "GESTION_PERSONAL",
+        'branch-incidents': 'INCIDENT_MANAGE',
         "atm-authorizations": "ATM_DOCUMENT_GENERATE",
         "instructor-dashboard": "CLASS_VIEW",
         "instructor-agenda": "CLASS_VIEW",
@@ -434,6 +437,7 @@ class App {
       "instructor-students": "Mis Estudiantes",
       "instructor-evaluations": "Evaluaciones",
       "instructor-incidents": "Incidencias",
+      'branch-incidents': 'Incidencias de sucursal',
       "instructor-profile": "Mi Perfil",
       "manager-dashboard": "Resumen ejecutivo",
       "manager-finance": "Financiero",

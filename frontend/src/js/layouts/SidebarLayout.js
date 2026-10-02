@@ -221,6 +221,7 @@ class SidebarLayout {
             ${!isAdminSystem && !isGeneralManager && user?.permissions?.includes('REFERRAL_REPORT_VIEW') ? `<a href="/referrals" class="nav-item ${currentPath === '/referrals' ? 'active' : ''}">
               <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4"></path><circle cx="9" cy="7" r="4"></circle><path d="m17 11 2 2 4-4"></path></svg><span class="nav-text">Campaña de referidos</span>
             </a>` : ''}
+            ${!isAdminSystem && !isGeneralManager && user?.permissions?.includes('INCIDENT_MANAGE') ? `<a href="/branch-incidents" class="nav-item ${currentPath === '/branch-incidents' ? 'active' : ''}"><svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6M12 16v1"></path></svg><span class="nav-text">Incidencias de sucursal</span></a>` : ''}
             ${!isAdminSystem && !isGeneralManager && user?.permissions?.includes('GESTION_PERSONAL') ? `<a href="/branch-access" class="nav-item ${currentPath === '/branch-access' ? 'active' : ''}">
               <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="M9 12l2 2 4-4"></path></svg><span class="nav-text">Personal y accesos</span>
             </a>` : ''}

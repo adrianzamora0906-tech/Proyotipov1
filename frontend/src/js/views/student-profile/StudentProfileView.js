@@ -128,6 +128,7 @@ class StudentProfileView extends Component {
             <div>
               <h1>${student.firstName} ${student.lastName}</h1>
               <p>Cédula: <strong>${StringHelper.normalizeCedula(student.cedula)}</strong></p>
+              ${student.disabilityPercentage ? `<p>Discapacidad: <strong>${Number(student.disabilityPercentage)}%</strong></p>` : ''}
               <span class="badge ${isAdditionalPracticeOnly ? 'badge-info' : this.getStatusBadgeClass(student.status)}">${isAdditionalPracticeOnly ? 'Prácticas adicionales' : this.getStatusLabel(student.status)}</span>
               ${isExamOnly ? '<span class="badge badge-info student-exam-badge">Formaci&oacute;n intensiva</span>' : ''}
             </div>
@@ -285,6 +286,7 @@ class StudentProfileView extends Component {
                         <div class="info-item"><span class="info-label">Duración</span><span class="info-value">${practice.number_of_days} días · 1 h 40 min por día</span></div>
                         <div class="info-item"><span class="info-label">Avance</span><span class="info-value">${practice.completed_days || 0} de ${practice.number_of_days} días</span></div>
                         <div class="info-item"><span class="info-label">Valor</span><span class="info-value">$${Number(practice.total_amount || 0).toFixed(2)}</span></div>
+                        ${practice.referred_by_name ? `<div class="info-item"><span class="info-label">Referido por</span><span class="info-value">${escapeHtml(practice.referred_by_name)}</span></div>` : ''}
                       </div>
                     </article>
                   `).join('')}

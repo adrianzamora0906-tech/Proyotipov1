@@ -72,7 +72,8 @@ class DocumentsView extends Component {
 
   getCounts() {
     return {
-      uploaded: this.students.filter(student => Number(student.uploadedCount || 0) === 3).length,
+      uploaded: this.students.filter(student => Number(student.uploadedCount || 0) === Number(student.requiredCount || 3)
+        && Number(student.missingCount || 0) === 0).length,
       missing: this.students.filter(student => Number(student.missingCount || 0) > 0).length,
     };
   }
@@ -96,9 +97,13 @@ class DocumentsView extends Component {
       city: student.city || student.city_name || 'N/A',
       branch: student.branch || student.branch_name || 'N/A',
       course: student.course || 'Sin curso',
+      requiredCount: /tipo\s*f/i.test(String(student.course || '')) ? 4 : 3,
       uploadedCount: 0,
-      missingCount: 3,
-      missingDocuments: ['Cedula', 'Certificado de estudio', 'Carnet de tipo sanguineo'],
+      missingCount: /tipo\s*f/i.test(String(student.course || '')) ? 4 : 3,
+      missingDocuments: [
+        'Cedula', 'Certificado de estudio', 'Carnet de tipo sanguineo',
+        ...(/tipo\s*f/i.test(String(student.course || '')) ? ['Certificado de discapacidad'] : []),
+      ],
     }));
   }
 
@@ -117,7 +122,8 @@ class DocumentsView extends Component {
     const filters = form ? Object.fromEntries(new FormData(form)) : {};
     const search = String(filters.search || '').trim().toLowerCase();
     return this.students.filter(student => {
-      const isComplete = Number(student.uploadedCount || 0) === 3 && Number(student.missingCount || 0) === 0;
+      const isComplete = Number(student.uploadedCount || 0) === Number(student.requiredCount || 3)
+        && Number(student.missingCount || 0) === 0;
       const hasPendingDocuments = Number(student.missingCount || 0) > 0;
       if (type === 'uploaded' ? !isComplete : !hasPendingDocuments) return false;
       if (search && !`${student.cedula || ''} ${student.studentName || ''}`.toLowerCase().includes(search)) return false;
@@ -144,7 +150,7 @@ class DocumentsView extends Component {
     }
     return rows.map(student => {
       const detail = type === 'uploaded'
-        ? '3 de 3 entregados'
+        ? `${Number(student.uploadedCount || 0)} de ${Number(student.requiredCount || 3)} entregados`
         : (student.missingDocuments || []).join(', ');
       return `
         <tr>

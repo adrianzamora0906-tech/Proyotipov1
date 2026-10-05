@@ -31,6 +31,8 @@ class StudentService {
       lastName: student.lastName || student.last_name || '',
       birthDate: student.birthDate || student.birth_date || null,
       bloodType: student.bloodType || student.blood_type || '',
+      disabilityPercentage: student.disabilityPercentage ?? student.disability_percentage ?? null,
+      discountBenefit: student.discountBenefit || student.discount_benefit || null,
       pickupBranchId: student.pickupBranchId || student.pickup_branch_id || null,
       pickupBranchName: student.pickupBranchName || student.pickup_branch_name || '',
       branch: student.branch || student.branch_name || '',
@@ -83,7 +85,10 @@ class StudentService {
           referredByUserId: studentData.referredByUserId || null,
           reservationId: studentData.reservationId || null,
           discount: Number(studentData.discount || 0),
+          discountBenefit: studentData.discountBenefit || null,
+          registrationTransfer: studentData.registrationTransfer || null,
           notes: studentData.notes || null,
+          disabilityPercentage: studentData.disabilityPercentage ?? null,
         };
 
         const result = await ApiService.createStudent(payload);

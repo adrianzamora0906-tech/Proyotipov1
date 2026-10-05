@@ -276,7 +276,7 @@ class CourseCycleService {
             AND COALESCE(ip.weekend_practice_area,scoped.practice_area,ip.practice_area)='carro'
             AND (u.branch_id=$1 OR scoped.practice_area IS NOT NULL)
           LIMIT 1
-        `, [branchId, instructorId, program.course_id])).rows[0] || null;
+        `, [branchId, instructorId])).rows[0] || null;
       };
       if (!pool.length) {
         await client.query('COMMIT');
@@ -2009,11 +2009,12 @@ class CourseCycleService {
         `,[cycleId,preferredInstructorId]);
         if (!instructorResult.rows.length) throw createError(422, 'El instructor no está habilitado para este curso');
         const instructor = instructorResult.rows[0];
-        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`exam-only:${instructor.id}:${selection.date}`]);
-        const dailyCount = Number((await client.query(`SELECT COUNT(*)::int total FROM practical_sessions
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`exam-only:${instructor.id}:${selection.date}:${startTime}`]);
+        const slotCount = Number((await client.query(`SELECT COUNT(*)::int total FROM practical_sessions
           WHERE instructor_id=$1 AND appointment_type='EXAM_ONLY' AND scheduled_start::date=$2::date
-            AND deleted_at IS NULL AND status NOT IN ('CANCELADA','REPROGRAMADA')`,[instructor.id,selection.date])).rows[0].total);
-        if (dailyCount >= 2) throw createError(409, 'Este instructor ya tiene los dos exámenes permitidos para ese día');
+            AND scheduled_start::time=$3::time
+            AND deleted_at IS NULL AND status NOT IN ('CANCELADA','REPROGRAMADA')`,[instructor.id,selection.date,startTime])).rows[0].total);
+        if (slotCount >= 2) throw createError(409, 'Este instructor ya tiene los dos exámenes permitidos para ese horario en esa fecha');
         const enrollment = (await client.query(`SELECT e.id FROM enrollments e
           WHERE e.student_id=$1 AND e.status='activo' AND e.course_id=$2
           ORDER BY e.created_at DESC LIMIT 1 FOR UPDATE OF e`,[studentId,cycle.course_id])).rows[0];
@@ -2081,9 +2082,9 @@ class CourseCycleService {
 
       const courseNameFilter = cycle.vehicle_type === 'moto'
         ? ['%moto%', '%motocicleta%', '%clase a%']
-        : ['%auto%', '%automovil%', '%automóvil%', '%clase b%'];
+        : ['%auto%', '%automovil%', '%automóvil%', '%clase b%', '%tipo f%'];
       const enrollmentResult = await client.query(`
-        SELECT e.id
+        SELECT e.id,(LOWER(c.name) LIKE '%tipo f%') AS requires_disability_certificate
         FROM enrollments e
         JOIN courses c ON c.id = e.course_id
         WHERE e.student_id = $1
@@ -2099,6 +2100,13 @@ class CourseCycleService {
 
       if (enrollmentResult.rows.length === 0) throw createError(404, 'Matricula activa no encontrada para este curso');
       const enrollmentId = enrollmentResult.rows[0].id;
+      if (enrollmentResult.rows[0].requires_disability_certificate) {
+        const certificate = await client.query(`SELECT 1 FROM student_documents document
+          JOIN document_types type ON type.id=document.document_type_id
+          WHERE document.student_id=$1 AND type.code='certificado_discapacidad'
+            AND NULLIF(document.file_path,'') IS NOT NULL LIMIT 1`, [studentId]);
+        if (!certificate.rowCount) throw createError(422, 'El certificado de discapacidad es obligatorio para la licencia Tipo F');
+      }
       const occupiedCycleSeats = Number((await client.query(`
         SELECT COUNT(DISTINCT seat_key)::int occupied
         FROM (

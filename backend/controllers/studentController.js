@@ -62,7 +62,7 @@ class StudentController {
   static async createAdditionalPractice(req, res, next) {
     try {
       if (!isUuid(req.params.id)) return res.status(400).json({ success: false, error: 'ID de estudiante inválido' });
-      const practice = await AdditionalPracticeService.create(req.params.id, req.body, req.user);
+      const practice = await AdditionalPracticeService.create(req.params.id, req.body, req.user, req.requestContext);
       return res.status(201).json({ success: true, data: practice });
     } catch (error) { next(error); }
   }
@@ -163,6 +163,7 @@ class StudentController {
       };
       const student = await StudentService.create(studentData, req.user.id, {
         allowDiscount: req.authorization?.permissions?.includes('PAYMENT_CREATE') || false,
+        requestContext: req.requestContext,
       });
       return res.status(201).json({ success: true, data: student });
     } catch (error) { next(error); }

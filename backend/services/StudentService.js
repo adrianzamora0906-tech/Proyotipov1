@@ -1,6 +1,7 @@
 const db = require('../config/database');
 const StudentAccountService = require('./StudentAccountService');
 const ReferralCampaignService = require('./ReferralCampaignService');
+const AuditService = require('./AuditService');
 const { createError } = require('../middleware/errorHandler');
 
 class StudentService {
@@ -167,7 +168,11 @@ class StudentService {
       await client.query('SELECT expire_course_cycle_seat_reservations()');
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`temporary-seat:${cycleId}:${instructorId}`]);
       const cycle=(await client.query(`SELECT cc.id,cc.branch_id,cc.course_id,cc.start_date,cc.end_date,cc.modality
-        FROM course_cycles cc WHERE cc.id=$1 AND cc.course_id=$2 AND cc.active=TRUE
+        FROM course_cycles cc
+        JOIN courses requested_course ON requested_course.id=$2 AND requested_course.active=TRUE
+        WHERE cc.id=$1 AND (cc.course_id=$2 OR (
+          requested_course.name ILIKE '%tipo f%' AND cc.vehicle_type='carro'
+        )) AND cc.active=TRUE
           AND cc.deleted_at IS NULL AND cc.status IN('activo','proximo')
           AND CURRENT_DATE<=cc.start_date+2`,[cycleId,courseId])).rows[0];
       if(!cycle)throw createError(409,'El curso seleccionado ya no admite reservas');
@@ -200,7 +205,7 @@ class StudentService {
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${cycleId}:${date}:${match[1]}:${match[2]}`]);
         const validTemplate=await client.query(`SELECT 1 FROM branch_course_programs p JOIN branch_course_schedule_templates t ON t.program_id=p.id AND t.active=TRUE
           WHERE p.branch_id=$1 AND p.course_id=$2 AND t.modality=$3 AND t.day_of_week=EXTRACT(DOW FROM $4::date)
-            AND t.start_time=$5::time AND t.end_time=$6::time`,[reservationBranchId,courseId,cycle.modality,date,match[1],match[2]]);
+            AND t.start_time=$5::time AND t.end_time=$6::time`,[reservationBranchId,cycle.course_id,cycle.modality,date,match[1],match[2]]);
         if(!validTemplate.rowCount)throw createError(422,'Uno de los horarios no pertenece al curso');
         const busy=await client.query(`SELECT 1 FROM (
           SELECT instructor_id,schedule_date,start_time,end_time FROM course_cycle_schedule_assignments WHERE status='activo'
@@ -365,6 +370,13 @@ class StudentService {
         WHERE course_enrollment.student_id = s.id
           AND (filtered_course.name ILIKE '%autom%' OR filtered_course.name ILIKE '%carro%' OR filtered_course.name ILIKE '%clase b%')
       )`;
+    } else if (filters.course_type === 'tipo-f') {
+      sql += ` AND EXISTS (
+        SELECT 1 FROM enrollments course_enrollment
+        JOIN courses filtered_course ON filtered_course.id = course_enrollment.course_id
+        WHERE course_enrollment.student_id = s.id
+          AND filtered_course.name ILIKE '%tipo f%'
+      )`;
     } else if (filters.course_type === 'moto') {
       sql += ` AND EXISTS (
         SELECT 1 FROM enrollments course_enrollment
@@ -454,6 +466,8 @@ class StudentService {
           'completed_days', ap.completed_days,
           'total_amount', ap.total_amount,
           'customer_type', ap.customer_type,
+          'referred_by_user_id', ap.referred_by_user_id,
+          'referred_by_name', NULLIF(TRIM(CONCAT(apu.first_name, ' ', apu.last_name)), ''),
           'status', CASE
             WHEN ap.status = 'CANCELLED' THEN 'CANCELLED'
             WHEN ap.completed_days >= ap.number_of_days OR CURRENT_DATE > ap.start_date + (ap.number_of_days - 1) THEN 'COMPLETED'
@@ -465,6 +479,7 @@ class StudentService {
          JOIN instructor_profiles aip ON aip.id = ap.instructor_id
          JOIN users iu ON iu.id = aip.user_id
          JOIN branches pb ON pb.id = ap.branch_id
+         LEFT JOIN users apu ON apu.id = ap.referred_by_user_id
          WHERE ap.student_id = s.id) AS additional_practices
       FROM students s
       LEFT JOIN branches b ON s.branch_id = b.id
@@ -535,7 +550,7 @@ class StudentService {
   /**
    * Crear nuevo estudiante
    */
-  static async create(data, userId, { allowDiscount = false } = {}) {
+  static async create(data, userId, { allowDiscount = false, requestContext = {} } = {}) {
     await db.query('SELECT expire_course_cycle_seat_reservations()');
     let seatReservation = null;
     const referralAttribution = await ReferralCampaignService.findPendingAttribution(data.identification);
@@ -626,26 +641,79 @@ class StudentService {
       courseId = course.rows[0].id;
     }
 
-    const discount = Number(data.discount || 0);
+    const selectedCourseRecord = courseId
+      ? (await db.query('SELECT name,price FROM courses WHERE id=$1 AND active=TRUE', [courseId])).rows[0]
+      : null;
+    if (courseId && !selectedCourseRecord) throw createError(422, 'Curso no valido');
+    const isTypeF = /tipo\s*f/i.test(String(selectedCourseRecord?.name || ''));
+    const disabilityPercentage = data.disabilityPercentage === null || data.disabilityPercentage === undefined || data.disabilityPercentage === ''
+      ? null
+      : Number(data.disabilityPercentage);
+    if (isTypeF && (!Number.isInteger(disabilityPercentage) || disabilityPercentage < 1 || disabilityPercentage > 100)) {
+      throw createError(422, 'Ingresa un porcentaje de discapacidad valido entre 1 y 100');
+    }
+
+    const discountBenefit = String(data.discountBenefit || '').trim() || null;
+    const benefitFinalPrices = {
+      UNIVERSITY_STUDENT: { moto: 117, carro: 180 },
+      POLICE: { moto: 110, carro: 170 },
+    };
+    if (discountBenefit && !benefitFinalPrices[discountBenefit]) {
+      throw createError(422, 'El convenio de descuento no es valido');
+    }
+    const selectedCourseName = String(selectedCourseRecord?.name || '');
+    const benefitCourseType = /clase\s*a|moto/i.test(selectedCourseName)
+      ? 'moto'
+      : (/clase\s*b|auto|autom[oó]vil/i.test(selectedCourseName) && !/tipo\s*f/i.test(selectedCourseName) ? 'carro' : null);
+    if (discountBenefit && !benefitCourseType) {
+      throw createError(422, 'El convenio solo aplica a los cursos de Moto y Carro');
+    }
+    const benefitFinalAmount = discountBenefit
+      ? benefitFinalPrices[discountBenefit][benefitCourseType]
+      : null;
+    if (discountBenefit && Number(selectedCourseRecord.price) < benefitFinalAmount) {
+      throw createError(422, 'El precio del convenio no puede superar el valor del curso');
+    }
+    const discount = discountBenefit
+      ? Number(selectedCourseRecord.price) - benefitFinalAmount
+      : Number(data.discount || 0);
     if (!Number.isFinite(discount) || discount < 0) throw createError(422, 'El descuento no es válido');
-    if (discount > 0 && !allowDiscount) throw createError(403, 'No tienes permiso para aplicar descuentos');
+    if (discount > 0 && !allowDiscount && !discountBenefit) throw createError(403, 'No tienes permiso para aplicar descuentos');
     if (courseId && discount > 0) {
       const coursePrice = await db.query('SELECT name,price FROM courses WHERE id=$1 AND active=TRUE', [courseId]);
       const selectedCourse = coursePrice.rows[0];
       const isCarCourse = /auto|automóvil|clase b/i.test(String(selectedCourse?.name || ''));
-      const minimumFinalAmount = isCarCourse ? 175 : 0;
+      const minimumFinalAmount = isCarCourse && !discountBenefit ? 175 : 0;
       if (!selectedCourse || discount > Number(selectedCourse.price) - minimumFinalAmount) {
         if (isCarCourse) throw createError(422, 'El curso de automóvil no puede quedar por debajo de $175.00');
         throw createError(422, 'El descuento no puede superar el valor del curso');
       }
     }
 
+    const registrationTransfer = data.registrationTransfer || null;
+    if (registrationTransfer) {
+      const transferAmount = Number(registrationTransfer.amount || 0);
+      const transferReference = String(registrationTransfer.reference || '').trim();
+      const finalCourseAmount = Number(selectedCourseRecord?.price || 0) - discount;
+      if (!courseId || !transferReference || !Number.isFinite(transferAmount) || transferAmount <= 0) {
+        throw createError(422, 'Completa el valor y numero de comprobante de la transferencia');
+      }
+      if (transferAmount > finalCourseAmount) {
+        throw createError(422, 'El valor transferido no puede superar el precio final del curso');
+      }
+      const duplicate = await db.query(`SELECT 1 FROM transfer_payment_verifications
+        WHERE LOWER(reference)=LOWER($1) LIMIT 1`, [transferReference]);
+      if (duplicate.rows.length) throw createError(409, 'El numero de transferencia ya fue registrado');
+      registrationTransfer.amount = transferAmount;
+      registrationTransfer.reference = transferReference;
+    }
+
     const notes = String(data.notes || '').trim().slice(0, 500);
     const result = await db.query(`
       INSERT INTO students (identification, first_name, last_name, birth_date, email, phone,
         address, blood_type, branch_id, city_id, status, created_by, registration_type, referred_by_user_id, notes,
-        pickup_branch_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        pickup_branch_id, disability_percentage, discount_benefit)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       RETURNING *
     `, [
       data.identification,
@@ -664,6 +732,8 @@ class StudentService {
       referredByUserId,
       notes || null,
       pickupBranchId,
+      isTypeF ? disabilityPercentage : null,
+      discountBenefit,
     ]);
 
     const student = result.rows[0];
@@ -699,10 +769,29 @@ class StudentService {
         FROM courses c
         WHERE c.id = $2::uuid
       `, [enrollmentId, courseId, discount]);
+      if (registrationTransfer) {
+        const transfer = (await db.query(`INSERT INTO transfer_payment_verifications
+          (branch_id,student_id,amount,bank,reference,transfer_date,created_by)
+          VALUES($1,$2,$3,'No especificado',$4,(NOW() AT TIME ZONE 'America/Guayaquil')::date,$5)
+          RETURNING id,status`, [branchId, student.id, registrationTransfer.amount, registrationTransfer.reference, userId])).rows[0];
+        await AuditService.log({
+          userId,
+          branchId,
+          action: 'TRANSFER_VERIFICATION_CREATED',
+          module: 'FINANCIERO',
+          entityType: 'TRANSFER_PAYMENT_VERIFICATION',
+          entityId: transfer.id,
+          description: 'Transferencia declarada durante el registro del estudiante',
+          newValues: { amount: registrationTransfer.amount, reference: registrationTransfer.reference, status: transfer.status },
+          requestContext,
+        });
+      }
       if (discount > 0) {
         await db.query('INSERT INTO history (student_id, action) VALUES ($1, $2)', [
           student.id,
-          `Descuento de $${discount.toFixed(2)} aplicado al registrar la matrícula`,
+          discountBenefit
+            ? `Convenio ${discountBenefit === 'POLICE' ? 'Policía' : 'Estudiante universitario'} aplicado: precio final $${benefitFinalAmount.toFixed(2)}`
+            : `Descuento de $${discount.toFixed(2)} aplicado al registrar la matrícula`,
         ]);
       }
     }
@@ -741,6 +830,7 @@ class StudentService {
       pickupBranchId: 'pickup_branch_id',
       branch_id: 'branch_id',
       notes: 'notes',
+      disabilityPercentage: 'disability_percentage',
     };
 
     for (const [key, col] of Object.entries(fieldMap)) {
@@ -879,6 +969,8 @@ class StudentService {
       await del('incidents', `DELETE FROM incidents WHERE enrollment_id IN (SELECT id FROM target_enrollments)
         OR practical_session_id IN (SELECT id FROM practical_sessions WHERE enrollment_id IN (SELECT id FROM target_enrollments))`);
       await del('practical_evaluations', 'DELETE FROM practical_evaluations WHERE enrollment_id IN (SELECT id FROM target_enrollments)');
+      await del('practical_session_reschedules', `DELETE FROM practical_session_reschedules WHERE original_session_id IN (
+        SELECT id FROM practical_sessions WHERE enrollment_id IN (SELECT id FROM target_enrollments))`);
       await del('practical_sessions', 'DELETE FROM practical_sessions WHERE enrollment_id IN (SELECT id FROM target_enrollments)');
       await del('payment_correction_requests', 'DELETE FROM payment_correction_requests WHERE payment_detail_id IN (SELECT id FROM target_payment_details)');
       await del('payment_void_requests', 'DELETE FROM payment_void_requests WHERE payment_detail_id IN (SELECT id FROM target_payment_details)');

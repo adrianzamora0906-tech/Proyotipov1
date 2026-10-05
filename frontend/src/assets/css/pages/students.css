@@ -369,6 +369,9 @@
 
 .student-transfer-reference {
   margin: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.7fr);
+  gap: 8px;
 }
 
 .student-transfer-reference[hidden] {
@@ -378,6 +381,10 @@
 .student-transfer-reference .form-input {
   height: 42px;
   width: 100%;
+}
+
+.student-transfer-reference .form-error {
+  grid-column: 1 / -1;
 }
 
 .student-blood-transfer-row {
@@ -430,6 +437,10 @@
 
   .student-transfer-column .student-transfer-check {
     top: 0;
+  }
+
+  .student-transfer-reference {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1281,6 +1292,49 @@
   margin-bottom: 1rem;
 }
 
+.type-f-document-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 1rem;
+}
+
+.type-f-document-grid[hidden] {
+  display: none;
+}
+
+.type-f-document-grid .registration-certificate-field {
+  max-width: none;
+  margin-bottom: 0;
+}
+
+.disability-percentage-field {
+  min-width: 0;
+}
+
+.disability-percentage-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 0.75rem;
+  align-items: center;
+  min-height: 126px;
+  padding: 1rem;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  background: var(--gray-50);
+}
+
+.disability-percentage-control > div {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.disability-percentage-control input[type="range"] {
+  width: 100%;
+}
+
 .registration-certificate-help {
   color: var(--gray-500);
   font-size: 0.78rem;
@@ -2070,6 +2124,10 @@
 
   .registration-certificate-field {
     max-width: none;
+  }
+
+  .type-f-document-grid {
+    grid-template-columns: 1fr;
   }
 
   .page-header {

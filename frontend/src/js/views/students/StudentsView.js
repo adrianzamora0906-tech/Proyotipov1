@@ -166,6 +166,7 @@ class StudentsView extends Component {
             <option value="">Todos</option>
             <option value="carro" ${queryParams.get('course_type') === 'carro' ? 'selected' : ''}>Carro</option>
             <option value="moto" ${queryParams.get('course_type') === 'moto' ? 'selected' : ''}>Moto</option>
+            <option value="tipo-f" ${queryParams.get('course_type') === 'tipo-f' ? 'selected' : ''}>Tipo F</option>
           </select></label>
           <label>Provincia<select class="form-select" name="province"><option value="">Todas</option>${provinceOptions.map(value => `<option value="${value}" ${queryParams.get('province') === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
           <label>Cantón<select class="form-select" name="city"><option value="">Todos</option>${cantonOptions.map(value => `<option value="${value}" ${queryParams.get('city') === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
@@ -668,7 +669,8 @@ class StudentsView extends Component {
                         </label>
                       </div>
                       <div class="student-transfer-reference" id="student-transfer-reference" hidden>
-                        <input class="form-input" id="student-transfer-reference-input" placeholder="Escribe el comprobante de transferencia">
+                        <input class="form-input" id="student-transfer-reference-input" placeholder="N&uacute;mero de comprobante">
+                        <input class="form-input" id="student-transfer-amount-input" type="number" min="0.01" step="0.01" placeholder="Valor transferido">
                         <div class="form-error" id="student-transfer-reference-error"></div>
                       </div>
                     </div>
@@ -692,11 +694,12 @@ class StudentsView extends Component {
                   <div class="form-error"></div>
                 </div>
 
-                <div class="staff-referral-field regular-enrollment-only renewal-hidden">
+                <div class="staff-referral-field referral-eligible-field">
                   <label class="form-label" for="student-referrer-search">Referido por <small>(opcional)</small></label>
                   <div class="staff-referral-search">
-                    <input type="search" class="form-input" id="student-referrer-search" autocomplete="off" placeholder="Buscar personal por nombre...">
+                    <input type="search" class="form-input" id="student-referrer-search" autocomplete="off" placeholder="Buscar personal, Polic&iacute;a o universidad...">
                     <input type="hidden" name="referredByUserId" id="student-referrer-id">
+                    <input type="hidden" name="discountBenefit" id="student-discount-benefit">
                     <div class="staff-referral-results" id="student-referrer-results" hidden></div>
                   </div>
                   <div class="staff-referral-selected" id="student-referrer-selected" hidden></div>
@@ -748,6 +751,33 @@ class StudentsView extends Component {
                     <a href="https://servicios.educacion.gob.ec/titulacion25-web/faces/paginas/consulta-titulos-refrendados.xhtml" target="_blank" rel="noopener noreferrer">aqui</a>.
                   </small>
                 </label>
+
+                <div class="type-f-document-grid regular-enrollment-only" id="type-f-document-grid" hidden>
+                <label class="registration-document-field registration-certificate-field registration-file-dropzone" id="disability-certificate-field" data-file-dropzone>
+                  <span class="form-label required">Certificado de discapacidad</span>
+                  <span class="registration-dropzone-content">
+                    <span class="registration-dropzone-icon" aria-hidden="true">&#8679;</span>
+                    <strong>Arrastra y suelta el certificado aqu&iacute;</strong>
+                    <small>PDF, JPG o PNG &middot; obligatorio para Tipo F</small>
+                    <span class="registration-dropzone-file" data-file-name>Ning&uacute;n archivo seleccionado</span>
+                  </span>
+                  <input type="file" name="certificadoDiscapacidadFile" accept=".pdf,.jpg,.jpeg,.png">
+                  <div class="form-error" id="disability-certificate-error"></div>
+                </label>
+
+                <div class="form-group disability-percentage-field" id="disability-percentage-field">
+                  <label class="form-label required" for="disability-percentage-range">Porcentaje de discapacidad</label>
+                  <div class="disability-percentage-control">
+                    <input id="disability-percentage-range" type="range" min="1" max="100" step="1" value="30" aria-label="Porcentaje de discapacidad">
+                    <div style="display:flex;align-items:center;gap:6px">
+                      <input class="form-input" type="number" name="disabilityPercentage" min="1" max="100" step="1" value="30" inputmode="numeric">
+                      <strong aria-hidden="true">%</strong>
+                    </div>
+                  </div>
+                  <small>Registra el porcentaje indicado en el certificado.</small>
+                  <div class="form-error" id="disability-percentage-error"></div>
+                </div>
+                </div>
 
                 <div class="student-document-grid regular-enrollment-only">
                   ${this.renderTwoSideDocumentUpload('cedula', 'Cédula de Identidad')}
@@ -1023,6 +1053,7 @@ class StudentsView extends Component {
     const transferCheck = document.getElementById('student-transfer-payment');
     const transferReference = document.getElementById('student-transfer-reference');
     const transferReferenceInput = document.getElementById('student-transfer-reference-input');
+    const transferAmountInput = document.getElementById('student-transfer-amount-input');
     const paymentMethodSelect = form?.querySelector('[name="paymentMethod"]');
     const paymentReferenceInput = form?.querySelector('[name="paymentReference"]');
     const syncTransferReference = () => {
@@ -1038,6 +1069,7 @@ class StudentsView extends Component {
           transferReferenceInput.value = paymentReferenceInput?.value || transferReferenceInput.value;
           setTimeout(() => transferReferenceInput.focus(), 0);
         }
+        if (transferAmountInput) transferAmountInput.required = true;
         if (collectPayment) {
           collectPayment.checked = true;
           collectPayment.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1055,6 +1087,10 @@ class StudentsView extends Component {
         if (transferReferenceInput) {
           transferReferenceInput.required = false;
           transferReferenceInput.value = '';
+        }
+        if (transferAmountInput) {
+          transferAmountInput.required = false;
+          transferAmountInput.value = '';
         }
         if (paymentReferenceInput) paymentReferenceInput.value = '';
         const transferReferenceError = document.getElementById('student-transfer-reference-error');
@@ -1221,6 +1257,7 @@ class StudentsView extends Component {
     document.querySelectorAll('.enrollment-calendar').forEach(calendar => this.updateCalendarWindow(calendar));
     form?.querySelector('[name="course_id"]')?.addEventListener('change', async () => {
       this.updateRegistrationPaymentSummary();
+      this.updateDisabilityCertificateRequirement();
       this.useInstructorFirstAvailability = false;
       this.instructorFirstAvailabilityDate = null;
       this.scheduleInstructorFilterId = null;
@@ -1235,6 +1272,15 @@ class StudentsView extends Component {
       }
       this.syncScheduleOptions();
     });
+    const disabilityRange = document.getElementById('disability-percentage-range');
+    const disabilityNumber = form?.querySelector('[name="disabilityPercentage"]');
+    const syncDisabilityPercentage = (source, target) => {
+      const value = Math.min(100, Math.max(1, Number(source.value) || 1));
+      source.value = String(value);
+      target.value = String(value);
+    };
+    disabilityRange?.addEventListener('input', () => syncDisabilityPercentage(disabilityRange, disabilityNumber));
+    disabilityNumber?.addEventListener('input', () => syncDisabilityPercentage(disabilityNumber, disabilityRange));
     form?.querySelector('[name="discountAmount"]')?.addEventListener('input', () => this.updateRegistrationPaymentSummary());
     form?.querySelector('[name="preferredInstructorId"]')?.addEventListener('change', async event => {
       this.scheduleInstructorFilterId = event.target.value || null;
@@ -1399,11 +1445,13 @@ class StudentsView extends Component {
     await this.toggleAdditionalPracticeMode(isAdditionalPractice);
     document.querySelectorAll('.student-registration-type').forEach(card => card.classList.toggle('is-selected', card.querySelector('input')?.checked));
     document.querySelectorAll('.renewal-hidden').forEach(element => { element.hidden = isRenewal || isAdditionalPractice; });
+    document.querySelectorAll('.referral-eligible-field').forEach(element => { element.hidden = isRenewal; });
     document.querySelectorAll('.renewal-observations-field').forEach(element => { element.hidden = !isRenewal; });
     document.querySelectorAll('.regular-enrollment-observations-field').forEach(element => { element.hidden = isRenewal || isAdditionalPractice; });
     document.querySelectorAll('.additional-practice-observations-field').forEach(element => { element.hidden = isRenewal || !isAdditionalPractice; });
     document.querySelectorAll('.student-modal-step-tab').forEach(tab => { tab.hidden = isRenewal && Number(tab.dataset.step) !== 2; });
     form?.querySelectorAll('.renewal-hidden input, .renewal-hidden select, .renewal-hidden textarea').forEach(field => { field.disabled = isRenewal || isAdditionalPractice; });
+    form?.querySelectorAll('.referral-eligible-field input').forEach(field => { field.disabled = isRenewal; });
     this.setNormalCourseRequiredFields(!isRenewal && !isAdditionalPractice);
     this.setTemporaryReservationFieldsOptional(isRenewal || this.temporaryReservationMode);
     const title = document.getElementById('student-modal-title');
@@ -1483,10 +1531,24 @@ class StudentsView extends Component {
     const form = document.getElementById('student-modal-form');
     const courseOption = form?.querySelector('[name="course_id"]')?.selectedOptions?.[0];
     const price = Number(courseOption?.dataset?.price || 0);
-    const isCarCourse = courseOption?.dataset?.courseType === 'carro';
-    const minimumFinalAmount = isCarCourse ? 175 : 0;
+    const catalogType = courseOption?.dataset?.catalogType || courseOption?.dataset?.courseType;
+    const isCarCourse = catalogType === 'carro';
+    const benefit = form?.querySelector('[name="discountBenefit"]')?.value || '';
+    const benefitPrices = {
+      UNIVERSITY_STUDENT: { moto: 117, carro: 180 },
+      POLICE: { moto: 110, carro: 170 },
+    };
+    const benefitFinalPrice = benefitPrices[benefit]?.[catalogType];
+    const hasApplicableBenefit = Number.isFinite(benefitFinalPrice);
+    const minimumFinalAmount = isCarCourse && !hasApplicableBenefit ? 175 : 0;
     const maximumDiscount = Math.max(price - minimumFinalAmount, 0);
     const discountInput = form?.querySelector('[name="discountAmount"]');
+    if (discountInput && benefit) {
+      discountInput.value = hasApplicableBenefit ? Math.max(price - benefitFinalPrice, 0).toFixed(2) : '0';
+      discountInput.readOnly = true;
+    } else if (discountInput) {
+      discountInput.readOnly = false;
+    }
     const discount = Math.max(Number(discountInput?.value || 0), 0);
     const summary = document.getElementById('payment-registration-summary');
     if (discountInput) discountInput.max = String(maximumDiscount);
@@ -1495,7 +1557,12 @@ class StudentsView extends Component {
       summary.textContent = 'Selecciona un curso para calcular el valor final.';
       return;
     }
-    summary.innerHTML = `Valor del curso: <strong>$${price.toFixed(2)}</strong> · Descuento: <strong>$${Math.min(discount, maximumDiscount).toFixed(2)}</strong> · Total final: <strong>$${Math.max(price - discount, minimumFinalAmount).toFixed(2)}</strong>${isCarCourse ? ' · Mínimo permitido: <strong>$175.00</strong>' : ''}`;
+    if (benefit && !hasApplicableBenefit) {
+      summary.textContent = 'Este convenio solo aplica a los cursos de Moto y Carro.';
+      return;
+    }
+    const benefitLabel = benefit === 'POLICE' ? 'Policía' : 'Estudiante universitario';
+    summary.innerHTML = `Valor del curso: <strong>$${price.toFixed(2)}</strong> · Descuento: <strong>$${Math.min(discount, maximumDiscount).toFixed(2)}</strong> · Total final: <strong>$${Math.max(price - discount, minimumFinalAmount).toFixed(2)}</strong>${hasApplicableBenefit ? ` · Convenio: <strong>${benefitLabel}</strong>` : (isCarCourse ? ' · Mínimo permitido: <strong>$175.00</strong>' : '')}`;
   }
 
   scheduleAdditionalPracticeAvailability() {
@@ -2551,7 +2618,8 @@ class StudentsView extends Component {
       const courses = response.data || [];
       const courseOptions = courses.map(course => {
         const courseType = this.getCourseCatalogType(course);
-        return `<option value="${escapeHtml(course.id)}" data-price="${Number(course.price || 0)}" data-course-type="${courseType}" data-course-name="${escapeHtml(course.name)}">${escapeHtml(course.name)}</option>`;
+        const isTypeF = courseType === 'tipo-f';
+        return `<option value="${escapeHtml(course.id)}" data-price="${Number(course.price || 0)}" data-course-type="${isTypeF ? 'carro' : courseType}" data-catalog-type="${courseType}" data-course-name="${escapeHtml(course.name)}">${escapeHtml(course.name)}</option>`;
       }).join('');
       const typeFOption = courses.some(course => /tipo f/i.test(course.name))
         ? ''
@@ -2559,6 +2627,7 @@ class StudentsView extends Component {
       courseSelect.innerHTML = '<option value="">Seleccionar curso...</option>' + courseOptions + typeFOption;
       courseSelect.disabled = false;
       this.updateRegistrationPaymentSummary();
+      this.updateDisabilityCertificateRequirement();
     } catch (error) { courseSelect.innerHTML='<option value="">No se pudieron cargar los cursos</option>'; courseSelect.disabled=true; }
   }
 
@@ -2955,8 +3024,17 @@ class StudentsView extends Component {
       const staff = await StudentService.searchReferralStaff(query);
       const currentValue = document.getElementById('student-referrer-search')?.value.trim();
       if (currentValue !== query) return;
-      this.referralStaffResults = staff;
-      this.renderReferralStaffResults(staff);
+      const normalizedQuery = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const registrationMode = document.querySelector('[name="registrationMode"]:checked')?.value || 'regular';
+      const benefitReferrals = registrationMode === 'regular'
+        ? [
+            { id: 'benefit:POLICE', name: 'Policía', role_name: 'Precio especial', branch_name: 'Moto $110 · Carro $170', discount_benefit: 'POLICE' },
+            { id: 'benefit:UNIVERSITY_STUDENT', name: 'Estudiante universitario', role_name: 'Precio especial', branch_name: 'Moto $117 · Carro $180', discount_benefit: 'UNIVERSITY_STUDENT' },
+          ].filter(item => item.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(normalizedQuery)
+            || (item.discount_benefit === 'UNIVERSITY_STUDENT' && 'universidad'.includes(normalizedQuery)))
+        : [];
+      this.referralStaffResults = [...benefitReferrals, ...staff];
+      this.renderReferralStaffResults(this.referralStaffResults);
     }, delay);
   }
 
@@ -2980,7 +3058,9 @@ class StudentsView extends Component {
     const search = document.getElementById('student-referrer-search');
     const results = document.getElementById('student-referrer-results');
     const selected = document.getElementById('student-referrer-selected');
-    if (idInput) idInput.value = person.id;
+    const benefitInput = document.getElementById('student-discount-benefit');
+    if (idInput) idInput.value = person.discount_benefit ? '' : person.id;
+    if (benefitInput) benefitInput.value = person.discount_benefit || '';
     if (search) {
       search.value = '';
       search.hidden = true;
@@ -2990,6 +3070,7 @@ class StudentsView extends Component {
       selected.hidden = false;
       selected.innerHTML = `<div><strong>${escapeHtml(person.name)}</strong><span>${escapeHtml(person.role_name || 'Personal')} · ${escapeHtml(person.branch_name || '')}</span></div><button type="button" data-clear-referrer aria-label="Quitar referido">&times;</button>`;
     }
+    this.updateRegistrationPaymentSummary();
   }
 
   clearReferralStaff() {
@@ -2999,7 +3080,9 @@ class StudentsView extends Component {
     const search = document.getElementById('student-referrer-search');
     const results = document.getElementById('student-referrer-results');
     const selected = document.getElementById('student-referrer-selected');
+    const benefitInput = document.getElementById('student-discount-benefit');
     if (idInput) idInput.value = '';
+    if (benefitInput) benefitInput.value = '';
     if (search) {
       search.value = '';
       search.hidden = false;
@@ -3012,6 +3095,7 @@ class StudentsView extends Component {
       selected.hidden = true;
       selected.innerHTML = '';
     }
+    this.updateRegistrationPaymentSummary();
   }
 
   goToNextModalStep() {
@@ -3808,6 +3892,25 @@ class StudentsView extends Component {
     return '';
   }
 
+  updateDisabilityCertificateRequirement() {
+    const form = document.getElementById('student-modal-form');
+    const option = form?.querySelector('[name="course_id"]')?.selectedOptions?.[0];
+    const typeFFields = document.getElementById('type-f-document-grid');
+    const input = form?.querySelector('[name="certificadoDiscapacidadFile"]');
+    const percentageInput = form?.querySelector('[name="disabilityPercentage"]');
+    const required = option?.dataset?.catalogType === 'tipo-f';
+    if (typeFFields) typeFFields.hidden = !required;
+    if (input) {
+      input.required = required;
+      if (!required) input.value = '';
+    }
+    if (percentageInput) percentageInput.required = required;
+    const error = document.getElementById('disability-certificate-error');
+    if (error) error.textContent = '';
+    const percentageError = document.getElementById('disability-percentage-error');
+    if (percentageError) percentageError.textContent = '';
+  }
+
   getCourseBusinessDays(startDate, endDate, courseKey = 'carro', modality = 'normal') {
     if (!startDate || !endDate) return [];
     if (modality === 'intensivo') {
@@ -3914,6 +4017,7 @@ class StudentsView extends Component {
 
     const topTransferCheck = document.getElementById('student-transfer-payment');
     const topTransferReferenceInput = document.getElementById('student-transfer-reference-input');
+    const topTransferAmountInput = document.getElementById('student-transfer-amount-input');
     if (!authService.can('PAYMENT_CREATE') && topTransferCheck?.checked && !String(topTransferReferenceInput?.value || '').trim()) {
       const transferReferenceError = document.getElementById('student-transfer-reference-error');
       if (transferReferenceError) transferReferenceError.textContent = 'Escribe el numero de comprobante.';
@@ -3921,6 +4025,17 @@ class StudentsView extends Component {
       this.goToModalStep(2);
       topTransferReferenceInput?.focus();
       return;
+    }
+    if (!authService.can('PAYMENT_CREATE') && topTransferCheck?.checked) {
+      const amount = Number(topTransferAmountInput?.value || 0);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        const transferError = document.getElementById('student-transfer-reference-error');
+        if (transferError) transferError.textContent = 'Ingresa el valor transferido.';
+        this.showModalAlert('error', 'Ingresa el valor de la transferencia.');
+        this.goToModalStep(2);
+        topTransferAmountInput?.focus();
+        return;
+      }
     }
 
     if (formData.get('registrationMode') === 'license-renewal') {
@@ -3935,6 +4050,23 @@ class StudentsView extends Component {
 
     const registrationDocumentsUrl = formData.get('registrationDocumentsMobileFileUrl');
     const registrationDocumentsPdf = formData.get('registrationDocumentsPdfFile');
+    const selectedCatalogType = form.querySelector('[name="course_id"]')?.selectedOptions?.[0]?.dataset?.catalogType;
+    const disabilityCertificate = formData.get('certificadoDiscapacidadFile');
+    const disabilityPercentage = Number(formData.get('disabilityPercentage'));
+    if (selectedCatalogType === 'tipo-f' && !disabilityCertificate?.name) {
+      const certificateError = document.getElementById('disability-certificate-error');
+      if (certificateError) certificateError.textContent = 'Adjunta el certificado de discapacidad.';
+      this.showModalAlert('error', 'El certificado de discapacidad es obligatorio para la licencia Tipo F.');
+      this.goToModalStep(3);
+      return;
+    }
+    if (selectedCatalogType === 'tipo-f' && (!Number.isInteger(disabilityPercentage) || disabilityPercentage < 1 || disabilityPercentage > 100)) {
+      const percentageError = document.getElementById('disability-percentage-error');
+      if (percentageError) percentageError.textContent = 'Ingresa un porcentaje entre 1 y 100.';
+      this.showModalAlert('error', 'El porcentaje de discapacidad es obligatorio para la licencia Tipo F.');
+      this.goToModalStep(3);
+      return;
+    }
     const hasRegistrationPdf = Boolean(registrationDocumentsPdf?.name);
     if (hasRegistrationPdf && !this.isPdfFile(registrationDocumentsPdf)) {
       const documentError = document.getElementById('cedula-scan-error');
@@ -4062,9 +4194,17 @@ class StudentsView extends Component {
 
     const shouldCollectPayment = authService.can('PAYMENT_CREATE') && formData.get('collectPayment') === 'on';
     const discountAmount = Number(formData.get('discountAmount') || 0);
+    const discountBenefit = String(formData.get('discountBenefit') || '');
     const selectedCourseOption = form.querySelector('[name="course_id"]')?.selectedOptions?.[0];
     const selectedCoursePrice = Number(selectedCourseOption?.dataset?.price || 0);
-    const minimumFinalAmount = selectedCourseOption?.dataset?.courseType === 'carro' ? 175 : 0;
+    const benefitCatalogType = selectedCourseOption?.dataset?.catalogType || selectedCourseOption?.dataset?.courseType;
+    const benefitApplies = Boolean(discountBenefit && ['moto', 'carro'].includes(benefitCatalogType));
+    if (discountBenefit && !benefitApplies) {
+      this.showModalAlert('error', 'El convenio solo aplica a los cursos de Moto y Carro.');
+      this.goToModalStep(1);
+      return;
+    }
+    const minimumFinalAmount = benefitCatalogType === 'carro' && !benefitApplies ? 175 : 0;
     const maximumDiscount = Math.max(selectedCoursePrice - minimumFinalAmount, 0);
     const discountError = document.getElementById('payment-discount-error');
     if (discountError) discountError.textContent = '';
@@ -4134,6 +4274,7 @@ class StudentsView extends Component {
     const topTransferReference = !authService.can('PAYMENT_CREATE') && topTransferCheck?.checked
       ? String(topTransferReferenceInput?.value || '').trim()
       : '';
+    const topTransferAmount = topTransferReference ? Number(topTransferAmountInput?.value || 0) : 0;
     const registrationNotes = [
       this.getVisibleRegistrationNotes(),
       topTransferReference ? `Transferencia declarada. Comprobante: ${topTransferReference}` : '',
@@ -4150,13 +4291,19 @@ class StudentsView extends Component {
       bloodType: formData.get('bloodType'),
       pickupBranchId: formData.get('pickupBranchId'),
       course_id: formData.get('course_id'),
+      disabilityPercentage: selectedCatalogType === 'tipo-f' ? disabilityPercentage : null,
       city_id: this.currentBranchRecord?.city_id || formData.get('city_id'),
       branch_id: selectedBranchId || authService.getEffectiveBranchId() || null,
       branch: formData.get('branch'),
       referredByUserId: formData.get('referredByUserId') || null,
+      discountBenefit: discountBenefit || null,
       reservationId: this.activatingReservation?.id || null,
       discount: discountAmount,
       notes: registrationNotes,
+      registrationTransfer: topTransferReference ? {
+        amount: topTransferAmount,
+        reference: topTransferReference,
+      } : null,
     });
 
     if (!result.success) {
@@ -4191,6 +4338,9 @@ class StudentsView extends Component {
         await this.uploadModalDocumentFromDataUrl(student.id, 'certificado_bachiller', formData.get('certificadoBachillerMobileFileUrl'), 'Certificado de estudio');
       } else {
         await this.uploadModalDocument(student.id, 'certificado_bachiller', formData.get('certificadoBachillerFile'), 'Certificado de estudio');
+      }
+      if (selectedCatalogType === 'tipo-f') {
+        await this.uploadModalDocument(student.id, 'certificado_discapacidad', disabilityCertificate, 'Certificado de discapacidad');
       }
       if (submitBtn) submitBtn.textContent = 'Reservando horario...';
       const scheduleReservation = await this.selectStudentSchedule(student.id, scheduleId, schedulePlan);
@@ -4350,6 +4500,7 @@ class StudentsView extends Component {
         birthDate: formData.get('birthDate'), email: formData.get('email'), phone: formData.get('phone'),
         address: formData.get('address'), bloodType: 'N/D', city_id: formData.get('city_id'), branch: formData.get('branch'),
         registrationType: 'ADDITIONAL_PRACTICE',
+        referredByUserId: formData.get('referredByUserId') || null,
         notes: this.getVisibleRegistrationNotes(),
       });
       if (!creation.success) { this.showModalAlert('error', creation.error || 'No se pudo registrar la persona.'); this.restoreSubmitButton(submitBtn); return; }
@@ -4374,6 +4525,7 @@ class StudentsView extends Component {
         instructor_id: instructorId, number_of_days: days,
         start_date: startDate, daily_start_time: dailyTime, payment_method: method,
         customer_type: this.additionalPracticeStudent?.former_student ? 'FORMER_STUDENT' : 'EXTERNAL',
+        referred_by_user_id: formData.get('referredByUserId') || null,
         notes: this.getVisibleRegistrationNotes(),
       });
       if (!practice.success) throw new Error(practice.error || 'No se pudo registrar la práctica adicional.');

@@ -87,7 +87,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       <form data-start-mileage-form>
         <label for="start-mileage">Kilometraje inicial${required ? '' : ' (opcional)'}</label>
         <input id="start-mileage" name="startMileage" type="text" inputmode="numeric"
-          pattern="[0-9]+" maxlength="7" autocomplete="off" placeholder="Ej. 45820" ${required ? 'required' : ''}>
+          pattern="[0-9]{3,7}" minlength="3" maxlength="7" title="Ingresa entre 3 y 7 digitos" autocomplete="off" placeholder="Ej. 45820" ${required ? 'required' : ''}>
         <div class="attendance-error" data-start-mileage-error aria-live="polite"></div>
         <button type="submit" class="btn btn-primary">Guardar e iniciar</button>
         ${required ? '' : '<button type="button" class="btn btn-secondary" data-skip-mileage>Continuar sin kilometraje</button>'}
@@ -103,8 +103,8 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       event.preventDefault();
       const error = body.querySelector('[data-start-mileage-error]');
       const button = form.querySelector('button[type="submit"]');
-      if (!/^\d{1,7}$/.test(input.value)) {
-        error.textContent = 'Ingresa el kilometraje usando solo numeros.';
+      if (!/^\d{3,7}$/.test(input.value)) {
+        error.textContent = 'Ingresa el kilometraje con 3 a 7 digitos, usando solo numeros.';
         input.focus();
         return;
       }

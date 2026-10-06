@@ -51,6 +51,9 @@ export function stateMessage(error) {
   if (error.status === 401) return 'Tu sesion expiro. Inicia sesion nuevamente.';
   if (error.status === 403) return 'No tienes permiso para ver esta informacion.';
   if (error.status === 404) return 'Registro no encontrado.';
-  if (error.status === 409) return error.data?.error?.message || error.message || 'Existe un conflicto con el estado actual.';
+  if ([400, 409, 422].includes(error.status)) {
+    return error.data?.error?.message || error.message || 'Revisa los datos ingresados e intenta nuevamente.';
+  }
+  if (error.code === 'REQUEST_TIMEOUT') return error.message || 'El servidor tardo demasiado en responder. Intenta nuevamente.';
   return 'No se pudo cargar la informacion. Intenta nuevamente.';
 }

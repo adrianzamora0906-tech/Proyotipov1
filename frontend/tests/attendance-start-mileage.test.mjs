@@ -13,7 +13,7 @@ test('la entrada QR solicita kilometraje inicial numerico al instructor', () => 
   assert.match(modal, /inputmode="numeric"/);
   assert.match(modal, /input\.value\.replace\(\/\\D\/g, ''\)/);
   assert.match(service, /start-mileage/);
-  assert.match(backend, /\^\\d\{1,7\}\$/);
+  assert.match(backend, /\^\\d\{3,7\}\$/);
   assert.match(backend, /SESSION_START_MILEAGE/);
 });
 

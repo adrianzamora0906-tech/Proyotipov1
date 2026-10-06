@@ -582,6 +582,7 @@ class StudentsView extends Component {
                     <input type="text" class="form-input" name="cedula" placeholder="1234567890" required>
                     <div class="form-error"></div>
                     <small id="additional-practice-person-status" class="additional-practice-only" hidden></small>
+                    <label class="additional-practice-only" hidden><input type="checkbox" name="additionalPracticeFormerStudent"> Fue estudiante de la escuela</label>
                   </div>
                   <div class="form-group">
                     <label class="form-label required">Fecha de Nacimiento</label>
@@ -1132,6 +1133,7 @@ class StudentsView extends Component {
       if (form.querySelector('[name="additionalPractice"]')?.checked) this.scheduleAdditionalPracticeResolution(event.target.value);
     });
     form?.querySelector('[name="additionalPracticeDays"]')?.addEventListener('change', () => this.updateAdditionalPracticePrice());
+    form?.querySelector('[name="additionalPracticeFormerStudent"]')?.addEventListener('change', () => this.updateAdditionalPracticePrice());
     ['additionalPracticeInstructor','additionalPracticeStartDate','additionalPracticeTime','additionalPracticeDays'].forEach(name => {
       form?.querySelector(`[name="${name}"]`)?.addEventListener('change', () => this.scheduleAdditionalPracticeAvailability());
     });
@@ -1408,6 +1410,8 @@ class StudentsView extends Component {
     const form = document.getElementById('student-modal-form');
     this.additionalPracticeStudent = null;
     this.additionalPracticeResolved = false;
+    const formerStudent = form?.querySelector('[name="additionalPracticeFormerStudent"]');
+    if (formerStudent) { formerStudent.checked = false; formerStudent.disabled = false; }
     document.querySelectorAll('.regular-enrollment-only').forEach(element => { element.hidden = enabled; });
     document.querySelectorAll('.additional-practice-only').forEach(element => { element.hidden = !enabled; });
     const cedulaGroup = document.getElementById('student-cedula-group');
@@ -1466,6 +1470,9 @@ class StudentsView extends Component {
     this.additionalPracticeResolved = false;
     this.additionalPracticeStudent = null;
     const form = document.getElementById('student-modal-form');
+    const formerStudent = form?.querySelector('[name="additionalPracticeFormerStudent"]');
+    if (formerStudent) { formerStudent.checked = false; formerStudent.disabled = false; }
+    this.updateAdditionalPracticePrice();
     if (this.resolvedAdditionalPracticeIdentification && identification !== this.resolvedAdditionalPracticeIdentification) {
       ['firstName','lastName','birthDate','email','phone','address'].forEach(name => {
         const input = form?.querySelector(`[name="${name}"]`);
@@ -1493,6 +1500,11 @@ class StudentsView extends Component {
     this.additionalPracticeStudent = result.data;
     this.additionalPracticeResolved = true;
     this.resolvedAdditionalPracticeIdentification = identification;
+    const formerStudent = form?.querySelector('[name="additionalPracticeFormerStudent"]');
+    if (formerStudent) {
+      formerStudent.disabled = Boolean(result.data?.former_student);
+      if (result.data?.former_student) formerStudent.checked = true;
+    }
     const fields = result.data ? {
       cedula: result.data.cedula, firstName: result.data.firstName, lastName: result.data.lastName,
       birthDate: result.data.birthDate?.slice?.(0, 10), email: result.data.email,
@@ -1504,7 +1516,7 @@ class StudentsView extends Component {
       status.className = result.data ? 'additional-practice-person-found' : 'additional-practice-person-new';
       status.textContent = result.data
         ? 'Este usuario ya fue estudiante de la escuela. Sus datos se completaron automáticamente.'
-        : 'Esta persona no consta como estudiante. Se creará un nuevo registro al continuar.';
+        : 'No se encontro un registro. Se creara uno nuevo; marca si fue estudiante de la escuela.';
     }
     const help = document.getElementById('additional-practice-document-help');
     if (help) help.textContent = result.data
@@ -1513,10 +1525,15 @@ class StudentsView extends Component {
     this.updateAdditionalPracticePrice();
   }
 
+  isFormerAdditionalPracticeStudent() {
+    return Boolean(this.additionalPracticeStudent?.former_student
+      || document.getElementById('student-modal-form')?.querySelector('[name="additionalPracticeFormerStudent"]')?.checked);
+  }
+
   updateAdditionalPracticePrice() {
     const form = document.getElementById('student-modal-form');
     const days = Number(form?.querySelector('[name="additionalPracticeDays"]')?.value || 0);
-    const former = Boolean(this.additionalPracticeStudent?.former_student);
+    const former = this.isFormerAdditionalPracticeStudent();
     const rate = former ? 17 : 20;
     const total = days === 8 ? 136 : days * rate;
     const totalNode = document.getElementById('additional-practice-total');
@@ -4524,7 +4541,8 @@ class StudentsView extends Component {
         branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId(),
         instructor_id: instructorId, number_of_days: days,
         start_date: startDate, daily_start_time: dailyTime, payment_method: method,
-        customer_type: this.additionalPracticeStudent?.former_student ? 'FORMER_STUDENT' : 'EXTERNAL',
+        customer_type: this.isFormerAdditionalPracticeStudent() ? 'FORMER_STUDENT' : 'EXTERNAL',
+        former_student_declared: !this.additionalPracticeStudent?.former_student && this.isFormerAdditionalPracticeStudent(),
         referred_by_user_id: formData.get('referredByUserId') || null,
         notes: this.getVisibleRegistrationNotes(),
       });
@@ -4534,7 +4552,7 @@ class StudentsView extends Component {
       this.restoreSubmitButton(submitBtn);
       return;
     }
-    this.showModalAlert('success', `Prácticas registradas por ${days} días. Total: $${days === 8 ? 136 : days * (this.additionalPracticeStudent?.former_student ? 17 : 20)}.`);
+    this.showModalAlert('success', `Prácticas registradas por ${days} días. Total: $${days === 8 ? 136 : days * (this.isFormerAdditionalPracticeStudent() ? 17 : 20)}.`);
     setTimeout(() => {
       window.history.pushState(null, null, `/student-profile/${student.id}`);
       window.dispatchEvent(new PopStateEvent('popstate'));

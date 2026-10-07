@@ -7,7 +7,11 @@ const viewSource = await readFile(new URL('../src/js/views/students/StudentsView
 
 test('la teoria regular conserva su apertura quincenal de lunes a viernes', () => {
   assert.match(source, /const REGULAR_CADENCE_ANCHOR = '2026-09-21'/);
-  assert.match(source, /return remainder===0\?monday:addDays\(monday,14-remainder\)/);
+  assert.match(source, /const start=remainder===0\?monday:addDays\(monday,14-remainder\)/);
+});
+
+test('solo permite inscribir el dia de inicio y el dia siguiente', () => {
+  assert.match(source, /current<=addDays\(start,1\)\?start:addDays\(start,14\)/);
 });
 
 test('los intensivos de mañana y tarde comienzan en sabados alternados', () => {
@@ -18,8 +22,8 @@ test('los intensivos de mañana y tarde comienzan en sabados alternados', () => 
 });
 
 test('cada turno intensivo vuelve a abrir cada dos semanas', () => {
-  assert.match(source, /const periods=Math\.ceil\(elapsedDays\/14\)/);
-  assert.match(source, /return addDays\(anchor,periods\*14\)/);
+  assert.match(source, /const periods=Math\.floor\(elapsedDays\/14\)/);
+  assert.match(source, /const start=addDays\(anchor,periods\*14\)/);
   assert.match(source, /start=addDays\(start,14\)/);
 });
 

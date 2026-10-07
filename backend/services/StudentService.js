@@ -808,9 +808,7 @@ class StudentService {
       });
     }
 
-    const access = data.registrationType === 'ADDITIONAL_PRACTICE'
-      ? null
-      : await StudentAccountService.createForStudent(student.id);
+    const access = await StudentAccountService.createForStudent(student.id);
     return { ...student, enrollment_id: createdEnrollmentId, access };
   }
 

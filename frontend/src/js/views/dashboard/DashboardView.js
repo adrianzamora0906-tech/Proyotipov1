@@ -42,10 +42,9 @@ class DashboardView extends Component {
       DashboardService.getQuickActions(students, documentSummaries, { canViewPayments }),
     ]);
     const recentActivity = DashboardService.getRecentActivity(8, students);
-    const isBranchAdmin = (user.roles || []).includes('BRANCH_ADMIN');
     let voidRequests = [];
     let reviewedRequests = [];
-    if (isBranchAdmin) {
+    {
       try { voidRequests = (await ApiService.getPendingPaymentVoidRequests()).data || []; }
       catch (error) { console.warn('No se cargaron solicitudes críticas:', error.message); }
     }
@@ -212,8 +211,8 @@ class DashboardView extends Component {
           </div>
         </div>
         ${await this.studentsView.renderStudentModal()}
-        ${isBranchAdmin && voidRequests[0] ? `<div class="modal-overlay active" id="void-review-modal"><div class="modal" style="max-width:600px">
-          <div class="modal-header"><div><h3 class="modal-title">Acción financiera crítica</h3><p class="modal-subtitle">Requiere decisión del Administrador de Sucursal</p></div></div>
+        ${voidRequests[0] ? `<div class="modal-overlay active" id="void-review-modal"><div class="modal" style="max-width:600px">
+          <div class="modal-header"><div><h3 class="modal-title">Acción financiera crítica</h3><p class="modal-subtitle">Requiere decisión de Dayana Moreira</p></div></div>
           <div class="modal-body"><div class="alert alert-warning" style="display:block"><strong>${safe(voidRequests[0].requested_by_name)} solicitó anular un pago de $${Number(voidRequests[0].amount).toFixed(2)}</strong><p>Estudiante: ${safe(voidRequests[0].student_name)} (${safe(voidRequests[0].identification)})</p><p>Motivo: ${safe(voidRequests[0].reason)}</p></div>
           <label class="form-label">Observación de la decisión</label><textarea class="form-textarea" id="void-review-note" placeholder="Obligatoria si rechaza la solicitud"></textarea></div>
           <div class="modal-footer"><button class="btn btn-secondary void-review-btn" data-id="${voidRequests[0].id}" data-decision="REJECTED">Rechazar</button><button class="btn btn-danger void-review-btn" data-id="${voidRequests[0].id}" data-decision="APPROVED">Aprobar anulación</button></div>

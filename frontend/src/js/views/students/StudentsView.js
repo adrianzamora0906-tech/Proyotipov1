@@ -4589,9 +4589,14 @@ class StudentsView extends Component {
         notes: this.getVisibleRegistrationNotes(),
       });
       if (!practice.success) throw new Error(practice.error || 'No se pudo registrar la práctica adicional.');
+      if (practice.data?.access?.created) student.access = practice.data.access;
     } catch (error) {
       this.showModalAlert('error', error.message || 'No se pudo completar el registro de prácticas.');
       this.restoreSubmitButton(submitBtn);
+      return;
+    }
+    if (student.access?.created) {
+      this.showStudentAccess(student);
       return;
     }
     this.showModalAlert('success', `Prácticas registradas por ${days} días. Total: $${days === 8 ? 136 : days * (this.isFormerAdditionalPracticeStudent() ? 17 : 20)}.`);

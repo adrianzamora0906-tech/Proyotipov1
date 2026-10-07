@@ -24,17 +24,20 @@ function nextWeekday(value,weekday){const date=new Date(`${iso(value)}T12:00:00`
 function currentOrNextWeekday(value,weekday){const date=new Date(`${iso(value)}T12:00:00`);if(date.getDay()===weekday)return iso(date);return nextWeekday(value,weekday);}
 function currentWeekMonday(value){const date=new Date(`${iso(value)}T12:00:00`);const day=date.getDay();if(day===0)return nextWeekday(value,1);if(day===6)return nextWeekday(value,1);date.setDate(date.getDate()-(day-1));return iso(date);}
 function currentOrNextRegularMonday(value){
+  const current=iso(value);
   const monday=currentWeekMonday(value);
   const elapsedDays=Math.round((new Date(`${monday}T12:00:00`)-new Date(`${REGULAR_CADENCE_ANCHOR}T12:00:00`))/86400000);
   const remainder=((elapsedDays%14)+14)%14;
-  return remainder===0?monday:addDays(monday,14-remainder);
+  const start=remainder===0?monday:addDays(monday,14-remainder);
+  return current<=addDays(start,1)?start:addDays(start,14);
 }
 function currentOrNextIntensiveSaturday(value,anchor){
   const current=iso(value);
   if(current<=anchor)return anchor;
   const elapsedDays=Math.floor((new Date(`${current}T12:00:00`)-new Date(`${anchor}T12:00:00`))/86400000);
-  const periods=Math.ceil(elapsedDays/14);
-  return addDays(anchor,periods*14);
+  const periods=Math.floor(elapsedDays/14);
+  const start=addDays(anchor,periods*14);
+  return current<=addDays(start,1)?start:addDays(start,14);
 }
 function classDates(group){if(group.modality==='presencial_regular')return [0,1,2,3,4].map(offset=>addDays(group.start_date,offset));return [iso(group.start_date),addDays(group.start_date,7)];}
 

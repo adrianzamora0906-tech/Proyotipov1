@@ -759,9 +759,6 @@ class StudentProfileView extends Component {
 
     this.setupDocumentPreviews();
     this.setupCedulaPdfUpload(studentId);
-    document.getElementById('mobile-cedula-capture')?.addEventListener('click', () => {
-      this.openMobileDocumentCaptureModal(studentId, 'cedula');
-    });
     document.getElementById('mobile-blood-card-capture')?.addEventListener('click', () => {
       this.openBloodCardCompletionCapture(studentId);
     });
@@ -1157,6 +1154,14 @@ class StudentProfileView extends Component {
                 <option value="tarjeta">Tarjeta</option>
               </select>
             </div>
+            <div class="form-group" id="profile-payment-reference-group" hidden>
+              <label class="form-label required">N&uacute;mero de comprobante / transferencia</label>
+              <input class="form-input" name="reference" maxlength="120" placeholder="N&uacute;mero del comprobante">
+            </div>
+            <div class="form-group" id="profile-payment-card-batch-group" hidden>
+              <label class="form-label required">Lote de tarjeta</label>
+              <input class="form-input" name="cardBatch" maxlength="80" placeholder="Ej. 000123">
+            </div>
           </form>
         </div>
         <div class="modal-footer">
@@ -1167,11 +1172,30 @@ class StudentProfileView extends Component {
     `;
     modal.classList.add('active');
     this.bindProfileModalClose(modal);
+    const form = modal.querySelector('#profile-payment-form');
+    const methodInput = form?.elements.method;
+    const referenceGroup = modal.querySelector('#profile-payment-reference-group');
+    const referenceInput = form?.elements.reference;
+    const cardBatchGroup = modal.querySelector('#profile-payment-card-batch-group');
+    const cardBatchInput = form?.elements.cardBatch;
+    const updatePaymentFields = () => {
+      const method = String(methodInput?.value || '').toLowerCase();
+      const isTransfer = method === 'transferencia';
+      const isCard = method === 'tarjeta';
+      referenceGroup.hidden = !isTransfer;
+      referenceInput.required = isTransfer;
+      cardBatchGroup.hidden = !isCard;
+      cardBatchInput.required = isCard;
+      if (!isTransfer) referenceInput.value = '';
+      if (!isCard) cardBatchInput.value = '';
+    };
+    methodInput?.addEventListener('change', updatePaymentFields);
+    updatePaymentFields();
 
     modal.querySelector('#profile-pay-submit')?.addEventListener('click', async () => {
-      const form = modal.querySelector('#profile-payment-form');
       if (!form.reportValidity()) return;
-      const amount = Number(new FormData(form).get('amount'));
+      const values = new FormData(form);
+      const amount = Number(values.get('amount'));
       if (amount > balance) {
         alert(`El monto no puede superar el saldo pendiente de $${balance.toFixed(2)}.`);
         return;
@@ -1183,7 +1207,9 @@ class StudentProfileView extends Component {
         studentId,
         cedula,
         amount,
-        method: new FormData(form).get('method'),
+        method: values.get('method'),
+        reference: values.get('reference'),
+        cardBatch: values.get('cardBatch'),
         cashier: JSON.parse(sessionStorage.getItem('erp_session') || '{}').username || 'caja',
         notify: false,
       });
@@ -1191,6 +1217,11 @@ class StudentProfileView extends Component {
         submit.disabled = false;
         submit.textContent = 'Registrar pago';
         alert(result.error || 'No se pudo registrar el pago.');
+        return;
+      }
+      if (result.pendingTransfer) {
+        alert('La transferencia se registro y permanecera pendiente hasta su verificacion.');
+        this.closeProfileModal(true);
         return;
       }
       await this.showReceiptInProfileModal(result.receipt?.id);
@@ -1920,20 +1951,10 @@ class StudentProfileView extends Component {
     return `
       <div class="form-group" style="flex: 1 1 100%;">
         <label class="form-label">Cédula de identidad (PDF escaneado)</label>
-        <div class="form-row">
-          <div class="form-group" style="flex: 1;">
-            <label class="form-label">Foto del anverso</label>
-            <input type="file" class="form-input" id="cedula-front" accept="image/*">
-          </div>
-          <div class="form-group" style="flex: 1;">
-            <label class="form-label">Foto del reverso</label>
-            <input type="file" class="form-input" id="cedula-back" accept="image/*">
-          </div>
-        </div>
-        <button type="button" class="btn btn-secondary" id="generate-cedula-pdf">Generar PDF de cédula</button>
-        <button type="button" class="btn btn-primary" id="mobile-cedula-capture" style="margin-left:.5rem;">Capturar desde telefono</button>
+        <input type="file" class="form-input" id="cedula-pdf-file" accept="application/pdf,.pdf">
+        <button type="button" class="btn btn-primary" id="upload-cedula-pdf" style="margin-top:.65rem;">Subir PDF de c&eacute;dula</button>
         <small id="cedula-pdf-status" style="display:block; margin-top:.5rem; color:var(--gray-500);">
-          ${uploaded ? `PDF cargado: ${uploaded.name}` : 'Sube ambas fotos; el sistema generará el PDF.'}
+          Selecciona el PDF escaneado de la c&eacute;dula.
         </small>
         ${uploaded ? `<a class="btn btn-small btn-secondary view-document-btn" style="margin-top:.5rem; display:inline-block" href="#" data-file-url="${uploaded.file_url}">Ver PDF actual</a>` : ''}
       </div>
@@ -1941,36 +1962,37 @@ class StudentProfileView extends Component {
   }
 
   setupCedulaPdfUpload(studentId) {
-    const frontInput = document.getElementById('cedula-front');
-    const backInput = document.getElementById('cedula-back');
-    const button = document.getElementById('generate-cedula-pdf');
+    const fileInput = document.getElementById('cedula-pdf-file');
+    const button = document.getElementById('upload-cedula-pdf');
     const status = document.getElementById('cedula-pdf-status');
-    if (!frontInput || !backInput || !button) return;
+    if (!fileInput || !button || !status) return;
 
     button.addEventListener('click', async () => {
-      const front = frontInput.files?.[0];
-      const back = backInput.files?.[0];
-      if (!front || !back) {
-        status.textContent = 'Selecciona las fotos del anverso y reverso.';
+      const file = fileInput.files?.[0];
+      if (!file) {
+        status.textContent = 'Selecciona el PDF de la cedula.';
         return;
       }
-      if (front.size > 5 * 1024 * 1024 || back.size > 5 * 1024 * 1024) {
-        status.textContent = 'Cada imagen debe pesar como máximo 5 MB.';
+      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+        status.textContent = 'El documento debe ser un archivo PDF.';
+        return;
+      }
+      if (file.size > 9 * 1024 * 1024) {
+        status.textContent = 'El PDF no puede superar 9 MB.';
         return;
       }
       try {
         button.disabled = true;
-        status.textContent = 'Generando PDF de cédula…';
-        const pdfBlob = await this.createCedulaPdf(front, back);
-        const fileUrl = await this.readFileAsDataUrl(pdfBlob);
+        status.textContent = 'Subiendo PDF de cedula...';
+        const fileUrl = await this.readFileAsDataUrl(file);
         const response = await ApiService.createDocument(studentId, {
-          type: 'cedula', name: `cedula-${studentId}.pdf`, fileUrl,
+          type: 'cedula', name: file.name, fileUrl,
         });
-        if (!response.success) throw new Error('No se pudo guardar el PDF de cédula.');
-        status.textContent = 'PDF de cédula generado y guardado correctamente.';
-        window.dispatchEvent(new CustomEvent('erp:dataChanged', { detail: { collection: 'documents', action: 'cedula-pdf-created' } }));
+        if (!response.success) throw new Error('No se pudo guardar el PDF de cedula.');
+        status.textContent = 'PDF de cedula cargado correctamente.';
+        window.dispatchEvent(new CustomEvent('erp:dataChanged', { detail: { collection: 'documents', action: 'cedula-pdf-uploaded' } }));
       } catch (error) {
-        status.textContent = error.message || 'No se pudo generar el PDF.';
+        status.textContent = error.message || 'No se pudo subir el PDF.';
       } finally {
         button.disabled = false;
       }

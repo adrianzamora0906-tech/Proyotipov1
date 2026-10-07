@@ -86,12 +86,14 @@ class PendingPaymentsView extends Component {
     const pendingRows = (this.pendingAll || []).slice(0, this.pendingPageSize).map(p => {
       const cedula = StringHelper.normalizeCedula(p.student.cedula);
       const branchId = p.branchId || p.student.branchId || p.student.branch_id || '';
+      const pendingVerification = Number(p.pendingVerification || 0);
       return `
       <tr data-student-id="${p.student.id}" data-branch-id="${branchId}">
-        <td>${cedula}</td>
         <td>${p.student.firstName} ${p.student.lastName}</td>
+        <td>${cedula}</td>
         <td>${p.student.course}</td>
-        <td>${p.balance}</td>
+        <td>${pendingVerification > 0 ? `POR CONFIRMAR ${this.money(pendingVerification)}` : ''}</td>
+        <td>${Number(p.availableToCollect ?? p.balance)}</td>
         <td><button class="btn btn-primary charge-btn" data-student-id="${p.student.id}" data-branch-id="${branchId}">Cobrar</button></td>
       </tr>
     `;
@@ -118,6 +120,7 @@ class PendingPaymentsView extends Component {
           .report-filters{display:grid;grid-template-columns:1.35fr 1fr 1fr 1fr auto;gap:12px;align-items:end;padding:16px 18px;background:#fff;border:1px solid #e4e7ec;border-radius:14px}.report-filters label{display:grid;gap:6px;font-size:12px;font-weight:600;color:#475467}.report-filters select,.report-filters input{height:44px;border:1px solid #d0d5dd;border-radius:9px;padding:0 12px;background:#fff}.report-filters input:focus,.report-filters select:focus{outline:0;border-color:#4f46e5;box-shadow:0 0 0 3px #4f46e51a}
           .payment-workspace{border:1px solid #e4e7ec;border-radius:15px;background:#fff;overflow:hidden}.payment-tabs{display:flex;gap:6px;padding:12px 16px;border-bottom:1px solid #eaecf0;background:#f8fafc}.payment-tab{border:0;border-radius:9px;padding:10px 16px;background:transparent;color:#667085;font-weight:700;cursor:pointer}.payment-tab.active{background:#fff;color:#4338ca;box-shadow:0 1px 4px #1018281a}.payment-tab b{margin-left:6px;padding:2px 7px;border-radius:999px;background:#eef2ff;font-size:11px}.payment-panel{display:none;padding:18px}.payment-panel.active{display:block}.payment-panel-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.payment-panel-title h2{margin:0;font-size:19px}.payment-panel-title span{color:#667085;font-size:13px}
           .cash-table-wrap{overflow:auto;border:1px solid #eaecf0;border-radius:12px}.cash-table{width:100%;border-collapse:collapse}.cash-table th{padding:13px 15px;background:#f8fafc;text-align:left;color:#475467;font-size:12px}.cash-table td{padding:14px 15px;border-top:1px solid #eaecf0;color:#344054}.cash-table tbody tr:hover{background:#fafbff}.student-cell strong{display:block;color:#101828}.student-cell small{display:block;margin-top:3px;color:#98a2b3}.course-pill{display:inline-flex;padding:5px 9px;border-radius:999px;background:#eef2ff;color:#4338ca;font-size:12px;font-weight:700}.balance-value{color:#b42318;font-weight:800}.charge-btn{min-width:94px}.payment-actions{display:flex;gap:7px;align-items:center}.cash-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px}.cash-pagination button{border:1px solid #d0d5dd;border-radius:8px;padding:8px 13px;background:#fff;font-weight:600;cursor:pointer}.cash-pagination button:disabled{opacity:.4;cursor:not-allowed}.cash-pagination span{color:#667085;font-size:13px}
+          .transfer-pending-cell{display:grid;gap:3px;min-width:150px}.transfer-pending-cell strong{color:#b54708}.transfer-pending-cell small{color:#667085}.transfer-pending-badge{display:inline-flex;width:max-content;padding:4px 8px;border-radius:6px;background:#fff4e5;color:#b54708;font-size:11px;font-weight:800}.transfer-empty{color:#98a2b3;font-size:12px}
           @media(max-width:900px){.cash-kpis{grid-template-columns:1fr}.report-filters{grid-template-columns:1fr 1fr}.report-filters .filter-actions{grid-column:1/-1}.report-filters .filter-actions button{width:100%}}
           @media(max-width:600px){.cash-payments-header{align-items:flex-start}.cash-payments-header h1{font-size:24px}.report-filters{grid-template-columns:1fr}.payment-panel{padding:10px}.cash-table{min-width:720px}.payment-tabs{overflow:auto}.cash-kpis{grid-template-columns:repeat(3,minmax(145px,1fr));overflow:auto}.cash-kpi{padding:14px}.cash-kpi strong{font-size:20px}}
         </style>
@@ -136,7 +139,7 @@ class PendingPaymentsView extends Component {
         </form>
         <section class="payment-workspace">
           <nav class="payment-tabs" aria-label="Tipos de pagos"><button class="payment-tab active" type="button" data-payment-tab="pending">Pendientes <b>${this.pendingAll.length}</b></button><button class="payment-tab" type="button" data-payment-tab="receipts">Realizados <b>${this.receiptsAll.length}</b></button></nav>
-          <div class="payment-panel active" data-payment-panel="pending"><div class="payment-panel-title"><h2>Pagos pendientes</h2><span id="pending-result-count">${this.pendingAll.length} resultados</span></div><div class="cash-table-wrap"><table class="cash-table"><thead><tr><th>Estudiante</th><th>Cédula</th><th>Curso</th><th>Saldo</th><th>Acción</th></tr></thead><tbody id="pending-payments-body">${pendingRows}</tbody></table></div><div id="pending-payments-pagination" class="cash-pagination"></div></div>
+          <div class="payment-panel active" data-payment-panel="pending"><div class="payment-panel-title"><h2>Pagos pendientes</h2><span id="pending-result-count">${this.pendingAll.length} resultados</span></div><div class="cash-table-wrap"><table class="cash-table"><thead><tr><th>Estudiante</th><th>Cédula</th><th>Curso</th><th>Transferencia</th><th>Saldo</th><th>Acción</th></tr></thead><tbody id="pending-payments-body">${pendingRows}</tbody></table></div><div id="pending-payments-pagination" class="cash-pagination"></div></div>
           <div class="payment-panel" data-payment-panel="receipts"><div class="payment-panel-title"><h2>Pagos realizados</h2><span id="receipts-result-count">${this.receiptsAll.length} resultados</span></div><div class="cash-table-wrap"><table class="cash-table"><thead><tr><th>Estudiante</th><th>Cédula</th><th>Curso</th><th>Abonó</th><th>Comprobante</th><th>Acción</th></tr></thead><tbody id="receipts-body">${receiptRows}</tbody></table></div><div id="receipts-pagination" class="cash-pagination"></div></div>
         </section>
       </div>
@@ -158,7 +161,9 @@ class PendingPaymentsView extends Component {
         ? String(item.serviceTransactionId || '') === String(serviceTransactionId)
         : !item.serviceTransactionId && String(item.student?.id || item.studentId) === String(studentId));
       const isServicePayment = Boolean(serviceTransactionId);
-      const balance = isServicePayment ? Number(pendingRow?.balance || 0) : (await PaymentService.getStudentBalance(student.id)).balance;
+      const accountingBalance = isServicePayment ? Number(pendingRow?.balance || 0) : (await PaymentService.getStudentBalance(student.id)).balance;
+      const pendingVerification = Number(pendingRow?.pendingVerification || 0);
+      const balance = Math.max(Number(pendingRow?.availableToCollect ?? accountingBalance), 0);
       const concept = pendingRow?.student?.course || pendingRow?.course || student.course || 'Curso';
       const collectionBranchId = authService.getEffectiveBranchId();
       const methods = await PaymentService.getAvailableMethods(collectionBranchId);
@@ -174,13 +179,14 @@ class PendingPaymentsView extends Component {
           <div class="modal-body">
             <div class="modal-field"><strong>Cédula:</strong> ${StringHelper.normalizeCedula(student.cedula)}</div>
             <div class="modal-field"><strong>${isServicePayment ? 'Servicio' : 'Curso'}:</strong> ${this.escape(concept)}</div>
-            <div class="modal-field"><strong>Saldo pendiente:</strong> ${balance}</div>
+            <div class="modal-field"><strong>Saldo disponible para cobrar:</strong> ${balance}</div>
+            ${pendingVerification > 0 ? '<div class="alert alert-warning" style="display:block"><strong>Transferencia por confirmar.</strong></div>' : ''}
             ${methods && methods.length === 0 ? '<div class="alert alert-warning">No hay métodos de pago configurados para esta sucursal.</div>' : ''}
             <form id="payment-modal-form">
               <div class="form-row">
                 <div class="form-group" style="flex:1;">
                   <label class="form-label required">Monto a pagar</label>
-                  <input type="number" name="amount" class="form-input" value="${balance}" step="0.01" min="0" required ${isServicePayment ? 'readonly' : ''}>
+              <input type="number" name="amount" class="form-input" value="${balance}" step="0.01" min="0.01" max="${balance}" required ${isServicePayment ? 'readonly' : ''}>
                 </div>
                 <div class="form-group" style="flex:1;">
                   <label class="form-label required">Método</label>
@@ -199,7 +205,7 @@ class PendingPaymentsView extends Component {
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary" id="modal-cancel">Cancelar</button>
-            <button class="btn btn-primary" id="modal-pay" ${methodsDisabledAttr}>Registrar Pago</button>
+            <button class="btn btn-primary" id="modal-pay" ${methodsDisabledAttr || balance <= 0 ? 'disabled' : ''}>Registrar Pago</button>
           </div>
         </div>
       `;
@@ -392,9 +398,14 @@ class PendingPaymentsView extends Component {
         const cedula = StringHelper.normalizeCedula(p.student.cedula);
         const branchId = p.branchId || p.student.branchId || p.branch_id || p.student.branch_id || '';
         const fullName = `${p.student.firstName || ''} ${p.student.lastName || ''}`.trim();
-        return `<tr data-student-id="${this.escape(p.student.id)}" data-branch-id="${this.escape(branchId)}"><td class="student-cell"><strong>${this.escape(fullName)}</strong><small>${this.escape(p.branchName || '')}</small></td><td>${this.escape(cedula)}</td><td><span class="course-pill">${this.escape(p.student.course)}</span></td><td><span class="balance-value">${this.money(p.balance)}</span></td><td><button class="btn btn-primary charge-btn" data-student-id="${this.escape(p.student.id)}" data-branch-id="${this.escape(branchId)}" data-service-transaction-id="${this.escape(p.serviceTransactionId || '')}">Cobrar</button></td></tr>`;
+        const pendingVerification = Number(p.pendingVerification || 0);
+        const availableToCollect = Number(p.availableToCollect ?? p.balance);
+        const transferCell = pendingVerification > 0
+          ? `<div class="transfer-pending-cell"><span class="transfer-pending-badge">POR CONFIRMAR</span><strong>${this.money(pendingVerification)}</strong></div>`
+          : '';
+        return `<tr data-student-id="${this.escape(p.student.id)}" data-branch-id="${this.escape(branchId)}"><td class="student-cell"><strong>${this.escape(fullName)}</strong><small>${this.escape(p.branchName || '')}</small></td><td>${this.escape(cedula)}</td><td><span class="course-pill">${this.escape(p.student.course)}</span></td><td>${transferCell}</td><td><span class="balance-value">${this.money(availableToCollect)}</span></td><td><button class="btn btn-primary charge-btn" data-student-id="${this.escape(p.student.id)}" data-branch-id="${this.escape(branchId)}" data-service-transaction-id="${this.escape(p.serviceTransactionId || '')}" ${availableToCollect <= 0 ? 'disabled title="Transferencia pendiente de verificaci&oacute;n"' : ''}>${availableToCollect <= 0 ? 'Por confirmar' : 'Cobrar'}</button></td></tr>`;
       })
-      .join('') || '<tr><td colspan="5" class="dashboard-empty">No hay pagos pendientes.</td></tr>';
+      .join('') || '<tr><td colspan="6" class="dashboard-empty">No hay pagos pendientes.</td></tr>';
     const body = document.getElementById('pending-payments-body');
     if (body) body.innerHTML = html;
     const resultCount = document.getElementById('pending-result-count');

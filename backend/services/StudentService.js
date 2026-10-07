@@ -156,6 +156,8 @@ class StudentService {
     const identification=String(data.identification||'').replace(/\D/g,'');
     const firstName=String(data.firstName||'').trim(),lastName=String(data.lastName||'').trim();
     const branchId=data.branchId,courseId=data.courseId,instructorId=data.instructorId;
+    const reservationDays=Number(data.reservationDays||2);
+    if(!Number.isInteger(reservationDays)||reservationDays<1||reservationDays>30)throw createError(422,'La reserva debe durar entre 1 y 30 dias');
     const plan=data.schedulePlan&&typeof data.schedulePlan==='object'?data.schedulePlan:{};
     const selections=Array.isArray(plan.selections)?plan.selections:[];
     if(identification.length!==10||!firstName||!lastName)throw createError(422,'Cédula, nombre y apellido son requeridos para reservar');
@@ -218,15 +220,15 @@ class StudentService {
       const firstTime=String(selections[0].time).match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);
       const reservation=(await client.query(`INSERT INTO course_cycle_seat_reservations
         (cycle_id,instructor_id,referred_name,referred_phone,referred_identification,course_id,branch_id,reserved_start_time,reserved_end_time,notes,created_by,expires_at,reservation_kind,draft_data)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8::time,$9::time,$10,$11,NOW()+INTERVAL '2 days','temporary_enrollment',$12::jsonb) RETURNING *`,
-        [cycleId,instructorId,`${firstName} ${lastName}`,data.phone||null,identification,courseId,reservationBranchId,firstTime[1],firstTime[2],String(data.notes||'').slice(0,240)||null,user.id,JSON.stringify(safeDraft)])).rows[0];
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8::time,$9::time,$10,$11,NOW()+($12::int*INTERVAL '1 day'),'temporary_enrollment',$13::jsonb) RETURNING *`,
+        [cycleId,instructorId,`${firstName} ${lastName}`,data.phone||null,identification,courseId,reservationBranchId,firstTime[1],firstTime[2],String(data.notes||'').slice(0,240)||null,user.id,reservationDays,JSON.stringify(safeDraft)])).rows[0];
       for(const selection of selections){const match=String(selection.time).match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);await client.query(`INSERT INTO instructor_availability_overrides
         (instructor_id,schedule_date,start_time,end_time,status,reason,active,created_by,updated_by)
         VALUES($1,$2::date,$3::time,$4::time,'reserved',$5,TRUE,$6,$6)
         ON CONFLICT(instructor_id,schedule_date,start_time,end_time) DO UPDATE SET
           status='reserved',reason=EXCLUDED.reason,active=TRUE,updated_by=EXCLUDED.updated_by,updated_at=NOW()`,[instructorId,selection.date,match[1],match[2],`RESERVA_CURSO:${reservation.id}:${cycleId}`,user.id]);}
       await client.query(`INSERT INTO audit_logs(user_id,role,branch_id,action,entity,entity_id,metadata)
-        VALUES($1,$2,$3,'TEMPORARY_ENROLLMENT_RESERVED','course_cycle_seat_reservations',$4,$5::jsonb)`,[user.id,user.role,branchId,reservation.id,JSON.stringify({cycleId,instructorId,identification,expiresAt:reservation.expires_at})]);
+        VALUES($1,$2,$3,'TEMPORARY_ENROLLMENT_RESERVED','course_cycle_seat_reservations',$4,$5::jsonb)`,[user.id,user.role,branchId,reservation.id,JSON.stringify({cycleId,instructorId,identification,reservationDays,expiresAt:reservation.expires_at})]);
       await client.query('COMMIT');return reservation;
     }catch(error){await client.query('ROLLBACK').catch(()=>{});throw error;}finally{client.release();}
   }

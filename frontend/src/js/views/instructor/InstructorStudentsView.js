@@ -38,6 +38,10 @@ class InstructorStudentsView extends Component {
           </div>
 
           ${detail ? this.renderDetail(detail.data) : ''}
+          ${result.additionalPractices?.length ? `<section>
+            <h3>Practicas adicionales</h3>
+            ${this.renderRows(result.additionalPractices)}
+          </section>` : ''}
         </div>
       `;
       const layout = await SidebarLayout.render(content);
@@ -65,7 +69,7 @@ class InstructorStudentsView extends Component {
                 <td data-label="Avance"><div class="progress-bar"><span style="width:${item.progress}%"></span></div>${item.progress}%</td>
                 <td data-label="Proxima clase">${item.nextSession ? formatDateTime(item.nextSession) : 'Sin programar'}</td>
                 <td data-label="Estado"><span class="badge ${badgeClass(item.stage === 'active' ? 'EN_CURSO' : item.stage === 'completed' ? 'COMPLETADA' : 'PROXIMA')}">${item.stage === 'active' ? 'En clase ahora' : item.stage === 'completed' ? 'Ya recibió clase' : 'Próximo'}</span></td>
-                <td class="mobile-actions" data-label="Accion"><a class="btn btn-secondary btn-small" href="/instructor/students?enrollment=${item.enrollmentId}">Ver seguimiento</a></td>
+                <td class="mobile-actions" data-label="Accion"><a class="btn btn-secondary btn-small" href="${item.isAdditionalPractice ? '/instructor/agenda' : `/instructor/students?enrollment=${item.enrollmentId}`}">${item.isAdditionalPractice ? 'Ver agenda' : 'Ver seguimiento'}</a></td>
               </tr>
             `).join('')}
           </tbody>

@@ -232,6 +232,11 @@ class StudentService {
     }
   }
 
+  static async enableStudent(id) {
+    try { return await ApiService.enableStudent(id); }
+    catch (error) { return { success: false, error: error.data?.error?.message || error.message || 'No se pudo habilitar el estudiante' }; }
+  }
+
   static async resolveAdditionalPracticeStudent(identification) {
     try {
       const result = await ApiService.resolveAdditionalPracticeStudent(identification);

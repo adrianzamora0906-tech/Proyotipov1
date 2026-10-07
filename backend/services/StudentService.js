@@ -325,6 +325,7 @@ class StudentService {
     const params = [];
     let idx = 1;
 
+    if (filters.status !== 'inhabilitado') sql += " AND s.status <> 'inhabilitado'";
     if (filters.status === 'active') {
       sql += ` AND EXISTS (SELECT 1 FROM enrollments active_e WHERE active_e.student_id = s.id AND active_e.status = 'activo')`;
     } else if (filters.status === 'payment_pending') {
@@ -879,42 +880,11 @@ class StudentService {
   }
 
   static async disable(id, user = {}) {
-    const client = await db.getClient();
-    try {
-      await client.query('BEGIN');
-      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`disable-student:${id}`]);
-      const student = (await client.query(`
-        UPDATE students
-        SET status = 'inhabilitado', updated_by = $2, updated_at = NOW()
-        WHERE id = $1
-        RETURNING *
-      `, [id, user.id || null])).rows[0];
-      if (!student) throw createError(404, 'Estudiante no encontrado');
+    return require('./StudentSuspensionService').setEnabled(id, false, user);
+  }
 
-      const accounts = await client.query(`
-        UPDATE users
-        SET active = FALSE, updated_at = NOW()
-        WHERE student_id = $1 AND active = TRUE
-      `, [id]);
-
-      await client.query('INSERT INTO history (student_id, action) VALUES ($1, $2)', [id, 'Estudiante inhabilitado']);
-      await client.query(`INSERT INTO audit_logs(user_id,role,branch_id,action,entity,entity_id,metadata)
-        VALUES($1,$2,$3,'STUDENT_DISABLED','students',$4,$5::jsonb)`, [
-        user.id || null,
-        user.role || 'ADMIN_SYSTEM',
-        student.branch_id,
-        id,
-        JSON.stringify({ identification: student.identification, disabledAccounts: accounts.rowCount }),
-      ]);
-
-      await client.query('COMMIT');
-      return { ...student, disabled_accounts: accounts.rowCount };
-    } catch (error) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw error;
-    } finally {
-      client.release();
-    }
+  static async enable(id, user = {}) {
+    return require('./StudentSuspensionService').setEnabled(id, true, user);
   }
 
   static async delete(id, user = {}) {

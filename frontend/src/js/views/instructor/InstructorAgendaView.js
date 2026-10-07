@@ -36,7 +36,7 @@ class InstructorAgendaView extends Component {
       ]);
       const sessions = result.data || [];
       this.agendaSessions = sessions;
-      this.agendaStudents = studentResult.data || [];
+      this.agendaStudents = [...(studentResult.data || []), ...(studentResult.additionalPractices || [])];
       this.upcomingExams = examResult.data || [];
       const nextSession = sessions.find(item => ['PROGRAMADA','PROXIMA','EN_CURSO'].includes(item.status) && !item.isExpired) || null;
       const practicalClassCount = sessions.filter(item => !item.isExamOnly).length;
@@ -194,7 +194,7 @@ class InstructorAgendaView extends Component {
     return students.map(item => `<article class="agenda-student-item">
       <div class="agenda-student-item__avatar">${escapeHtml(item.name.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase())}</div>
       <div class="agenda-student-item__info"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.course)}</span><small>${item.completedSessions}/${item.totalSessions} clases · ${item.progress}% de avance</small></div>
-      <a class="btn btn-secondary btn-small" href="/instructor/students?enrollment=${item.enrollmentId}">Ver seguimiento</a>
+      <a class="btn btn-secondary btn-small" href="${item.isAdditionalPractice ? '/instructor/students' : `/instructor/students?enrollment=${item.enrollmentId}`}">${item.isAdditionalPractice ? 'Ver estudiante' : 'Ver seguimiento'}</a>
     </article>`).join('');
   }
 
@@ -204,6 +204,7 @@ class InstructorAgendaView extends Component {
   }
 
   renderActions(item) {
+    if (item.isAdditionalPractice) return '<div class="instructor-actions"><a class="btn btn-secondary btn-small" href="/instructor/students">Ver estudiante</a></div>';
     const buttons = [`<button class="btn btn-secondary btn-small js-session-detail" data-id="${item.id}">Observaciones</button>`];
     if (item.isScheduleOnly) {
       buttons.push('<span class="badge badge-warning">Asistencia pendiente de sincronizacion</span>');

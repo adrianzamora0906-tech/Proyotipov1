@@ -137,7 +137,7 @@ class StudentProfileView extends Component {
             ${isBranchAdmin ? `<button class="btn btn-primary" id="register-branch-admin-attendance" ${branchAdminAttendance?.canRegister?'':'disabled'} data-phase="${branchAdminAttendance?.phase || 'ENTRY'}" title="${escapeHtml(branchAdminAttendance?.message || 'No se pudo comprobar la clase programada')}">${branchAdminAttendance?.completed?'Asistencia completa':branchAdminAttendance?.phase==='EXIT'?'Registrar salida':'Registrar entrada'}</button>` : ''}
             <button class="btn btn-secondary" id="edit-student-btn">Editar</button>
             ${canManageStudentRecord ? `
-              <button type="button" class="btn btn-secondary" id="disable-student-btn">Inhabilitar</button>
+              <button type="button" class="btn btn-secondary" id="disable-student-btn" data-disabled="${student.status === 'inhabilitado'}">${student.status === 'inhabilitado' ? 'Habilitar' : 'Inhabilitar'}</button>
               <button type="button" class="btn btn-danger" id="delete-student-btn">Eliminar</button>
             ` : ''}
           </div>
@@ -606,8 +606,15 @@ class StudentProfileView extends Component {
       this.openResetStudentAccessModal(studentId);
     });
 
-    document.getElementById('disable-student-btn')?.addEventListener('click', () => {
-      this.openDisableStudentModal(studentId);
+    document.getElementById('disable-student-btn')?.addEventListener('click', async event => {
+      if (event.currentTarget.dataset.disabled !== 'true') return this.openDisableStudentModal(studentId);
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const result = await StudentService.enableStudent(studentId);
+        if (!result.success) return window.alert(result.error || 'No se pudo habilitar el estudiante.');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      } finally { button.disabled = false; }
     });
 
     document.getElementById('delete-student-btn')?.addEventListener('click', () => {
@@ -796,7 +803,7 @@ class StudentProfileView extends Component {
           <button type="button" class="modal-close" data-close-student-action>&times;</button>
         </div>
         <div class="modal-body">
-          <p>El expediente se conserva, pero el estudiante queda marcado como inhabilitado y su cuenta de portal se desactiva.</p>
+          <p>El estudiante se oculta de los listados operativos y del instructor. Sus horarios se liberan y su acceso se desactiva. El expediente se conserva para habilitarlo desde el filtro Inhabilitados.</p>
           <div class="credential-error" id="student-action-error" hidden></div>
         </div>
         <div class="modal-footer">

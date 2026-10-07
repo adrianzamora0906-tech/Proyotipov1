@@ -38,11 +38,11 @@ function currentOrNextIntensiveSaturday(value,anchor){
 }
 function classDates(group){if(group.modality==='presencial_regular')return [0,1,2,3,4].map(offset=>addDays(group.start_date,offset));return [iso(group.start_date),addDays(group.start_date,7)];}
 
-async function resolveEnrollmentBranchId(branchId){
+async function resolveEnrollmentBranchId(branchId,queryable=db){
   if(!branchId)return null;
-  const result=await db.query(`SELECT COALESCE(reference.id,current.id) branch_id
+  const result=await queryable.query(`SELECT COALESCE(reference.id,current.id) branch_id
     FROM branches current LEFT JOIN branches reference
-      ON current.code='SP_IC2' AND reference.code='SP_IC1'
+      ON current.code IN ('SP_IC','SP_IC2') AND reference.code='SP_IC1'
       AND reference.city_id=current.city_id AND reference.active=TRUE
     WHERE current.id=$1 LIMIT 1`,[branchId]);
   return result.rows[0]?.branch_id||branchId;
@@ -69,6 +69,7 @@ class TheoryCourseService {
   static endDate(option,start){return addDays(start,option.modality==='presencial_regular'?4:7);}
 
   static async getOrCreateGroup(client,{branchId,courseId,selection,actorId,allowFull=false}){
+    branchId=await resolveEnrollmentBranchId(branchId,client);
     const option=this.normalizeSelection(selection);
     const instructorId=await this.findInstructor(client,branchId,option);
     let start=this.initialStart(option);
@@ -134,7 +135,7 @@ class TheoryCourseService {
 
   static async options(user,filters={}){
     const requestedBranchId=filters.branch_id||user.branch_id;if(!requestedBranchId)throw createError(422,'Sucursal requerida');
-    // Shopin comparte la oferta teórica y sus cupos con Flavio Reyes.
+    // Manta 2000 y Shopping comparten grupos y cupos con Flavio Reyes.
     const branchId=await resolveEnrollmentBranchId(requestedBranchId);
     const client=await db.getClient();try{
       const rows=[];

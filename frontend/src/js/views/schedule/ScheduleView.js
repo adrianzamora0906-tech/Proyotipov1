@@ -1062,7 +1062,7 @@ class ScheduleView extends Component {
                     <span>${student.identification ? `Cédula: ${this.escapeHtml(student.identification)}` : 'Cédula pendiente'}${student.phone ? ` · ${this.escapeHtml(student.phone)}` : ''}</span>
                     <small>${student.start_time ? `${this.escapeHtml(student.start_time)}–${this.escapeHtml(student.end_time)}` : 'Horario pendiente'}</small>
                   </div>
-                  <span class="instructor-student-status ${student.status}">${student.status === 'reservado' ? 'Reservado' : student.status === 'transporte' ? 'Transporte' : 'Matriculado'}</span>
+                  <span class="instructor-student-status ${student.status}">${student.status === 'reservado' ? 'Reservado' : student.status === 'transporte' ? 'Transporte' : student.status === 'practica_adicional' ? 'Practica adicional' : 'Matriculado'}</span>
                 </article>
               `).join('')}
             </div>

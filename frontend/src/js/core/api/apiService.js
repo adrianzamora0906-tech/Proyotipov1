@@ -62,6 +62,10 @@ class ApiService {
     return apiClient.post(`/students/${id}/disable`, {});
   }
 
+  static async enableStudent(id) {
+    return apiClient.post(`/students/${id}/enable`, {});
+  }
+
   static async searchStudents(query, params = {}) {
     const qs = new URLSearchParams({ query, ...params }).toString();
     return apiClient.get(`/students/search?${qs}`);

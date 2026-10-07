@@ -49,6 +49,7 @@ class StudentsView extends Component {
       ['reservado', 'Reservado'],
       ['en_curso', 'En curso'],
       ['completado', 'Curso completado'],
+      ['inhabilitado', 'Inhabilitados'],
     ];
     const statusFilterOptionsHtml = statusFilterOptions
       .map(([value, label]) => `<option value="${value}" ${selectedStatus === value ? 'selected' : ''}>${label}</option>`)

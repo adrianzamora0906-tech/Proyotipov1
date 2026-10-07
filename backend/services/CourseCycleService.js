@@ -1634,6 +1634,15 @@ class CourseCycleService {
           SET status = 'cancelado', updated_at = NOW()
           WHERE id = $1
         `, [current.id]);
+        await client.query(`
+          UPDATE referred_instructor_schedule_blocks
+          SET status = 'cancelado', updated_at = NOW()
+          WHERE enrollment_id = $1 AND cycle_id = $2 AND student_id = $3
+            AND schedule_date = $4::date AND instructor_id = $5
+            AND start_time = $6::time AND end_time = $7::time
+            AND status = 'activo'
+        `, [current.enrollment_id, cycleId, studentId, date, current.instructor_id,
+          current.start_time, current.end_time]);
         const inserted = await client.query(`
           INSERT INTO course_cycle_schedule_assignments (
             cycle_id, enrollment_id, student_id, schedule_date,

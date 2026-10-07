@@ -196,6 +196,14 @@ class StudentController {
     } catch (error) { next(error); }
   }
 
+  static async enable(req, res, next) {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({ success: false, error: 'ID de estudiante invalido' });
+      await StudentService.getById(req.params.id, await getStudentScope(req, false));
+      return res.json({ success: true, data: await StudentService.enable(req.params.id, req.user) });
+    } catch (error) { next(error); }
+  }
+
   static async delete(req, res, next) {
     try {
       if (!isUuid(req.params.id)) return res.status(400).json({ success: false, error: 'ID de estudiante invalido' });

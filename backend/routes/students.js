@@ -40,6 +40,7 @@ router.post('/:id/reset-access', requirePermission('STUDENT_UPDATE'), StudentCon
 
 // POST /api/students/:id/disable - Inhabilitar estudiante sin borrar expediente
 router.post('/:id/disable', requirePermission('STUDENT_UPDATE'), StudentController.disable);
+router.post('/:id/enable', requirePermission('STUDENT_UPDATE'), StudentController.enable);
 
 // PUT /api/students/:id - Actualizar estudiante
 router.put('/:id', requirePermission('STUDENT_UPDATE'), StudentController.update);

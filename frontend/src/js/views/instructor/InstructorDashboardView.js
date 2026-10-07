@@ -298,6 +298,7 @@ class InstructorDashboardView extends Component {
   }
 
   renderSessionActions(item) {
+    if (item.isAdditionalPractice) return '<div class="instructor-actions"><a href="/instructor/students" class="btn btn-secondary btn-small">Ver estudiante</a></div>';
     const buttons=[];
     if (item.isScheduleOnly) return `<div class="instructor-actions"><a href="/instructor/students?enrollment=${item.enrollmentId}" class="btn btn-secondary btn-small">Ver estudiante</a></div>`;
     if (item.isExamOnly && item.actualEnd) return `<div class="instructor-actions"><a href="/instructor/evaluations?session=${encodeURIComponent(item.id)}&enrollment=${encodeURIComponent(item.enrollmentId)}" class="btn btn-primary btn-small">Evaluar</a></div>`;

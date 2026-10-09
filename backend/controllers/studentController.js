@@ -4,6 +4,7 @@ const db = require('../config/database');
 const AdditionalPracticeService = require('../services/AdditionalPracticeService');
 const StudentAccountService = require('../services/StudentAccountService');
 const LicenseRenewalService = require('../services/LicenseRenewalService');
+const StudentRecordEditService = require('../services/StudentRecordEditService');
 
 const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const effectiveBranchId = (req) => req.authorization?.operationalCoverage?.operational_branch_id || req.authorization?.branchId || req.user.branch_id;
@@ -34,6 +35,38 @@ async function getStudentScope(req, useDefaultBranch = true) {
 }
 
 class StudentController {
+  static editAccess(req) {
+    return {global:!!req.authorization?.global,branchId:effectiveBranchId(req),requestContext:req.requestContext};
+  }
+
+  static async editContext(req,res,next) {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({success:false,error:'Estudiante invalido'});
+      res.json({success:true,data:await StudentRecordEditService.context(req.params.id,req.user,StudentController.editAccess(req))});
+    } catch(error) {next(error);}
+  }
+
+  static async editOptions(req,res,next) {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({success:false,error:'Estudiante invalido'});
+      res.json({success:true,data:await StudentRecordEditService.options(req.params.id,req.user,StudentController.editAccess(req),req.query)});
+    } catch(error) {next(error);}
+  }
+
+  static async previewEdit(req,res,next) {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({success:false,error:'Estudiante invalido'});
+      res.json({success:true,data:await StudentRecordEditService.preview(req.params.id,req.body,req.user,StudentController.editAccess(req))});
+    } catch(error) {next(error);}
+  }
+
+  static async saveEdit(req,res,next) {
+    try {
+      if (!isUuid(req.params.id)) return res.status(400).json({success:false,error:'Estudiante invalido'});
+      res.json({success:true,data:await StudentRecordEditService.save(req.params.id,req.body,req.user,StudentController.editAccess(req))});
+    } catch(error) {next(error);}
+  }
+
   static async branchAdminAttendanceStatus(req, res, next) {
     try {
       if (!isUuid(req.params.id)) return res.status(400).json({ success:false,error:'ID de estudiante inválido' });

@@ -245,7 +245,9 @@ class StudentsView extends Component {
     const isRegistrationPage = ['/students/new', '/student-form'].includes(window.location.pathname);
     if (isRegistrationPage) {
       await this.mountStudentModalEvents();
-      this.openStudentModal();
+      const editStudentId = new URLSearchParams(window.location.search).get('edit');
+      if (editStudentId) await this.openStudentRecordEdit(editStudentId);
+      else this.openStudentModal();
       return;
     }
     const studentFilterForm = document.getElementById('student-filter-form');
@@ -1788,10 +1790,14 @@ class StudentsView extends Component {
     }
 
     const dateCapacity = schedule.availabilityByDate?.[schedule.date] || {};
-    const available = Number(dateCapacity.available ?? schedule.available);
-    const normalAvailable = Number(schedule.fullNormalSchedule
+    const ownsSlot = this.recordEditContext?.assignments?.some(item =>
+      item.cycleId === schedule.cycleId && item.date === schedule.date
+      && item.time.replace(/\s/g, '') === String(schedule.time || '').replace(/\s/g, '')
+      && item.instructorId === this.scheduleInstructorFilterId);
+    const available = Math.max(Number(dateCapacity.available ?? schedule.available), ownsSlot ? 1 : 0);
+    const normalAvailable = Math.max(Number(schedule.fullNormalSchedule
       ? (dateCapacity.available ?? schedule.available)
-      : (schedule.available ?? available));
+      : (schedule.available ?? available)), ownsSlot ? 1 : 0);
     const capacity = Number(dateCapacity.capacity ?? schedule.capacity);
     const examCount = Number(dateCapacity.examCount || 0);
     const disabled = available <= 0;
@@ -2821,7 +2827,7 @@ class StudentsView extends Component {
     modal.style.display = '';
     document.body.style.overflow = 'hidden';
     this.goToModalStep(1);
-    if (!this.activatingReservation) this.restoreSessionModalBranch().catch(error => console.error('No se pudo restaurar la sucursal del registro:', error));
+    if (!this.activatingReservation && !this.recordEditContext) this.restoreSessionModalBranch().catch(error => console.error('No se pudo restaurar la sucursal del registro:', error));
     this.syncScheduleOptions();
     modal.querySelector('[name="province"]')?.focus();
   }
@@ -2897,6 +2903,199 @@ class StudentsView extends Component {
       item.setAttribute('aria-pressed', String(selected));
     });
     this.scheduleInstructorFilterId = context.instructorId || null;
+  }
+
+  async openStudentRecordEdit(studentId) {
+    const form = document.getElementById('student-modal-form');
+    if (!form) return;
+    this.editStudentId = studentId;
+    try {
+      const result = await ApiService.getStudentEditContext(studentId);
+      if (!result.success) throw new Error(result.error || 'No se pudo abrir el expediente');
+      const context = result.data;
+      this.recordEditContext = context;
+      form.reset();
+      await this.setRegistrationMode('regular');
+      this.openStudentModal();
+      document.getElementById('student-modal-title').textContent = `Editar estudiante: ${context.student.first_name} ${context.student.last_name}`;
+      document.getElementById('student-modal-submit').textContent = 'Revisar cambios';
+      document.getElementById('temporary-reservation-toggle')?.remove();
+      form.querySelectorAll('.student-registration-types input').forEach(input => { input.disabled = true; });
+
+      const student = context.student;
+      const values = {
+        firstName: student.first_name, lastName: student.last_name, cedula: student.identification,
+        birthDate: String(student.birth_date || '').slice(0, 10), email: student.email,
+        phone: student.phone, address: student.address, bloodType: student.blood_type,
+        pickupBranchId: student.pickup_branch_id, disabilityPercentage: student.disability_percentage,
+        referredByUserId: student.referred_by_user_id, discountBenefit: student.discount_benefit,
+      };
+      Object.entries(values).forEach(([name, value]) => {
+        const input = form.querySelector(`[name="${name}"]`);
+        if (input && value != null) input.value = value;
+      });
+      if (student.referred_by_user_id) {
+        this.referralStaffResults = context.referrers || [];
+        this.selectReferralStaff(student.referred_by_user_id);
+        if (form.elements.discountBenefit) form.elements.discountBenefit.value = student.discount_benefit || '';
+      }
+      const pickup = form.elements.pickupBranchId;
+      if (pickup && student.pickup_branch_id && ![...pickup.options].some(option => option.value === student.pickup_branch_id)) {
+        const currentPickup = context.branches?.find(item => item.id === student.pickup_branch_id);
+        pickup.add(new Option(currentPickup?.name || 'Sucursal de recogida actual', student.pickup_branch_id));
+        pickup.value = student.pickup_branch_id;
+      }
+      form.querySelectorAll('.registration-observations-field [name="notes"]').forEach(input => {
+        input.value = student.notes || '';
+      });
+      const city = context.cities.find(item => String(item.id) === String(student.city_id));
+      if (city) {
+        form.elements.province.value = city.province;
+        await this.renderModalCities?.();
+        form.elements.city_id.value = city.id;
+        await this.renderModalBranches?.();
+      }
+      const branch = form.elements.branch;
+      const branchOption = [...branch.options].find(option => option.dataset.branchId === student.branch_id);
+      if (branchOption) branchOption.selected = true;
+      else throw new Error('La sucursal del estudiante no esta disponible para editar');
+      await this.loadModalBranchCourses(branch);
+      await this.loadModalReferredInstructors(student.branch_id);
+      const enrollment = context.enrollments[0];
+      if (enrollment) {
+        const course = form.elements.course_id;
+        if (![...course.options].some(option => option.value === enrollment.course_id)) {
+          course.add(new Option(enrollment.course_name || 'Curso actual', enrollment.course_id));
+        }
+        course.value = enrollment.course_id;
+        this.renderModalReferredInstructorOptions();
+        const instructorId = context.assignments[0]?.instructorId || context.exam?.instructor_id;
+        if (instructorId) {
+          const instructor = form.elements.preferredInstructorId;
+          if (![...instructor.options].some(option => option.value === instructorId)) {
+            instructor.add(new Option(context.instructors.find(item => item.id === instructorId)?.name || 'Instructor actual', instructorId));
+          }
+          instructor.disabled = false;
+          instructor.value = instructorId;
+          this.scheduleInstructorFilterId = instructorId;
+        }
+        const modality = context.assignments[0]?.modality || 'normal';
+        document.getElementById('selected-enrollment-modality').value = modality;
+        await this.reloadModalSchedules(student.branch_id, instructorId || null, null, {
+          practicalCycleId: context.assignments[0]?.cycleId || null,
+        });
+        document.getElementById('selected-enrollment-modality').value = modality;
+        this.syncScheduleOptions();
+        this.restoreRecordEditSchedule();
+        const theory = enrollment.theory_modality === 'presencial_intensivo'
+          ? String(enrollment.theory_start_time || '').startsWith('13') ? 'presencial_intensivo_13' : 'presencial_intensivo_08'
+          : enrollment.theory_modality || 'por_confirmar';
+        const theoryInput = form.querySelector(`[name="theorySchedule"][value="${theory}"]`);
+        if (theoryInput) {
+          theoryInput.disabled = false;
+          theoryInput.checked = true;
+          theoryInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      } else {
+        form.querySelector('.schedule-workflow').hidden = true;
+        this.goToModalStep(2);
+      }
+      const status = document.getElementById('registration-documents-status');
+      if (status) status.textContent = context.documents.filter(item => item.hasFile).map(item => item.name).join(', ') || 'Sin documentos cargados';
+      const bachillerDocument = context.documents.find(item => item.type === 'certificado_bachiller');
+      const bachillerFromCedula = /cedula indica bachiller/i.test(bachillerDocument?.observations || '');
+      const bachillerToggle = form.elements.cedulaIndicatesBachiller;
+      if (bachillerToggle) {
+        bachillerToggle.checked = bachillerFromCedula;
+        bachillerToggle.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      if (!context.canDocuments) {
+        form.querySelectorAll('.student-modal-step[data-step="3"] input[type="file"], [name="cedulaIndicatesBachiller"]')
+          .forEach(input => { input.disabled = true; });
+      }
+      const collect = form.elements.collectPayment;
+      if (collect) { collect.checked = false; collect.dispatchEvent(new Event('change', { bubbles: true })); }
+      if (context.canFinance && collect) {
+        const method = form.elements.paymentMethod;
+        const referenceGroup = form.elements.paymentReference?.closest('.form-group');
+        referenceGroup?.insertAdjacentHTML('afterend', `<div class="form-row" id="record-edit-payment-details">
+          <div class="form-group" data-card-batch hidden><label class="form-label">Lote de tarjeta</label>
+            <input class="form-input" name="paymentCardBatch"></div>
+          <div class="form-group" data-transfer-date hidden><label class="form-label">Fecha de transferencia</label>
+            <input class="form-input" type="date" name="paymentTransferDate" value="${new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Guayaquil' }).format(new Date())}"></div>
+        </div>`);
+        const syncMethod = () => {
+          const details = document.getElementById('record-edit-payment-details');
+          details.querySelector('[data-card-batch]').hidden = method.value !== 'tarjeta';
+          details.querySelector('[data-transfer-date]').hidden = method.value !== 'transferencia';
+        };
+        method?.addEventListener('change', syncMethod);
+        syncMethod();
+      }
+      if (context.payment) {
+        const discount = form.elements.discountAmount;
+        if (discount) discount.value = Math.max(0, Number(context.payment.total) - Number(context.payment.final_amount)).toFixed(2);
+        const summary = document.getElementById('payment-registration-summary');
+        if (summary) summary.textContent = `Importe: $${Number(context.payment.final_amount).toFixed(2)} | Pagado: $${(Number(context.payment.final_amount) - Number(context.payment.balance)).toFixed(2)} | Saldo: $${Number(context.payment.balance).toFixed(2)}`;
+      }
+      if (!context.canFinance && form.elements.discountAmount) form.elements.discountAmount.disabled = true;
+      if (!context.canSchedule && form.elements.course_id) form.elements.course_id.disabled = true;
+      form.querySelector('[name="firstName"]')?.focus();
+    } catch (error) {
+      if (!document.getElementById('student-modal-overlay')?.classList.contains('active')) this.openStudentModal();
+      document.getElementById('student-modal-submit').disabled = true;
+      this.showModalAlert('error', error.message || 'No se pudo cargar el expediente');
+    }
+  }
+
+  restoreRecordEditSchedule() {
+    const context = this.recordEditContext;
+    const assignments = context?.assignments || [];
+    if (!assignments.length) return;
+    const first = assignments[0];
+    const selections = assignments.map(item => ({
+      id: `cycle:${item.cycleId}`, cycleId: item.cycleId, date: item.date,
+      time: item.time, modality: item.modality,
+    }));
+    const form = document.getElementById('student-modal-form');
+    const calendarCells = [...document.querySelectorAll('#student-schedule-calendar .schedule-option')];
+    const matches = calendarCells.filter(cell => {
+      try {
+        const payload = JSON.parse(cell.dataset.schedule || '{}');
+        return selections.some(item => item.cycleId === payload.cycleId && item.date === payload.date
+          && item.time.replace(/\s/g, '') === String(payload.time || '').replace(/\s/g, ''));
+      } catch (_) { return false; }
+    });
+    if (matches.length === selections.length) {
+      const calendar = matches[0].closest('.enrollment-calendar');
+      const cycleSet = calendar?.closest('.enrollment-cycle-set');
+      if (cycleSet) {
+        cycleSet.dataset.activeCycleIndex = calendar.dataset.cycleIndex || '0';
+        cycleSet.querySelectorAll(':scope > .enrollment-calendar').forEach(item => {
+          item.style.display = item === calendar ? 'block' : 'none';
+        });
+      }
+      matches.forEach(cell => {
+        cell.disabled = false;
+        cell.classList.remove('disabled');
+        cell.classList.add('selected');
+        cell.setAttribute('aria-disabled', 'false');
+        cell.setAttribute('aria-hidden', 'false');
+      });
+      calendar.dataset.rotationEnabled = String(new Set(selections.map(item => item.time)).size > 1);
+      this.updateCalendarWindow(calendar);
+      this.updateScheduleSelectionSummary(selections);
+    }
+    form.elements.scheduleId.value = `cycle:${first.cycleId}`;
+    form.elements.schedulePlan.value = JSON.stringify({
+      selections, rotation: new Set(selections.map(item => item.time)).size > 1,
+      preferredInstructorId: first.instructorId, practicalMode: 'classes',
+    });
+    const summary = document.getElementById('schedule-selection-summary');
+    if (summary && !matches.length) {
+      summary.classList.remove('is-empty');
+      summary.querySelector('strong').textContent = assignments.map(item => `${item.date} ${item.time}`).join(' | ');
+    }
   }
 
   async openReservationActivation(reservation) {
@@ -3026,7 +3225,10 @@ class StudentsView extends Component {
     const form = document.getElementById('student-modal-form');
     const alert = document.getElementById('student-modal-alert');
     if (!modal) return;
+    const editedStudentId = this.recordEditContext?.student?.id || new URLSearchParams(window.location.search).get('edit');
     const shouldReturnToStudents = ['/students/new', '/student-form'].includes(window.location.pathname);
+    document.getElementById('student-record-edit-review')?.remove();
+    this.recordEditContext = null;
     this.studentModalScheduleContext = null;
     modal.classList.remove('active');
     modal.setAttribute('aria-hidden', 'true');
@@ -3125,7 +3327,7 @@ class StudentsView extends Component {
       this.studentModalOrigin = null;
     }
     if (shouldReturnToStudents) {
-      window.history.pushState(null, null, '/students');
+      window.history.pushState(null, null, editedStudentId ? `/student-profile/${encodeURIComponent(editedStudentId)}` : '/students');
       window.dispatchEvent(new PopStateEvent('popstate'));
     }
   }
@@ -3268,6 +3470,7 @@ class StudentsView extends Component {
 
   validateScheduleFirstStep() {
     const form = document.getElementById('student-modal-form');
+    if (this.recordEditContext && !this.recordEditContext.enrollments.length) return true;
     const mode = form?.querySelector('[name="registrationMode"]:checked')?.value || 'regular';
     if (mode === 'license-renewal') {
       this.goToModalStep(2);
@@ -3925,6 +4128,16 @@ class StudentsView extends Component {
     }
   }
 
+  getCalendarInstructorButton(calendar) {
+    if (!calendar) return null;
+    const buttons = [...calendar.querySelectorAll('[data-course-instructor-id]')];
+    const active = buttons.find(button => button.classList.contains('active'));
+    if (active) return active;
+    if (calendar.dataset.modality !== 'intensivo') return null;
+    return buttons.find(button => String(button.dataset.courseInstructorId)
+      === String(this.scheduleInstructorFilterId || '')) || buttons[0] || null;
+  }
+
   async updateInstructorAssignmentPreview(calendar, plan = []) {
     const preview = calendar?.querySelector('.schedule-instructor-preview');
     if (!preview) return;
@@ -3940,8 +4153,7 @@ class StudentsView extends Component {
 
     const preferredSelect = document.getElementById('preferred-instructor-select');
     const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';
-    const activeInstructorButton = [...document.querySelectorAll('#student-schedule-calendar [data-course-instructor-id].active')]
-      .find(button => button.closest('.enrollment-calendar')?.style.display !== 'none');
+    const activeInstructorButton = this.getCalendarInstructorButton(calendar);
     const preferredInstructorId = examOnly
       ? activeInstructorButton?.dataset.courseInstructorId || this.scheduleInstructorFilterId || preferredSelect?.value || null
       : activeInstructorButton?.dataset.courseInstructorId || this.scheduleInstructorFilterId || preferredSelect?.value || null;
@@ -4143,8 +4355,10 @@ class StudentsView extends Component {
       ],
       address: additionalPractice || renewal ? [] : [{ type: 'required', message: 'La dirección es requerida' }],
       bloodType: temporaryReservation || additionalPractice || renewal ? [] : [{ type: 'required', message: 'Debes seleccionar el tipo de sangre' }],
-      pickupBranchId: additionalPractice || renewal ? [] : [{ type: 'required', message: 'Selecciona dónde recoger al estudiante' }],
-      course_id: additionalPractice || renewal ? [] : [{ type: 'required', message: 'Debes seleccionar un curso' }],
+      pickupBranchId: additionalPractice || renewal || (this.recordEditContext && !this.recordEditContext.student.pickup_branch_id)
+        ? [] : [{ type: 'required', message: 'Selecciona dónde recoger al estudiante' }],
+      course_id: additionalPractice || renewal || (this.recordEditContext && !this.recordEditContext.enrollments.length)
+        ? [] : [{ type: 'required', message: 'Debes seleccionar un curso' }],
       city_id: [{ type: 'required', message: 'Debes seleccionar una ciudad' }],
       branch: [{ type: 'required', message: 'Debes seleccionar una sucursal' }],
     };
@@ -4175,6 +4389,15 @@ class StudentsView extends Component {
 
     if (!this.validateStudentFields()) {
       this.goToModalStep(2);
+      return;
+    }
+
+    if (this.editStudentId) {
+      if (!this.recordEditContext) {
+        this.showModalAlert('error', 'No se cargo el expediente. Cierra y vuelve a abrir Editar.');
+        return;
+      }
+      await this.handleStudentRecordEditSubmit(form, formData, submitBtn);
       return;
     }
 
@@ -4280,8 +4503,9 @@ class StudentsView extends Component {
       || formData.get('theoryConfirmationAccepted') === 'true'
       || formData.get('theoryConfirmationAccepted') === 'on';
     const examOnly = formData.get('practicalMode') === 'exam_only';
-    const activeInstructorButton = [...document.querySelectorAll('#student-schedule-calendar [data-course-instructor-id].active')]
-      .find(button => button.closest('.enrollment-calendar')?.style.display !== 'none');
+    const selectedInstructorCalendar = [...document.querySelectorAll('.enrollment-calendar')]
+      .find(calendar => calendar.style.display !== 'none');
+    const activeInstructorButton = this.getCalendarInstructorButton(selectedInstructorCalendar);
     const preferredInstructorId = examOnly
       ? activeInstructorButton?.dataset.courseInstructorId || this.scheduleInstructorFilterId || formData.get('preferredInstructorId') || null
       : activeInstructorButton?.dataset.courseInstructorId || this.scheduleInstructorFilterId || formData.get('preferredInstructorId') || null;
@@ -4588,6 +4812,170 @@ class StudentsView extends Component {
         window.dispatchEvent(new PopStateEvent('popstate'));
       }, 5000);
     }
+  }
+
+  async collectStudentRecordEdit(form, formData) {
+    const context = this.recordEditContext;
+    const student = context.student;
+    const branchId = form.elements.branch?.selectedOptions?.[0]?.dataset?.branchId || student.branch_id;
+    const personal = {
+      identification: formData.get('cedula'), firstName: formData.get('firstName'),
+      lastName: formData.get('lastName'), birthDate: formData.get('birthDate') || null,
+      email: formData.get('email') || null, phone: formData.get('phone') || null,
+      address: formData.get('address') || null, bloodType: formData.get('bloodType') || null,
+      city_id: formData.get('city_id') || student.city_id,
+      branch_id: branchId, pickupBranchId: formData.get('pickupBranchId') || student.pickup_branch_id || null,
+      referredByUserId: formData.get('referredByUserId') || null,
+      notes: form.querySelector('.regular-enrollment-observations-field [name="notes"]')?.value.trim() || null,
+    };
+    if (context.canFinance) personal.discountBenefit = formData.get('discountBenefit') || null;
+    const typeF = form.elements.course_id?.selectedOptions?.[0]?.dataset?.catalogType === 'tipo-f';
+    if (form.elements.disabilityPercentage && !form.elements.disabilityPercentage.disabled
+      && (typeF || student.disability_percentage != null)) {
+      personal.disabilityPercentage = formData.get('disabilityPercentage') || null;
+    }
+    const payload = { revision: context.revision, personal, documents: [] };
+    const enrollment = context.enrollments[0];
+    if (enrollment) {
+      let plan;
+      try { plan = JSON.parse(form.elements.schedulePlan?.value || '{}'); }
+      catch (_) { throw new Error('El horario seleccionado no es valido'); }
+      const original = context.assignments.map(item => `${item.cycleId}|${item.date}|${item.time.replace(/\s/g, '')}`).sort();
+      const selected = (plan.selections || []).map(item => `${item.cycleId}|${item.date}|${String(item.time).replace(/\s/g, '')}`).sort();
+      const oldInstructor = context.assignments[0]?.instructorId || context.exam?.instructor_id;
+      const newInstructor = form.elements.preferredInstructorId?.value || oldInstructor;
+      const newCourse = form.elements.course_id?.value || enrollment.course_id;
+      const oldTheory = enrollment.theory_modality === 'presencial_intensivo'
+        ? String(enrollment.theory_start_time || '').startsWith('13') ? 'presencial_intensivo_13' : 'presencial_intensivo_08'
+        : enrollment.theory_modality || 'por_confirmar';
+      const theory = form.querySelector('[name="theorySchedule"]:checked')?.value || oldTheory;
+      const academicChanged = newCourse !== enrollment.course_id || branchId !== student.branch_id
+        || newInstructor !== oldInstructor || JSON.stringify(selected) !== JSON.stringify(original) || theory !== oldTheory;
+      if (academicChanged) {
+        if (!context.canSchedule) throw new Error('No tienes permiso para cambiar el curso u horario');
+        if (!plan.selections?.length || !newInstructor) throw new Error('Selecciona el nuevo horario e instructor');
+        if (newCourse !== enrollment.course_id && selected[0] === original[0]) {
+          throw new Error('Selecciona un horario del nuevo curso');
+        }
+        payload.academic = { courseId: newCourse, theorySelection: theory,
+          schedulePlan: { ...plan, preferredInstructorId: newInstructor,
+            practicalMode: formData.get('practicalMode') || plan.practicalMode || 'classes' } };
+      }
+      if (context.canFinance && context.payment && form.elements.discountAmount) {
+        const coursePrice = newCourse === enrollment.course_id
+          ? Number(context.payment.total)
+          : Number(form.elements.course_id?.selectedOptions?.[0]?.dataset?.price || enrollment.course_price);
+        const finalAmount = coursePrice - Number(form.elements.discountAmount.value || 0);
+        if (newCourse === enrollment.course_id && finalAmount !== Number(context.payment.final_amount)) {
+          payload.finance = { finalAmount };
+        }
+        if (formData.get('collectPayment') === 'on') {
+          payload.newPayment = { amount: Number(formData.get('paymentAmount')),
+            method: formData.get('paymentMethod'), reference: formData.get('paymentReference'),
+            cardBatch: formData.get('paymentCardBatch'), transferDate: formData.get('paymentTransferDate') };
+        }
+      }
+    }
+    const addDocument = async (type, file, name) => {
+      if (!file?.name) return;
+      if (!['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)) throw new Error('Carga documentos PDF, JPG o PNG');
+      payload.documents.push({ type, name: name || file.name, fileUrl: await this.readFileAsDataUrl(file) });
+    };
+    const packageFile = formData.get('registrationDocumentsPdfFile');
+    const packageUrl = formData.get('registrationDocumentsMobileFileUrl');
+    if (packageFile?.name || String(packageUrl || '').startsWith('data:')) {
+      payload.documents.push({ type: 'registro_documentos', name: 'Cedula y carnet de tipo sanguineo',
+        fileUrl: packageFile?.name ? await this.readFileAsDataUrl(packageFile) : packageUrl,
+        includesBloodCard: formData.get('registrationDocumentsMobileIncludesBloodCard') !== 'false' });
+    } else {
+      for (const [prefix, type] of [['cedula', 'cedula'], ['bloodTypeCard', 'carnet_tipo_sangre']]) {
+        const pdf = formData.get(`${prefix}PdfFile`);
+        const front = formData.get(`${prefix}FrontFile`);
+        const back = formData.get(`${prefix}BackFile`);
+        const mobileUrl = formData.get(`${prefix}MobileFileUrl`);
+        if (pdf?.name) await addDocument(type, pdf);
+        else if (String(mobileUrl || '').startsWith('data:')) payload.documents.push({ type, name: type, fileUrl: mobileUrl });
+        else if (front?.name || back?.name) {
+          if (!front?.name || !back?.name) throw new Error('Adjunta el frente y reverso del documento');
+          const blob = await this.createScanPdf(front, back, type);
+          payload.documents.push({ type, name: `${type}.pdf`, fileUrl: await this.readFileAsDataUrl(blob) });
+        }
+      }
+    }
+    const certificate = [...form.querySelectorAll('[name="certificadoBachillerFile"]')]
+      .map(input => input.files?.[0]).find(file => file?.name);
+    const certificateUrl = formData.get('certificadoBachillerMobileFileUrl');
+    if (certificate?.name) await addDocument('certificado_bachiller', certificate);
+    else if (String(certificateUrl || '').startsWith('data:')) payload.documents.push({ type: 'certificado_bachiller', name: 'Certificado de bachiller', fileUrl: certificateUrl });
+    await addDocument('certificado_discapacidad', formData.get('certificadoDiscapacidadFile'));
+    const hadBachillerByCedula = /cedula indica bachiller/i.test(
+      context.documents.find(item => item.type === 'certificado_bachiller')?.observations || '');
+    const replacedCedula = payload.documents.some(item => item.type === 'cedula' || item.type === 'registro_documentos');
+    if (formData.get('cedulaIndicatesBachiller') === 'on' && (!hadBachillerByCedula || replacedCedula)
+      && !payload.documents.some(item => item.type === 'certificado_bachiller')) {
+      payload.cedulaIndicatesBachiller = true;
+    }
+    if (payload.documents.reduce((sum, item) => sum + item.fileUrl.length, 0) > 14 * 1024 * 1024) {
+      throw new Error('Los documentos seleccionados superan el limite de 10 MB');
+    }
+    return payload;
+  }
+
+  async handleStudentRecordEditSubmit(form, formData, submitBtn) {
+    if (submitBtn.disabled) return;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Revisando...';
+    try {
+      const payload = await this.collectStudentRecordEdit(form, formData);
+      const response = await ApiService.previewStudentEdit(this.editStudentId, payload);
+      if (!response.success) throw new Error(response.error || 'No se pudieron revisar los cambios');
+      this.showStudentRecordEditReview(payload, response.data);
+    } catch (error) {
+      this.showModalAlert('error', error.data?.error?.message || error.message || 'No se pudieron revisar los cambios');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Revisar cambios';
+    }
+  }
+
+  showStudentRecordEditReview(payload, preview) {
+    document.getElementById('student-record-edit-review')?.remove();
+    const layer = document.createElement('div');
+    layer.id = 'student-record-edit-review';
+    layer.className = 'branch-modal-backdrop student-registration-result-backdrop';
+    layer.innerHTML = `<section class="branch-modal student-registration-result student-record-edit-review-dialog" role="dialog" aria-modal="true"
+      aria-labelledby="student-edit-review-title" style="display:block;align-self:center;flex:none;width:min(760px,calc(100vw - 24px));height:auto;min-height:0;max-height:85vh;overflow:auto">
+      <h2 id="student-edit-review-title">Has realizado estos cambios</h2>
+      <div style="overflow-x:auto"><table><thead><tr><th>Dato</th><th>Antes</th><th>Ahora</th></tr></thead><tbody>${preview.changes.map(change =>
+        `<tr><th>${escapeHtml(change.field)}</th><td>${escapeHtml(change.before ?? 'Sin dato')}</td><td>${escapeHtml(change.after ?? 'Sin dato')}</td></tr>`).join('')}</tbody></table></div>
+      <p style="margin-top:20px">¿Quieres confirmar y guardar estos cambios?</p>
+      <div role="alert" data-edit-error hidden></div>
+      <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:20px;flex-wrap:wrap">
+        <button type="button" class="btn btn-secondary" data-back>Volver a editar</button>
+        <button type="button" class="btn btn-primary" data-confirm>Confirmar y guardar</button>
+      </div></section>`;
+    document.body.appendChild(layer);
+    layer.querySelector('[data-back]').onclick = () => layer.remove();
+    layer.querySelector('[data-confirm]').onclick = async () => {
+      const confirm = layer.querySelector('[data-confirm]');
+      const errorHost = layer.querySelector('[data-edit-error]');
+      confirm.disabled = true;
+      confirm.textContent = 'Guardando...';
+      try {
+        const result = await ApiService.saveStudentEdit(this.editStudentId, {
+          payload, confirmationToken: preview.confirmationToken,
+        });
+        if (!result.success) throw new Error(result.error || 'No se pudo guardar el expediente');
+        layer.remove();
+        this.closeStudentModal();
+      } catch (error) {
+        errorHost.textContent = error.data?.error?.message || error.message || 'No se pudieron guardar los cambios';
+        errorHost.hidden = false;
+        confirm.disabled = false;
+        confirm.textContent = 'Confirmar y guardar';
+      }
+    };
+    layer.querySelector('[data-confirm]').focus();
   }
 
   async handleTemporaryReservationSubmit(form, formData, submitBtn) {

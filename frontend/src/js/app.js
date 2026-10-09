@@ -14,7 +14,7 @@ import "./data/DemoDataGenerator.js";
 import LoginView from "./views/auth/LoginView.js?v=perfil-profesor-teoria-20260907";
 import DashboardView from "./views/dashboard/DashboardView.js?v=consultas-optimizadas-20260811";
 import StudentsView from "./views/students/StudentsView.js?v=activar-seleccion-real-20261008";
-import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=cambio-horario-por-instructor-20260928";
+import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=student-edit-registration-20261009";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=editar-grupo-finde-20261008";
 import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";

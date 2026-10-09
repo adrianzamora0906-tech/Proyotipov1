@@ -19,8 +19,9 @@ const money = (value) =>
 const date = (value) =>
   value
     ? new Date(value).toLocaleString("es-EC", {
-        dateStyle: "medium",
-        timeStyle: "short",
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "America/Guayaquil",
       })
     : "—";
 
@@ -29,8 +30,8 @@ class CashOperationsView extends Component {
     const [workspace, pending, receipts, methods] = await Promise.all([
       ApiService.getCashWorkspace(),
       PaymentService.getPendingPayments(),
-      ApiService.getReceipts(),
-      PaymentService.getAvailableMethods(),
+      authService.can('RECEIPT_VIEW') ? ApiService.getReceipts() : Promise.resolve({data: []}),
+      authService.can('PAYMENT_CREATE') ? PaymentService.getAvailableMethods() : Promise.resolve([]),
     ]);
     this.data = workspace.data || {
       alerts: [],
@@ -53,12 +54,41 @@ class CashOperationsView extends Component {
       this.methods = [];
     }
     const pendingTransfers = this.data.transfers.filter(
-      (x) => x.status === "PENDING",
+      (x) => ["PENDING", "AWAITING_APPROVAL"].includes(x.status) || this.needsLegacyApproval(x),
     ).length;
     const urgent = this.data.alerts.filter(
       (x) => x.alert_type !== "PENDING_BALANCE",
     ).length;
-    const content = `<div class="cash-ops"><style>.cash-ops{display:grid;gap:18px}.cash-ops-head{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:22px;border:1px solid #dbe4f0;border-radius:16px;background:linear-gradient(135deg,#f8fbff,#eef2ff)}.cash-ops-head h1{margin:0;color:#17233e}.cash-ops-head p{margin:5px 0 0;color:#667085}.cash-ops-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.cash-ops-kpi{padding:16px;border:1px solid #e4e7ec;border-radius:13px;background:#fff}.cash-ops-kpi strong{display:block;font-size:24px}.cash-ops-kpi span{font-size:13px;color:#667085}.cash-ops-tabs{display:flex;gap:7px;padding:8px;border:1px solid #e4e7ec;border-radius:13px;background:#f8fafc}.cash-ops-tab{flex:1;border:0;border-radius:9px;padding:11px;background:transparent;font-weight:700;color:#667085;cursor:pointer}.cash-ops-tab.active{background:#5146e5;color:#fff}.cash-ops-panel{display:none;border:1px solid #e4e7ec;border-radius:14px;background:#fff;overflow:hidden}.cash-ops-panel.active{display:block}.cash-ops-panel-head{display:flex;justify-content:space-between;align-items:center;padding:17px 19px;border-bottom:1px solid #eaecf0}.cash-ops-panel-head h2{margin:0;font-size:19px}.cash-ops-list{display:grid;gap:10px;padding:16px}.cash-ops-item{display:grid;grid-template-columns:1.5fr 1fr auto;align-items:center;gap:14px;padding:14px;border:1px solid #e4e7ec;border-radius:11px}.cash-ops-item strong,.cash-ops-item small{display:block}.cash-ops-item small{margin-top:3px;color:#667085}.cash-ops-actions{display:flex;gap:7px}.cash-ops-badge{display:inline-flex;padding:5px 9px;border-radius:999px;background:#fff1cc;color:#995b00;font-size:11px;font-weight:800}.cash-ops-badge.CONFIRMED,.cash-ops-badge.APPLIED{background:#dcfce7;color:#067647}.cash-ops-badge.REJECTED{background:#fee2e2;color:#b42318}.cash-ops-modal .modal{max-width:620px}.cash-ops-form{display:grid;grid-template-columns:1fr 1fr;gap:13px}.cash-ops-form label{display:grid;gap:6px;font-size:13px;font-weight:700}.cash-ops-form .wide{grid-column:1/-1}@media(max-width:700px){.cash-ops-head{align-items:flex-start}.cash-ops-kpis{display:flex;overflow:auto}.cash-ops-kpi{min-width:155px}.cash-ops-tabs{overflow:auto}.cash-ops-tab{min-width:145px}.cash-ops-item{grid-template-columns:1fr}.cash-ops-actions{flex-wrap:wrap}.cash-ops-form{grid-template-columns:1fr}.cash-ops-form .wide{grid-column:auto}}</style><header class="cash-ops-head"><div><span class="cash-dashboard__eyebrow">CONTROL DE CARTERA</span><h1>Operaciones de Caja</h1><p>Verifica transferencias, atiende alertas y corrige datos sin alterar valores.</p></div></header>${this.error ? `<div class="alert alert-error">${esc(this.error)}</div>` : ""}<section class="cash-ops-kpis"><article class="cash-ops-kpi"><strong>${pendingTransfers}</strong><span>Transferencias por verificar</span></article><article class="cash-ops-kpi"><strong>${urgent}</strong><span>Alertas prioritarias</span></article><article class="cash-ops-kpi"><strong>${this.data.corrections.length}</strong><span>Correcciones auditadas</span></article></section><nav class="cash-ops-tabs"><button class="cash-ops-tab active" data-tab="transfers">Transferencias</button><button class="cash-ops-tab" data-tab="alerts">Alertas financieras</button><button class="cash-ops-tab" data-tab="corrections">Correcciones</button></nav><section class="cash-ops-panel active" data-panel="transfers"><div class="cash-ops-panel-head"><h2>Transferencias registradas</h2><button class="btn btn-primary" id="new-transfer">Nueva transferencia</button></div><div class="cash-ops-list">${this.transferRows()}</div></section><section class="cash-ops-panel" data-panel="alerts"><div class="cash-ops-panel-head"><h2>Atención requerida</h2></div><div class="cash-ops-list">${this.alertRows()}</div></section><section class="cash-ops-panel" data-panel="corrections"><div class="cash-ops-panel-head"><h2>Corrección de datos del cobro</h2><button class="btn btn-primary" id="new-correction">Corregir cobro</button></div><div class="cash-ops-list">${this.correctionRows()}</div></section><div class="modal-overlay cash-ops-modal" id="cash-ops-modal"></div></div>`;
+    const content = `<link rel="stylesheet" href="/src/assets/css/pages/cash-operations.css">
+      <div class="cash-ops">
+        <header class="cash-ops-head"><div><span class="cash-dashboard__eyebrow">CONTROL DE CARTERA</span><h1>Operaciones de Caja</h1></div></header>
+        ${this.error ? `<div class="alert alert-error">${esc(this.error)}</div>` : ""}
+        <section class="cash-ops-kpis">
+          <article class="cash-ops-kpi"><strong id="transfer-pending-total">${pendingTransfers}</strong><span>Transferencias pendientes</span></article>
+          <article class="cash-ops-kpi"><strong>${urgent}</strong><span>Alertas prioritarias</span></article>
+          <article class="cash-ops-kpi"><strong>${this.data.corrections.length}</strong><span>Correcciones auditadas</span></article>
+        </section>
+        <nav class="cash-ops-tabs" aria-label="Operaciones">
+          <button class="cash-ops-tab active" data-tab="transfers">Transferencias</button>
+          <button class="cash-ops-tab" data-tab="alerts">Alertas financieras</button>
+          <button class="cash-ops-tab" data-tab="corrections">Correcciones</button>
+        </nav>
+        <section class="cash-ops-panel active" data-panel="transfers">
+          <div class="cash-ops-panel-head"><h2>Transferencias</h2><div class="cash-ops-toolbar-actions"><button class="btn btn-primary" id="new-transfer">Nueva transferencia</button></div></div>
+          <div class="cash-ops-filters">
+            <label class="cash-ops-search"><span>Buscar</span><input class="form-input" id="transfer-search" type="search" placeholder="Nombre, cédula o comprobante"></label>
+            <label><span>Estado</span><select class="form-select" id="transfer-state"><option value="all">Todos los estados</option><option value="approval">Por aprobar</option><option value="confirmation">Por confirmar</option><option value="completed">Aprobadas / aplicadas</option><option value="rejected">Rechazadas</option></select></label>
+            <label><span>Desde</span><input class="form-input" type="date" id="transfer-from"></label>
+            <label><span>Hasta</span><input class="form-input" type="date" id="transfer-to"></label>
+          </div>
+          <div class="cash-ops-results"><span id="transfer-result-count"></span><span id="transfer-feedback" role="status" aria-live="polite"></span></div>
+          <div class="cash-ops-columns" aria-hidden="true"><span>Estudiante y comprobante</span><span>Valor y fecha</span><span>Estado y revisión</span></div>
+          <div class="cash-ops-list" id="transfer-list">${this.transferRows()}</div>
+        </section>
+        <section class="cash-ops-panel" data-panel="alerts"><div class="cash-ops-panel-head"><h2>Atención requerida</h2></div><div class="cash-ops-list">${this.alertRows()}</div></section>
+        <section class="cash-ops-panel" data-panel="corrections"><div class="cash-ops-panel-head"><h2>Corrección de datos del cobro</h2><button class="btn btn-primary" id="new-correction">Corregir cobro</button></div><div class="cash-ops-list">${this.correctionRows()}</div></section>
+        <div class="modal-overlay cash-ops-modal" id="cash-ops-modal"></div>
+      </div>`;
     const layout = await SidebarLayout.render(content);
     setTimeout(() => SidebarLayout.attachEventListeners(), 0);
     return layout;
@@ -66,13 +96,74 @@ class CashOperationsView extends Component {
   transferRows() {
     return (
       this.data.transfers
+        .filter((transfer) => this.matchesTransfer(transfer))
+        .slice()
+        .sort((a, b) => {
+          const pending = (value) => ['PENDING', 'AWAITING_APPROVAL'].includes(value.status)
+            || this.needsLegacyApproval(value);
+          const aPending = pending(a);
+          const bPending = pending(b);
+          if (aPending !== bPending) return aPending ? -1 : 1;
+          if (!aPending) {
+            const completedDate = (value) => Date.parse(value.approved_at || value.reviewed_at || value.created_at) || 0;
+            return completedDate(a) - completedDate(b);
+          }
+          const transferDate = (value) => Date.parse(value.transfer_date || value.created_at) || 0;
+          return transferDate(b) - transferDate(a)
+            || (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0);
+        })
         .map(
           (x) =>
-            `<article class="cash-ops-item"><div><strong>${esc(x.student_name)}</strong><small>${esc(x.identification)} · ${esc(x.bank)} · Ref. ${esc(x.reference)}</small></div><div><strong>${money(x.amount)}</strong><small>${date(x.created_at)}</small></div><div class="cash-ops-actions"><span class="cash-ops-badge ${esc(x.status)}">${{ PENDING: "Pendiente", CONFIRMED: "Confirmada", REJECTED: "Rechazada" }[x.status] || x.status}</span>${x.status === "PENDING" ? `<button class="btn btn-primary review-transfer" data-id="${x.id}" data-decision="CONFIRMED">Confirmar</button><button class="btn btn-secondary review-transfer" data-id="${x.id}" data-decision="REJECTED">Rechazar</button>` : ""}</div></article>`,
+            `<article class="cash-ops-item"><div><strong>${esc(x.student_name)}</strong><small>Cédula: ${esc(x.identification)}</small><small>Comprobante: ${esc(x.reference || 'Sin referencia')} · ${esc(x.bank || 'Sin banco')}</small></div><div><strong class="transfer-amount">${money(x.amount)}</strong><small>${this.transferDateLabel(x)}</small></div><div class="cash-ops-state"><span class="cash-ops-badge ${esc(this.needsLegacyApproval(x) ? 'AWAITING_APPROVAL' : x.status)}">${esc(this.transferStatus(x))}</span><div class="cash-ops-actions">${this.transferActions(x)}</div>${x.approved_at ? `<small>${date(x.approved_at)}</small>` : ''}</div></article>`,
         )
         .join("") ||
-      '<p class="dashboard-empty">No hay transferencias registradas.</p>'
+      '<div class="cash-ops-empty"><strong>No hay transferencias para mostrar</strong></div>'
     );
+  }
+  needsLegacyApproval(transfer) {
+    return transfer.status === "CONFIRMED" && !transfer.approved_at && !transfer.direct_payment;
+  }
+  transferDay(transfer) {
+    if (transfer.transfer_date) return String(transfer.transfer_date).slice(0, 10);
+    if (!transfer.created_at) return '';
+    return new Date(transfer.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Guayaquil' });
+  }
+  transferDateLabel(transfer) {
+    const day = this.transferDay(transfer);
+    return day ? new Date(`${day}T12:00:00-05:00`).toLocaleDateString('es-EC', { dateStyle: 'medium', timeZone: 'America/Guayaquil' }) : 'Sin fecha';
+  }
+  matchesTransfer(transfer) {
+    const filters = this.transferFilters || {};
+    const search = String(filters.search || '').trim().toLocaleLowerCase('es');
+    if (search && ![transfer.student_name, transfer.identification, transfer.reference, transfer.bank].some(value => String(value || '').toLocaleLowerCase('es').includes(search))) return false;
+    const approval = transfer.status === 'AWAITING_APPROVAL' || this.needsLegacyApproval(transfer);
+    if (filters.state === 'approval' && !approval) return false;
+    if (filters.state === 'confirmation' && transfer.status !== 'PENDING') return false;
+    if (filters.state === 'completed' && (transfer.status !== 'CONFIRMED' || approval)) return false;
+    if (filters.state === 'rejected' && transfer.status !== 'REJECTED') return false;
+    const day = this.transferDay(transfer);
+    return !(filters.from && day < filters.from) && !(filters.to && day > filters.to);
+  }
+  updateTransferList(message = '') {
+    document.getElementById('transfer-list').innerHTML = this.transferRows();
+    const count = this.data.transfers.filter(transfer => this.matchesTransfer(transfer)).length;
+    document.getElementById('transfer-result-count').textContent = `${count} de ${this.data.transfers.length} transferencias`;
+    document.getElementById('transfer-pending-total').textContent = this.data.transfers.filter(transfer => ['PENDING', 'AWAITING_APPROVAL'].includes(transfer.status) || this.needsLegacyApproval(transfer)).length;
+    document.getElementById('transfer-feedback').textContent = message;
+  }
+  transferStatus(transfer) {
+    if (this.needsLegacyApproval(transfer)) return 'Por aprobar (pago aplicado)';
+    return { PENDING: 'Por confirmar', AWAITING_APPROVAL: 'Por aprobar', CONFIRMED: transfer.approved_at ? 'Aprobada' : 'Aplicada', REJECTED: 'Rechazada' }[transfer.status] || transfer.status;
+  }
+  transferActions(transfer) {
+    const legacy = this.needsLegacyApproval(transfer);
+    const approval = transfer.status === "AWAITING_APPROVAL" || legacy;
+    if (transfer.status !== "PENDING" && !approval) return "";
+    const permission = approval ? "TRANSFER_APPROVE" : "TRANSFER_VERIFY";
+    if (!authService.can(permission)) return "";
+    const stage = approval ? "approval" : "confirmation";
+    const decision = approval ? "APPROVED" : "CONFIRMED";
+    return `<button class="btn btn-primary review-transfer" data-stage="${stage}" data-id="${transfer.id}" data-decision="${decision}" data-applied="${legacy}">${approval ? "Aprobar" : "Confirmar"}</button>${legacy ? '' : `<button class="btn btn-secondary review-transfer" data-stage="${stage}" data-id="${transfer.id}" data-decision="REJECTED">Rechazar</button>`}`;
   }
   alertRows() {
     const labels = {
@@ -104,7 +195,9 @@ class CashOperationsView extends Component {
   async mount() {
     document.querySelectorAll(".cash-ops-badge.PENDING").forEach((badge) => { badge.textContent = "Por confirmar"; });
     if (!authService.can("PAYMENT_CREATE")) document.getElementById("new-transfer")?.remove();
-    if (!authService.can("TRANSFER_VERIFY")) document.querySelectorAll(".review-transfer").forEach((button) => button.remove());
+    document.querySelectorAll(".review-transfer").forEach((button) => {
+      if (!authService.can(button.dataset.stage === "approval" ? "TRANSFER_APPROVE" : "TRANSFER_VERIFY")) button.remove();
+    });
     if (authService.can("TRANSFER_EXPORT")) {
       const exportButton = document.createElement("button");
       exportButton.type = "button";
@@ -123,7 +216,7 @@ class CashOperationsView extends Component {
         } catch (error) { alert(error.message || "No se pudo exportar."); }
         finally { exportButton.disabled = false; }
       });
-      document.querySelector('[data-panel="transfers"] .cash-ops-panel-head')?.append(exportButton);
+      document.querySelector('.cash-ops-toolbar-actions')?.append(exportButton);
     }
     document.querySelectorAll(".cash-ops-tab").forEach(
       (btn) =>
@@ -144,40 +237,87 @@ class CashOperationsView extends Component {
     document
       .getElementById("new-correction")
       ?.addEventListener("click", () => this.openCorrection());
-    document.querySelectorAll(".review-transfer").forEach(
-      (btn) =>
-        (btn.onclick = async () => {
-          const action =
-            btn.dataset.decision === "CONFIRMED"
-              ? "confirmar y aplicar al saldo"
-              : "rechazar";
-          if (!confirm(`¿Deseas ${action} esta transferencia?`)) return;
-          btn.disabled = true;
-          try {
-            await ApiService.reviewTransferVerification(
-              btn.dataset.id,
-              btn.dataset.decision,
-            );
-            this.refresh();
-          } catch (e) {
-            btn.disabled = false;
-            alert(e.message);
-          }
-        }),
-    );
+    this.transferFilters = { search: '', state: 'all', from: '', to: '' };
+    for (const [id, key] of [['transfer-search', 'search'], ['transfer-state', 'state'], ['transfer-from', 'from'], ['transfer-to', 'to']]) {
+      document.getElementById(id).addEventListener(key === 'search' ? 'input' : 'change', (event) => {
+        this.transferFilters[key] = event.target.value;
+        this.updateTransferList();
+      });
+    }
+    document.getElementById('transfer-list').addEventListener('click', (event) => {
+      const button = event.target.closest('.review-transfer');
+      if (button) this.openReview(button.dataset.id, button.dataset.decision, button.dataset.stage);
+    });
+    this.updateTransferList();
   }
   modal(html) {
     const host = document.getElementById("cash-ops-modal");
-    host.innerHTML = `<div class="modal"><div class="modal-header"><h3 class="modal-title">${html.title}</h3><button class="modal-close" data-close>&times;</button></div><div class="modal-body">${html.body}<div id="cash-op-error" class="form-error"></div></div><div class="modal-footer"><button class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary" id="cash-op-save">${html.save}</button></div></div>`;
+    const previousFocus = document.activeElement;
+    host.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="cash-op-title"><div class="modal-header"><h3 class="modal-title" id="cash-op-title">${html.title}</h3><button class="modal-close" aria-label="Cerrar" data-close>&times;</button></div><div class="modal-body">${html.body}<div id="cash-op-error" class="form-error" role="alert"></div></div><div class="modal-footer"><button class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary" id="cash-op-save">${html.save}</button></div></div>`;
     host.classList.add("active");
     host.querySelectorAll("[data-close]").forEach(
       (x) =>
         (x.onclick = () => {
           host.classList.remove("active");
           host.innerHTML = "";
+          host.onkeydown = null;
+          previousFocus?.focus();
         }),
     );
+    host.onkeydown = (event) => {
+      if (event.key === 'Escape') host.querySelector('[data-close]:not(:disabled)')?.click();
+      if (event.key !== 'Tab') return;
+      const controls = Array.from(host.querySelectorAll('button:not(:disabled), input, select, textarea, a[href]'));
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    host.querySelector('[data-close]')?.focus();
     return host;
+  }
+  openReview(id, decision, stage) {
+    const transfer = this.data.transfers.find(item => String(item.id) === String(id));
+    const approval = stage === 'approval';
+    if (!transfer || !authService.can(approval ? 'TRANSFER_APPROVE' : 'TRANSFER_VERIFY')) return;
+    const rejected = decision === 'REJECTED';
+    const label = rejected ? 'Rechazar transferencia' : approval ? 'Aprobar transferencia' : 'Confirmar transferencia';
+    const effect = rejected ? 'El saldo no se modificará.' : this.needsLegacyApproval(transfer)
+      ? 'Pago ya aplicado. Esta aprobación registra la revisión sin modificar el saldo.'
+      : approval ? 'El importe se aplicará al saldo del estudiante.' : 'Quedará pendiente de aprobación. El saldo no se modificará.';
+    let proof = '';
+    try {
+      const url = new URL(transfer.proof_url);
+      if (['https:', 'http:'].includes(url.protocol)) proof = `<a href="${esc(url.href)}" target="_blank" rel="noopener noreferrer">Ver comprobante</a>`;
+    } catch (_) {}
+    const host = this.modal({
+      title: label,
+      save: rejected ? 'Rechazar' : approval ? 'Aprobar' : 'Confirmar',
+      body: `<p class="transfer-review-value">${money(transfer.amount)}</p><div class="transfer-review-name">${esc(transfer.student_name)}</div><dl class="transfer-review-details"><div><dt>Cédula</dt><dd>${esc(transfer.identification)}</dd></div><div><dt>Comprobante</dt><dd>${esc(transfer.reference || 'Sin referencia')}</dd></div><div><dt>Banco</dt><dd>${esc(transfer.bank || 'No especificado')}</dd></div><div><dt>Fecha de transferencia</dt><dd>${this.transferDateLabel(transfer)}</dd></div><div><dt>Confirmación</dt><dd>${date(transfer.reviewed_at)}</dd></div><div><dt>Estado</dt><dd>${esc(this.transferStatus(transfer))}</dd></div></dl>${proof}<div class="alert alert-info">${effect}</div><form id="transfer-review-form"><label class="transfer-review-note">${rejected ? 'Motivo del rechazo' : 'Observación (opcional)'}<textarea name="note" class="form-input" maxlength="1000" ${rejected ? 'required' : ''}></textarea></label></form>`,
+    });
+    host.querySelector('#cash-op-save').onclick = async () => {
+      const form = host.querySelector('#transfer-review-form');
+      if (!form.reportValidity()) return;
+      const note = String(new FormData(form).get('note') || '').trim();
+      if (rejected && !note) { host.querySelector('#cash-op-error').textContent = 'Escribe el motivo del rechazo.'; return; }
+      const button = host.querySelector('#cash-op-save');
+      button.disabled = true;
+      button.textContent = 'Guardando...';
+      host.querySelectorAll('[data-close]').forEach(control => { control.disabled = true; });
+      try {
+        const review = approval ? ApiService.approveTransferVerification.bind(ApiService) : ApiService.reviewTransferVerification.bind(ApiService);
+        const result = await review(id, decision, note);
+        Object.assign(transfer, result.data.transfer);
+        host.querySelectorAll('[data-close]').forEach(control => { control.disabled = false; });
+        host.querySelector('[data-close]').click();
+        this.updateTransferList(rejected ? 'Transferencia rechazada.' : approval ? 'Transferencia aprobada.' : 'Transferencia confirmada.');
+        document.querySelector('#transfer-list .review-transfer')?.focus({ preventScroll: true });
+      } catch (error) {
+        button.disabled = false;
+        host.querySelectorAll('[data-close]').forEach(control => { control.disabled = false; });
+        button.textContent = rejected ? 'Rechazar' : approval ? 'Aprobar' : 'Confirmar';
+        host.querySelector('#cash-op-error').textContent = error.message;
+      }
+    };
   }
   openTransfer() {
     const options = this.pending

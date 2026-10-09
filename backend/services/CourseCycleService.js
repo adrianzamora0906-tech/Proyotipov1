@@ -198,6 +198,14 @@ function intensiveEndDate(startDate, vehicleType) {
 }
 
 class CourseCycleService {
+  static intensiveRotationInstructor(rotation, anchorDate, startDate, position = 1) {
+    if (!rotation.length || !anchorDate) return null;
+    const anchor = toDateString(anchorDate), start = toDateString(startDate);
+    const weeks = Math.floor((Date.parse(`${start}T12:00:00Z`) - Date.parse(`${anchor}T12:00:00Z`)) / (7 * 86400000));
+    if (!Number.isFinite(weeks)) return null;
+    const index = ((weeks + position - 1) % rotation.length + rotation.length) % rotation.length;
+    return rotation[index].instructor_id;
+  }
   static calendarLayout(cycle) {
     return { dates: cycleDates(cycle), slots: practicalSlots(cycle) };
   }
@@ -216,7 +224,7 @@ class CourseCycleService {
         `intensive-rotation:${branchId}:${vehicleType}`,
       ]);
       const program = (await client.query(`
-        SELECT p.id,p.course_id,GREATEST(p.capacity_per_instructor,1)::int capacity_per_instructor
+        SELECT p.id,p.course_id,p.intensive_rotation_anchor_date,GREATEST(p.capacity_per_instructor,1)::int capacity_per_instructor
         FROM branch_course_programs p
         JOIN courses c ON c.id=p.course_id AND c.active=TRUE
         WHERE p.branch_id=$1 AND p.vehicle_type=$2 AND p.intensive_enabled=TRUE
@@ -286,6 +294,33 @@ class CourseCycleService {
         return null;
       }
 
+      // Realign only empty future courses. Booked courses and explicit weekend
+      // overrides keep their published instructor and their existing history.
+      if (configuredRotation.length && program.intensive_rotation_anchor_date) {
+        const published = (await client.query(`SELECT r.id,r.cycle_id,r.instructor_id,r.start_date,r.position_order
+          FROM intensive_instructor_rotation_assignments r JOIN course_cycles cc ON cc.id=r.cycle_id
+          WHERE r.branch_id=$1 AND r.vehicle_type=$2 AND r.active=TRUE AND cc.active=TRUE
+            AND cc.deleted_at IS NULL AND cc.start_date>=CURRENT_DATE
+            AND NOT EXISTS(SELECT 1 FROM branch_course_weekend_overrides o
+              WHERE o.program_id=$3 AND o.start_date=r.start_date AND o.active=TRUE)
+          ORDER BY r.start_date,r.position_order FOR UPDATE OF r,cc`, [branchId,vehicleType,program.id])).rows;
+        for (const row of published) {
+          const expected = this.intensiveRotationInstructor(configuredRotation,program.intensive_rotation_anchor_date,row.start_date,Number(row.position_order));
+          if (!expected || String(expected) === String(row.instructor_id) || !pool.some(item => String(item.id) === String(expected))) continue;
+          const occupied = await client.query(`SELECT 1 FROM course_cycle_schedule_assignments WHERE cycle_id=$1 AND status='activo'
+            UNION ALL SELECT 1 FROM course_cycle_seat_reservations WHERE cycle_id=$1 AND status='activo'
+              AND (expires_at IS NULL OR expires_at>NOW()) LIMIT 1`, [row.cycle_id]);
+          if (occupied.rows.length) continue;
+          await client.query(`UPDATE intensive_instructor_rotation_assignments SET instructor_id=$2,updated_at=NOW() WHERE id=$1`,[row.id,expected]);
+          await client.query(`UPDATE course_cycle_instructors SET active=FALSE,updated_at=NOW() WHERE cycle_id=$1 AND role='practico' AND active=TRUE`,[row.cycle_id]);
+          await client.query(`INSERT INTO course_cycle_instructors(cycle_id,instructor_id,role,active) VALUES($1,$2,'practico',TRUE)
+            ON CONFLICT(cycle_id,instructor_id) DO UPDATE SET active=TRUE,updated_at=NOW()`,[row.cycle_id,expected]);
+          await client.query(`INSERT INTO audit_logs(user_id,role,branch_id,action,entity,entity_id,metadata)
+            VALUES($1,$2,$3,'INTENSIVE_ROTATION_REALIGNED','course_cycles',$4,$5::jsonb)`,
+          [user.id||null,user.role||null,branchId,row.cycle_id,JSON.stringify({previousInstructorId:row.instructor_id,instructorId:expected,startDate:toDateString(row.start_date),anchorDate:toDateString(program.intensive_rotation_anchor_date)})]);
+        }
+      }
+
       const slotCount = INTENSIVE_PRACTICAL_SLOTS[vehicleType].length;
       let startDate = nextSaturday(new Date());
       let previousInstructorId = null;
@@ -338,8 +373,9 @@ class CourseCycleService {
             ORDER BY start_date DESC,position_order DESC LIMIT 1
           `, [branchId, vehicleType, startDate, positionOrder])).rows[0]?.instructor_id;
           const lastIndex = pool.findIndex(item => String(item.id) === String(lastUsed));
-          const selected = forcedInstructorId
-            ? await findForcedWeekendInstructor(forcedInstructorId)
+          const datedInstructorId = this.intensiveRotationInstructor(configuredRotation,program.intensive_rotation_anchor_date,startDate,positionOrder);
+          const selected = forcedInstructorId || datedInstructorId
+            ? await findForcedWeekendInstructor(forcedInstructorId || datedInstructorId)
             : pool[(lastIndex + 1 + pool.length) % pool.length];
           if (!selected) throw createError(422, `El instructor configurado para ${startDate} ya no está habilitado`);
           const inserted = (await client.query(`
@@ -1829,7 +1865,7 @@ class CourseCycleService {
     }
   }
 
-  static async reserveSchedule(user, data = {}) {
+  static async reserveSchedule(user, data = {}, transactionClient = null) {
     const { studentId, schedulePlan } = data;
     const preferredInstructorId = data.preferredInstructorId || schedulePlan?.preferredInstructorId || null;
     const selections = Array.isArray(schedulePlan?.selections) ? schedulePlan.selections : [];
@@ -1891,9 +1927,9 @@ class CourseCycleService {
       throw createError(422, 'Selecciona el instructor que tomará el examen');
     }
 
-    const client = await db.getClient();
+    const client = transactionClient || await db.getClient();
     try {
-      await client.query('BEGIN');
+      if (!transactionClient) await client.query('BEGIN');
 
       const cycleResult = await client.query(`
         SELECT cc.*
@@ -2049,7 +2085,7 @@ class CourseCycleService {
         [enrollment.id,instructor.id,cycle.branch_id,selection.date,startTime,user.id])).rows[0];
         await client.query('INSERT INTO history(student_id,action) VALUES($1,$2)',[studentId,
           `Solo examen práctico asignado con ${instructor.first_name} ${instructor.last_name} el ${selection.date} a las ${startTime}`]);
-        await client.query('COMMIT');
+        if (!transactionClient) await client.query('COMMIT');
         return { assignments:[],examAppointment:appointment,instructor:{id:instructor.id,name:`${instructor.first_name} ${instructor.last_name}`} };
       }
       const capacityResult = await client.query(`
@@ -2442,7 +2478,7 @@ class CourseCycleService {
         SET status='convertido',converted_at=NOW(),updated_at=NOW()
         WHERE enrollment_id=$1 AND cycle_id=$2 AND status='activo'`,[enrollmentId,cycleId]);
 
-      await client.query('COMMIT');
+      if (!transactionClient) await client.query('COMMIT');
       return {
         assignments: inserted,
         instructor: instructorAssignment ? {
@@ -2451,13 +2487,13 @@ class CourseCycleService {
         } : null,
       };
     } catch (error) {
-      await client.query('ROLLBACK');
+      if (!transactionClient) await client.query('ROLLBACK');
       if (error.code === '23505') {
         throw createError(409, 'Este cupo acaba de ser ocupado por otra matrícula. Selecciona otro horario o instructor');
       }
       throw error;
     } finally {
-      client.release();
+      if (!transactionClient) client.release();
     }
   }
 }

@@ -34,6 +34,10 @@ router.post('/:id/branch-admin-attendance', requirePermission('STUDENT_UPDATE'),
 
 // GET /api/students/:id - Obtener estudiante por ID
 router.get('/:id', requirePermission('STUDENT_VIEW'), StudentController.getById);
+router.get('/:id/edit-context', requirePermission('STUDENT_UPDATE'), StudentController.editContext);
+router.get('/:id/edit-options', requirePermission('STUDENT_UPDATE'), StudentController.editOptions);
+router.post('/:id/edit-preview', requirePermission('STUDENT_UPDATE'), StudentController.previewEdit);
+router.put('/:id/record', requirePermission('STUDENT_UPDATE'), StudentController.saveEdit);
 
 // Genera una nueva clave temporal; la clave se devuelve una sola vez.
 router.post('/:id/reset-access', requirePermission('STUDENT_UPDATE'), StudentController.resetAccess);

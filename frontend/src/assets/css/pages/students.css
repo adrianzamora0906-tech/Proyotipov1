@@ -524,6 +524,46 @@
   position: relative;
 }
 
+.student-record-edit-review-dialog table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.student-record-edit-review-dialog th,
+.student-record-edit-review-dialog td {
+  padding: 8px;
+  border-bottom: 1px solid #ddd;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+@media (max-width: 600px) {
+  .student-record-edit-review-dialog table,
+  .student-record-edit-review-dialog tbody,
+  .student-record-edit-review-dialog tbody tr,
+  .student-record-edit-review-dialog tbody th,
+  .student-record-edit-review-dialog tbody td {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .student-record-edit-review-dialog thead { display: none; }
+  .student-record-edit-review-dialog tbody tr { padding: 8px 0; border-bottom: 1px solid #ddd; }
+  .student-record-edit-review-dialog tbody th,
+  .student-record-edit-review-dialog tbody td { padding: 5px 0; border: 0; }
+  .student-record-edit-review-dialog tbody td::before {
+    display: block;
+    font-size: 12px;
+    color: #667085;
+  }
+  .student-record-edit-review-dialog tbody td:nth-child(2)::before { content: 'Antes'; }
+  .student-record-edit-review-dialog tbody td:nth-child(3)::before { content: 'Ahora'; }
+}
+
 /* La captura QR se abre sobre el modal de inscripción sin desmontarlo. */
 .mobile-registration-capture-overlay {
   z-index: 11000 !important;

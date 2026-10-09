@@ -176,9 +176,9 @@ class PaymentService {
         p.final_amount AS "finalAmount",
         p.created_at AS "createdAt",
         COALESCE((SELECT SUM(tv.amount) FROM transfer_payment_verifications tv
-          WHERE tv.student_id=s.id AND tv.service_transaction_id IS NULL AND tv.status='PENDING'),0) AS "pendingVerification",
+          WHERE tv.student_id=s.id AND tv.service_transaction_id IS NULL AND tv.status IN ('PENDING','AWAITING_APPROVAL')),0) AS "pendingVerification",
         (SELECT tv.reference FROM transfer_payment_verifications tv
-          WHERE tv.student_id=s.id AND tv.service_transaction_id IS NULL AND tv.status='PENDING'
+          WHERE tv.student_id=s.id AND tv.service_transaction_id IS NULL AND tv.status IN ('PENDING','AWAITING_APPROVAL')
           ORDER BY tv.created_at DESC LIMIT 1) AS "pendingTransferReference",
         COALESCE((
           SELECT SUM(pd.amount) FROM payment_details pd
@@ -224,9 +224,9 @@ class PaymentService {
         sc.name AS course,st.amount AS balance,st.amount AS total,
         st.amount AS "finalAmount",st.created_at AS "createdAt",0::numeric AS paid,
         COALESCE((SELECT SUM(tv.amount) FROM transfer_payment_verifications tv
-          WHERE tv.service_transaction_id=st.id AND tv.status='PENDING'),0) AS "pendingVerification",
+          WHERE tv.service_transaction_id=st.id AND tv.status IN ('PENDING','AWAITING_APPROVAL')),0) AS "pendingVerification",
         (SELECT tv.reference FROM transfer_payment_verifications tv
-          WHERE tv.service_transaction_id=st.id AND tv.status='PENDING'
+          WHERE tv.service_transaction_id=st.id AND tv.status IN ('PENDING','AWAITING_APPROVAL')
           ORDER BY tv.created_at DESC LIMIT 1) AS "pendingTransferReference",
         'SERVICE' AS "paymentType"
       FROM service_transactions st

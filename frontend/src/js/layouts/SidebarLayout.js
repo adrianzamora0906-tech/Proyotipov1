@@ -213,7 +213,7 @@ class SidebarLayout {
               ` : ''}
             `}
 
-            ${!isAdminSystem && !isGeneralManager && !isCashOnly && user?.permissions?.includes('TRANSFER_VERIFY') ? `<a href="/cash/operations" class="nav-item ${currentPath === '/cash/operations' ? 'active' : ''}">
+            ${!isAdminSystem && !isGeneralManager && !isCashOnly && (user?.permissions?.includes('TRANSFER_VERIFY') || user?.permissions?.includes('TRANSFER_APPROVE')) ? `<a href="/cash/operations" class="nav-item ${currentPath === '/cash/operations' ? 'active' : ''}">
               <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"></path><circle cx="18" cy="18" r="3"></circle></svg><span class="nav-text">Confirmar transferencias</span>
             </a>` : ''}
 

@@ -18,7 +18,7 @@ class CashOperationsService {
   }
 
   static async transferBranch(actor, authorization, client = db) {
-    return await this.isCentralTransferVerifier(actor.id, client)
+    return authorization?.permissions?.includes('TRANSFER_APPROVE') || await this.isCentralTransferVerifier(actor.id, client)
       ? null
       : this.branch(actor, authorization);
   }
@@ -28,12 +28,13 @@ class CashOperationsService {
     const branchId = centralVerifier ? null : this.branch(actor, authorization);
     if (!branchId && !authorization?.global && !centralVerifier) throw createError(422, 'Sucursal requerida');
     const params = [authorization?.global ? null : branchId];
+    const transferParams = authorization?.permissions?.includes('TRANSFER_APPROVE') ? [null] : params;
     const [transfers, directTransfers, corrections, alerts] = await Promise.all([
       db.query(`SELECT tv.*,TRIM(CONCAT(s.first_name,' ',s.last_name)) student_name,s.identification,
         TRIM(CONCAT(u.first_name,' ',u.last_name)) created_by_name
         FROM transfer_payment_verifications tv JOIN students s ON s.status <> 'inhabilitado' AND s.id=tv.student_id
         JOIN users u ON u.id=tv.created_by WHERE ($1::uuid IS NULL OR tv.branch_id=$1)
-        ORDER BY tv.created_at DESC LIMIT 100`, params),
+        ORDER BY tv.created_at DESC LIMIT 100`, transferParams),
       db.query(`SELECT pd.id,pd.id payment_detail_id,e.branch_id,s.id student_id,
         pd.amount,'Transferencia aplicada' bank,pd.reference,pd.created_at,pd.created_at reviewed_at,
         'CONFIRMED' status,TRIM(CONCAT(s.first_name,' ',s.last_name)) student_name,
@@ -47,7 +48,7 @@ class CashOperationsService {
           AND NOT EXISTS (SELECT 1 FROM transfer_payment_verifications tv
             WHERE tv.status='CONFIRMED' AND tv.student_id=s.id
               AND LOWER(tv.reference)=LOWER(COALESCE(pd.reference,'')))
-        ORDER BY pd.created_at DESC LIMIT 100`, params),
+        ORDER BY pd.created_at DESC LIMIT 100`, transferParams),
       db.query(`SELECT cr.*,TRIM(CONCAT(s.first_name,' ',s.last_name)) student_name,
         s.identification FROM payment_correction_requests cr
         JOIN payment_details pd ON pd.id=cr.payment_detail_id JOIN payments p ON p.id=pd.payment_id
@@ -73,11 +74,11 @@ class CashOperationsService {
     return { transfers: allTransfers, corrections: corrections.rows, alerts: alerts.rows };
   }
 
-  static async createTransfer(data, actor, authorization, requestContext) {
+  static async createTransfer(data, actor, authorization, requestContext, client = db) {
     let branchId = authorization?.operationalCoverage?.operational_branch_id || this.branch(actor, authorization);
     let service = null;
     if (data.serviceTransactionId) {
-      service = (await db.query(`SELECT st.amount,st.student_id,st.branch_id FROM service_transactions st
+      service = (await client.query(`SELECT st.amount,st.student_id,st.branch_id FROM service_transactions st
         JOIN students s ON s.id=st.student_id AND s.status<>'inhabilitado'
         JOIN branches b ON b.id=st.branch_id LEFT JOIN cities bc ON bc.id=b.city_id
         LEFT JOIN branches collector ON collector.id=$4::uuid LEFT JOIN cities cc ON cc.id=collector.city_id
@@ -92,27 +93,27 @@ class CashOperationsService {
       data.studentId = service.student_id;
       branchId = service.branch_id;
     } else if (!data.studentId && data.cedula) {
-      const student = (await db.query(`SELECT s.id FROM students s JOIN enrollments e ON e.student_id=s.id AND e.status='activo'
+      const student = (await client.query(`SELECT s.id FROM students s JOIN enrollments e ON e.student_id=s.id AND e.status='activo'
           WHERE s.identification=$1 AND ($2::boolean=TRUE OR e.branch_id=$3) ORDER BY e.created_at DESC LIMIT 1`,[data.cedula,Boolean(authorization?.global),branchId])).rows[0];
       data.studentId=student?.id;
     }
     if (!data.studentId || !data.amount || !data.reference || !data.transferDate) throw createError(422, 'Complete estudiante, monto, número de transferencia y fecha');
     if (data.serviceTransactionId) {
       if(!service||Number(data.amount)!==Number(service.amount)) throw createError(422,'El valor no coincide con el servicio pendiente');
-      const pending=(await db.query("SELECT COALESCE(SUM(amount),0)::numeric total FROM transfer_payment_verifications WHERE service_transaction_id=$1 AND status='PENDING'",[data.serviceTransactionId])).rows[0];
+      const pending=(await client.query("SELECT COALESCE(SUM(amount),0)::numeric total FROM transfer_payment_verifications WHERE service_transaction_id=$1 AND status IN ('PENDING','AWAITING_APPROVAL')",[data.serviceTransactionId])).rows[0];
       if(Number(pending.total)>0) throw createError(409,'Este servicio ya tiene una transferencia por confirmar');
     } else {
-      const payment=(await db.query(`SELECT p.balance FROM payments p JOIN enrollments e ON e.id=p.enrollment_id
+      const payment=(await client.query(`SELECT p.balance FROM payments p JOIN enrollments e ON e.id=p.enrollment_id
         WHERE e.student_id=$1 AND e.status='activo' AND p.status<>'anulado' ORDER BY p.created_at DESC LIMIT 1`,[data.studentId])).rows[0];
-      const pending=(await db.query("SELECT COALESCE(SUM(amount),0)::numeric total FROM transfer_payment_verifications WHERE student_id=$1 AND service_transaction_id IS NULL AND status='PENDING'",[data.studentId])).rows[0];
+      const pending=(await client.query("SELECT COALESCE(SUM(amount),0)::numeric total FROM transfer_payment_verifications WHERE student_id=$1 AND service_transaction_id IS NULL AND status IN ('PENDING','AWAITING_APPROVAL')",[data.studentId])).rows[0];
       if(!payment||Number(data.amount)+Number(pending.total)>Number(payment.balance)) throw createError(422,'El monto supera el saldo disponible después de las transferencias por confirmar');
     }
     try {
-      const result = await db.query(`INSERT INTO transfer_payment_verifications
+      const result = await client.query(`INSERT INTO transfer_payment_verifications
         (branch_id,student_id,service_transaction_id,amount,bank,reference,transfer_date,proof_url,created_by)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
         [branchId,data.studentId,data.serviceTransactionId||null,Number(data.amount),String(data.bank||'No especificado').trim(),String(data.reference).trim(),data.transferDate,data.proofUrl||null,actor.id]);
-      await AuditService.log({userId:actor.id,branchId,role:actor.role,action:'TRANSFER_VERIFICATION_CREATED',module:'FINANCIERO',entityType:'TRANSFER_PAYMENT_VERIFICATION',entityId:result.rows[0].id,description:'Transferencia registrada para verificación',newValues:{amount:Number(data.amount),bank:data.bank,reference:data.reference},requestContext});
+      await AuditService.log({userId:actor.id,branchId,role:actor.role,action:'TRANSFER_VERIFICATION_CREATED',module:'FINANCIERO',entityType:'TRANSFER_PAYMENT_VERIFICATION',entityId:result.rows[0].id,description:'Transferencia registrada para verificación',newValues:{amount:Number(data.amount),bank:data.bank,reference:data.reference},requestContext},client);
       return result.rows[0];
     } catch (error) {
       if (error.code==='23505') throw createError(409,'La referencia de transferencia ya fue registrada');
@@ -150,26 +151,40 @@ class CashOperationsService {
     sheet.mergeCells('A2:H2');sheet.getCell('A2').value=`Fecha del reporte: ${reportDate}`;sheet.getCell('A2').alignment={horizontal:'center'};
     sheet.columns=[{key:'date',width:15},{key:'student',width:34},{key:'id',width:16},{key:'bank',width:20},{key:'reference',width:24},{key:'amount',width:14},{key:'status',width:16},{key:'registered',width:25}];
     const header=sheet.getRow(4);header.values=['Fecha','Estudiante','Cédula','Banco','N.º transferencia','Valor','Estado','Registrado por'];header.font={bold:true,color:{argb:'FFFFFFFF'}};header.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF4F46E5'}};
-    result.rows.forEach(row=>sheet.addRow({date:String(row.transfer_date).slice(0,10),student:row.student_name,id:row.identification,bank:row.bank,reference:row.reference,amount:Number(row.amount),status:row.status==='PENDING'?'POR CONFIRMAR':row.status==='CONFIRMED'?'CONFIRMADA':'RECHAZADA',registered:row.registered_by}));
+    result.rows.forEach(row=>sheet.addRow({date:String(row.transfer_date).slice(0,10),student:row.student_name,id:row.identification,bank:row.bank,reference:row.reference,amount:Number(row.amount),status:({PENDING:'POR CONFIRMAR',AWAITING_APPROVAL:'POR APROBAR',CONFIRMED:'APLICADA',REJECTED:'RECHAZADA'})[row.status],registered:row.registered_by}));
     sheet.getColumn('amount').numFmt='$0.00';sheet.autoFilter={from:'A4',to:'H4'};sheet.views=[{state:'frozen',ySplit:4}];
     return {buffer:await workbook.xlsx.writeBuffer(),filename:`transferencias-${reportDate}.xlsx`};
   }
 
   static async reviewTransfer(id, decision, note, actor, authorization, requestContext) {
+    const approval = authorization?.transferApproval === true;
+    const permission = approval ? 'TRANSFER_APPROVE' : 'TRANSFER_VERIFY';
+    if (!authorization?.permissions?.includes(permission)) throw createError(403, 'No tienes permiso para esta accion');
+    const acceptedDecision = approval ? 'APPROVED' : 'CONFIRMED';
+    if (![acceptedDecision, 'REJECTED'].includes(decision)) throw createError(422, 'Decision de transferencia invalida');
+    const expectedStatus = approval ? 'AWAITING_APPROVAL' : 'PENDING';
     const client = await db.getClient();
     try {
       await client.query('BEGIN');
       const branchId = await this.transferBranch(actor, authorization, client);
+      const stageCondition = approval
+        ? "(tv.status=$3 OR (tv.status='CONFIRMED' AND tv.approved_at IS NULL))"
+        : 'tv.status=$3';
       const row=(await client.query(`SELECT tv.*,s.identification FROM transfer_payment_verifications tv
         JOIN students s ON s.status <> 'inhabilitado' AND s.id=tv.student_id WHERE tv.id=$1
-          AND ($2::uuid IS NULL OR tv.branch_id=$2) AND tv.status='PENDING' FOR UPDATE OF tv`,[id,branchId])).rows[0];
+          AND ($2::uuid IS NULL OR tv.branch_id=$2) AND ${stageCondition} FOR UPDATE OF tv`,[id,branchId,expectedStatus])).rows[0];
       if(!row) throw createError(404,'Transferencia pendiente no encontrada');
-      const confirmed=String(decision).toUpperCase()==='CONFIRMED';
+      if (approval && String(row.reviewed_by) === String(actor.id)) throw createError(403, 'La aprobacion requiere una persona distinta de quien confirmo');
+      const confirmed = decision === acceptedDecision;
+      const alreadyApplied = row.status === 'CONFIRMED';
+      if (alreadyApplied && !confirmed) throw createError(409, 'Este pago ya fue aplicado. Para rechazarlo debes solicitar su anulacion');
+      const status = confirmed ? (approval ? 'CONFIRMED' : 'AWAITING_APPROVAL') : 'REJECTED';
       let paymentResult=null;
-      if(confirmed) paymentResult=await PaymentService.registerPayment({cedula:row.identification,serviceTransactionId:row.service_transaction_id,amount:Number(row.amount),method:'transferencia',reference:row.reference,cashierUserId:actor.id,cashierRole:actor.role,collectionBranchId:row.branch_id,globalAccess:branchId===null||Boolean(authorization?.global),requestContext},client);
-      const updated=(await client.query(`UPDATE transfer_payment_verifications SET status=$2,reviewed_by=$3,review_note=$4,reviewed_at=NOW() WHERE id=$1 AND status='PENDING' RETURNING *`,[id,confirmed?'CONFIRMED':'REJECTED',actor.id,note||null])).rows[0];
+      if(confirmed && approval && !alreadyApplied) paymentResult=await PaymentService.registerPayment({cedula:row.identification,serviceTransactionId:row.service_transaction_id,amount:Number(row.amount),method:'transferencia',reference:row.reference,cashierUserId:actor.id,cashierRole:actor.role,collectionBranchId:row.branch_id,globalAccess:branchId===null||Boolean(authorization?.global),requestContext},client);
+      const reviewColumns = approval ? 'approved_by=$3,approval_note=$4,approved_at=NOW()' : 'reviewed_by=$3,review_note=$4,reviewed_at=NOW()';
+      const updated=(await client.query(`UPDATE transfer_payment_verifications SET status=$2,${reviewColumns} WHERE id=$1 AND status=$5 AND approved_at IS NULL RETURNING *`,[id,status,actor.id,note||null,row.status || expectedStatus])).rows[0];
       if(!updated) throw createError(409,'La transferencia ya fue procesada');
-      await AuditService.log({userId:actor.id,branchId:row.branch_id,role:actor.role,action:confirmed?'TRANSFER_CONFIRMED':'TRANSFER_REJECTED',module:'FINANCIERO',entityType:'TRANSFER_PAYMENT_VERIFICATION',entityId:id,description:confirmed?'Transferencia confirmada y aplicada al saldo':'Transferencia rechazada',newValues:{status:confirmed?'CONFIRMED':'REJECTED',note:note||null},requestContext},client);
+      await AuditService.log({userId:actor.id,branchId:row.branch_id,role:actor.role,action:confirmed?(approval?'TRANSFER_APPROVED':'TRANSFER_CONFIRMED'):'TRANSFER_REJECTED',module:'FINANCIERO',entityType:'TRANSFER_PAYMENT_VERIFICATION',entityId:id,description:confirmed?(approval?'Transferencia aprobada y aplicada al saldo':'Transferencia confirmada pendiente de aprobacion'):'Transferencia rechazada',newValues:{status,note:note||null},metadata:{stage:approval?'approval':'confirmation'},requestContext},client);
       await client.query('COMMIT');
       return {transfer:updated,payment:paymentResult};
     } catch(error){await client.query('ROLLBACK');throw error;} finally{client.release();}

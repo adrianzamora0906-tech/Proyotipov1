@@ -98,6 +98,22 @@ class ApiService {
     return apiClient.put(`/students/${id}`, data);
   }
 
+  static async getStudentEditContext(id) {
+    return apiClient.get(`/students/${encodeURIComponent(id)}/edit-context`);
+  }
+
+  static async getStudentEditOptions(id,params) {
+    return apiClient.get(`/students/${encodeURIComponent(id)}/edit-options?${new URLSearchParams(params)}`);
+  }
+
+  static async previewStudentEdit(id,data) {
+    return apiClient.post(`/students/${encodeURIComponent(id)}/edit-preview`,data);
+  }
+
+  static async saveStudentEdit(id,data) {
+    return apiClient.put(`/students/${encodeURIComponent(id)}/record`,data);
+  }
+
   static async updateStudentStatus(id, status) {
     return apiClient.put(`/students/${id}/status`, { status });
   }
@@ -220,6 +236,10 @@ class ApiService {
 
   static async reviewTransferVerification(id, decision, note = '') {
     return apiClient.put(`/payments/transfer-verifications/${id}/review`, { decision, note });
+  }
+
+  static async approveTransferVerification(id, decision, note = '') {
+    return apiClient.put(`/payments/transfer-verifications/${id}/approve`, { decision, note });
   }
 
   static async exportTransferVerifications(date = '') {

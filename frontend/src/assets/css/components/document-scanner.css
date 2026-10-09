@@ -1,0 +1,12 @@
+.document-scanner { width: min(960px, 96vw); max-height: 94dvh; box-sizing: border-box; padding: 16px; border: 1px solid #cbd5d1; border-radius: 8px; background: #fff; color: #18231f; overflow: auto; }
+.document-scanner::backdrop { background: #14221dcc; }
+.document-scanner h2 { margin: 0; font-size: 20px; }
+.document-scanner [role=status]:empty { display: none; }
+.scanner-images { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; margin: 16px 0; }
+.scanner-images canvas { display: block; width: 100%; height: auto; }
+.scanner-images > canvas { touch-action: none; cursor: crosshair; }
+.scanner-result span { display: block; margin-bottom: 8px; font-size: 14px; }
+.document-scanner footer { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.document-scanner button { min-height: 44px; padding: 8px 14px; border: 1px solid #b8c7c0; border-radius: 6px; background: #f3f6f4; color: #18231f; font: inherit; }
+.document-scanner [data-accept] { background: #08785d; color: #fff; border-color: #08785d; }
+@media (max-width: 600px) { .scanner-images { grid-template-columns: 1fr; } .scanner-images canvas { max-height: none; } .document-scanner footer { position: sticky; bottom: -16px; padding: 12px 0; background: #fff; } }

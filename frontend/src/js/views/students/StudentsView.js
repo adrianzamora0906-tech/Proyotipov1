@@ -66,13 +66,15 @@ class StudentsView extends Component {
     const summaryParams = { ...listParams };
     delete summaryParams.status;
     delete summaryParams.registration_type;
-    const [students, branches, reservations, summaryStudents, summaryReservations] = await Promise.all([
+    const [students, branches, reservations, summaryStudents, summaryReservations, disabledStudents] = await Promise.all([
       StudentService.getAllStudents(listParams),
       StudentService.getBranches(),
       StudentService.getActiveReservations(listParams),
       StudentService.getAllStudents(summaryParams),
       selectedStatus ? StudentService.getActiveReservations(summaryParams) : Promise.resolve(null),
+      this.getDisabledStudents(summaryParams).catch(() => null),
     ]);
+    this.disabledStudentCount = disabledStudents?.length ?? null;
     const allSummaryStudents = summaryStudents || students;
     const allSummaryReservations = summaryReservations || reservations;
     this.visibleReservations = reservations;
@@ -318,12 +320,14 @@ class StudentsView extends Component {
       const summaryParams = { ...params };
       delete summaryParams.status;
       delete summaryParams.registration_type;
-      const [students, reservations, summaryStudents, summaryReservations] = await Promise.all([
+      const [students, reservations, summaryStudents, summaryReservations, disabledStudents] = await Promise.all([
         prefetched.students ? Promise.resolve(prefetched.students) : StudentService.getAllStudents(params),
         prefetched.reservations ? Promise.resolve(prefetched.reservations) : StudentService.getActiveReservations(params),
         StudentService.getAllStudents(summaryParams),
         params.status ? StudentService.getActiveReservations(summaryParams) : Promise.resolve(null),
+        this.getDisabledStudents(summaryParams).catch(() => null),
       ]);
+      this.disabledStudentCount = disabledStudents?.length ?? null;
       const currentBranch = authService.getCurrentUser()?.branch || '';
       const orderedStudents = [...students].sort((first, second) => {
         if (this.groupBy === 'instructor') {
@@ -465,6 +469,7 @@ class StudentsView extends Component {
 
   bindSummaryCardEvents(studentFilterForm, applyStudentFilters = null) {
     if (!studentFilterForm) return;
+    document.querySelector('[data-open-disabled-students]')?.addEventListener('click', () => this.openDisabledStudentsModal(studentFilterForm));
     document.querySelectorAll('.student-summary-card[data-status]').forEach(card => {
       card.addEventListener('click', async () => {
         studentFilterForm.elements.status.value = card.dataset.status || '';
@@ -480,6 +485,81 @@ class StudentsView extends Component {
         await this.refreshStudentTable(this.getStudentListParams(data), 1);
       });
     });
+  }
+
+  async getDisabledStudents(params) {
+    const filters = { ...params, status: 'inhabilitado' };
+    delete filters.registration_type;
+    const response = await ApiService.getStudents(filters);
+    if (!response.success || !Array.isArray(response.data)) throw new Error('No se pudieron consultar los estudiantes inhabilitados.');
+    return response.data.map(student => StudentService.normalizeStudent(student));
+  }
+
+  async openDisabledStudentsModal(form) {
+    if (this.disabledStudentsDialog?.isConnected) return;
+    const opener = document.activeElement;
+    const dialog = document.createElement('dialog');
+    this.disabledStudentsDialog = dialog;
+    dialog.className = 'disabled-students-dialog';
+    dialog.setAttribute('aria-labelledby', 'disabled-students-title');
+    dialog.innerHTML = `<div class="modal-header"><h2 id="disabled-students-title" class="modal-title">Estudiantes inhabilitados</h2><button type="button" class="modal-close" aria-label="Cerrar" data-close>&times;</button></div>
+      <div class="modal-body"><label>Buscar por nombre o c&eacute;dula<input type="search" class="form-input" data-search></label>
+      <p role="status" aria-live="polite">Cargando estudiantes...</p><div data-results></div></div>
+      <div class="modal-footer"><button type="button" class="btn btn-secondary" data-previous>Anterior</button><span data-page></span><button type="button" class="btn btn-secondary" data-next>Siguiente</button></div>`;
+    document.body.append(dialog);
+    const close = () => dialog.close();
+    dialog.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
+    });
+    dialog.querySelector('[data-close]').onclick = close;
+    dialog.addEventListener('click', event => {
+      if (event.target !== dialog) return;
+      const rect = dialog.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close();
+    });
+    dialog.addEventListener('close', () => { dialog.remove(); opener?.focus(); });
+    dialog.showModal();
+    const params = this.getStudentListParams(Object.fromEntries(new FormData(form)));
+    const search = dialog.querySelector('[data-search]');
+    search.value = params.search || '';
+    delete params.search;
+    let students = [], page = 1;
+    const render = () => {
+      const term = search.value.trim().toLocaleLowerCase('es');
+      const visible = students.filter(student => `${student.firstName} ${student.lastName} ${student.cedula}`.toLocaleLowerCase('es').includes(term));
+      const pages = Math.max(1, Math.ceil(visible.length / 10));
+      page = Math.min(page, pages);
+      dialog.querySelector('[role="status"]').textContent = `${visible.length} ${visible.length === 1 ? 'estudiante inhabilitado' : 'estudiantes inhabilitados'}`;
+      dialog.querySelector('[data-results]').innerHTML = visible.length ? `<div class="disabled-students-table"><table><thead><tr><th>Estudiante</th><th>C&eacute;dula</th><th>Sucursal</th><th></th></tr></thead><tbody>${visible.slice((page - 1) * 10, page * 10).map(student => `<tr><td>${escapeHtml(`${student.firstName} ${student.lastName}`)}</td><td>${escapeHtml(student.cedula)}</td><td>${escapeHtml(student.branch || 'Sin sucursal')}</td><td><a class="btn btn-secondary" href="/student-profile/${encodeURIComponent(student.id)}" data-profile>Ver expediente</a></td></tr>`).join('')}</tbody></table></div>` : '<p>No hay estudiantes inhabilitados con estos filtros.</p>';
+      dialog.querySelector('[data-page]').textContent = `${page} de ${pages}`;
+      dialog.querySelector('[data-previous]').disabled = page <= 1;
+      dialog.querySelector('[data-next]').disabled = page >= pages;
+      dialog.querySelectorAll('[data-profile]').forEach(link => link.onclick = event => {
+        if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        event.preventDefault(); close();
+        window.history.pushState(null, null, link.getAttribute('href'));
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+    };
+    search.oninput = () => { page = 1; render(); };
+    dialog.querySelector('[data-previous]').onclick = () => { page--; render(); };
+    dialog.querySelector('[data-next]').onclick = () => { page++; render(); };
+    dialog.querySelector('[data-previous]').disabled = true;
+    dialog.querySelector('[data-next]').disabled = true;
+    search.disabled = true;
+    try {
+      students = await this.getDisabledStudents(params);
+      if (!dialog.isConnected) return;
+      render(); search.disabled = false; search.focus();
+    } catch (error) {
+      if (dialog.isConnected) {
+        dialog.querySelector('[role="status"]').textContent = error.message || 'No se pudo cargar el listado.';
+        const retry = document.createElement('button');
+        retry.type = 'button'; retry.className = 'btn btn-secondary'; retry.textContent = 'Reintentar';
+        retry.onclick = () => { dialog.close(); dialog.remove(); this.openDisabledStudentsModal(form); };
+        dialog.querySelector('[data-results]').append(retry);
+      }
+    }
   }
 
   renderRegistrationTabs(students = [], activeType = 'REGULAR') {
@@ -2741,7 +2821,7 @@ class StudentsView extends Component {
     modal.style.display = '';
     document.body.style.overflow = 'hidden';
     this.goToModalStep(1);
-    this.restoreSessionModalBranch().catch(error => console.error('No se pudo restaurar la sucursal del registro:', error));
+    if (!this.activatingReservation) this.restoreSessionModalBranch().catch(error => console.error('No se pudo restaurar la sucursal del registro:', error));
     this.syncScheduleOptions();
     modal.querySelector('[name="province"]')?.focus();
   }
@@ -2749,7 +2829,7 @@ class StudentsView extends Component {
   async restoreSessionModalBranch() {
     const form = document.getElementById('student-modal-form');
     const catalog = this.modalLocationCatalog;
-    if (!form || !catalog || this.studentModalScheduleContext) return;
+    if (!form || !catalog || this.studentModalScheduleContext || this.activatingReservation) return;
     const sessionBranchId = String(authService.getEffectiveBranchId() || '');
     const sessionBranch = catalog.branches.find(branch => String(branch.id) === sessionBranchId);
     const sessionCity = sessionBranch
@@ -2865,20 +2945,37 @@ class StudentsView extends Component {
       this.renderModalReferredInstructorOptions();
     }
     const instructor = form.elements.preferredInstructorId;
+    const reservedPlan = draft.schedulePlan || {};
+    const reservedDate = String(reservedPlan.selections?.[0]?.date || reservation.start_date || '').slice(0, 10);
+    const weekend = [0, 6].includes(new Date(`${reservedDate}T12:00:00`).getDay());
+    const modality = reservation.modality || reservedPlan.selections?.[0]?.modality || (weekend ? 'intensivo' : 'normal');
+    const modalityInput = document.getElementById('selected-enrollment-modality');
+    if (modalityInput) modalityInput.value = modality;
     if (instructor && [...instructor.options].some(item => item.value === reservation.instructor_id)) {
       instructor.value = reservation.instructor_id;
       this.scheduleInstructorFilterId = reservation.instructor_id;
       await this.reloadModalSchedules(reservation.branch_id, reservation.instructor_id, null, {
         reservationId: reservation.id,
+        practicalCycleId: reservation.cycle_id,
       });
     }
+    const refreshedModality = document.getElementById('selected-enrollment-modality');
+    if (refreshedModality) refreshedModality.value = modality;
+    document.querySelectorAll('#student-schedule-calendar [data-modality].enrollment-modality-button').forEach(button => {
+      const selected = button.dataset.modality === modality;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+    this.syncScheduleOptions();
     this.selectReservedSchedule(reservation);
     if(draft.theorySchedule){const theory=form.querySelector(`[name="theorySchedule"][value="${draft.theorySchedule}"]`);if(theory)theory.checked=true;}
-    this.syncScheduleOptions();
   }
 
   selectReservedSchedule(reservation) {
-    const normalizeTime = value => String(value || '').replace(/\s/g, '').slice(0, 11);
+    const normalizeTime = value => {
+      const times = String(value || '').match(/\d{1,2}:\d{2}(?::\d{2})?/g) || [];
+      return times.map(time => time.split(':').slice(0, 2).map(part => part.padStart(2, '0')).join(':')).join('-');
+    };
     const reservationStart = reservation.start_time || reservation.reserved_start_time || '';
     const reservationEnd = reservation.end_time || reservation.reserved_end_time || '';
     const expectedTime = normalizeTime(`${reservationStart} - ${reservationEnd}`);
@@ -2886,22 +2983,25 @@ class StudentsView extends Component {
     document.querySelectorAll('.schedule-option.selected, .schedule-option.reservation-activation-slot').forEach(cell => {
       cell.classList.remove('selected', 'reservation-activation-slot');
     });
-    const cells = [...document.querySelectorAll('.schedule-option')].filter(cell => {
+    const cells = [...document.querySelectorAll('#student-schedule-calendar .schedule-option')].filter(cell => {
       let payload = {};
       try { payload = JSON.parse(cell.dataset.schedule || '{}'); } catch (error) { /* dato inválido */ }
       if(String(payload.cycleId||'')!==String(reservation.cycle_id))return false;
       const cellTime = normalizeTime(cell.dataset.time || payload.time);
-      if(reservedSelections.length)return reservedSelections.some(selection=>String(selection.date)===String(payload.date)&&normalizeTime(selection.time)===cellTime);
+      if(reservedSelections.length)return reservedSelections.some(selection=>String(selection.date).slice(0,10)===String(payload.date).slice(0,10)&&normalizeTime(selection.time)===cellTime);
       return Boolean(expectedTime) && cellTime === expectedTime;
     });
-    if (!cells.length) return;
+    if (!cells.length) {
+      this.showModalAlert('error', 'No se pudo recuperar el horario reservado. Vuelve a abrir la reserva antes de continuar.');
+      return;
+    }
     const calendar = cells[0].closest('.enrollment-calendar');
     const cycleSet = calendar?.closest('.enrollment-cycle-set');
     if (cycleSet) {
       const calendars = [...cycleSet.querySelectorAll('.enrollment-calendar')];
       const reservedCycleIndex = calendars.indexOf(calendar);
       if (reservedCycleIndex >= 0) {
-        cycleSet.dataset.activeCycleIndex = String(reservedCycleIndex);
+        cycleSet.dataset.activeCycleIndex = String(calendar.dataset.cycleIndex ?? reservedCycleIndex);
         calendars.forEach((item, index) => { item.style.display = index === reservedCycleIndex ? 'block' : 'none'; });
       }
     }
@@ -2909,6 +3009,13 @@ class StudentsView extends Component {
       cell.disabled = false;
       cell.classList.remove('disabled');
       cell.classList.add('selected', 'reservation-activation-slot');
+      cell.setAttribute('aria-disabled', 'false');
+      cell.setAttribute('aria-hidden', 'false');
+    });
+    calendar.dataset.rotationEnabled = String(Boolean(reservation.draft_data?.schedulePlan?.rotation));
+    calendar.querySelectorAll('.schedule-rotation-toggle').forEach(toggle => {
+      toggle.classList.toggle('active', calendar.dataset.rotationEnabled === 'true');
+      toggle.setAttribute('aria-pressed', calendar.dataset.rotationEnabled);
     });
     this.updateCalendarWindow(calendar);
     this.storeSchedulePlan(calendar);
@@ -3379,6 +3486,9 @@ class StudentsView extends Component {
         ? ''
         : 'Primero selecciona si el estudiante tomara carro o moto.';
     }
+    const selectedCalendar = [...document.querySelectorAll('.enrollment-calendar')]
+      .find(calendar => calendar.style.display !== 'none' && calendar.querySelector('.schedule-option.selected'));
+    if (selectedCalendar) this.storeSchedulePlan(selectedCalendar);
     this.updateScheduleSelection();
   }
 
@@ -5094,6 +5204,10 @@ class StudentsView extends Component {
       <button type="button" class="student-summary-card student-summary-card--reservations ${activeStatus === 'reservado' ? 'is-active' : ''}" data-status="reservado" aria-pressed="${activeStatus === 'reservado'}">
         <span class="student-summary-icon">R</span>
         <div><strong>${reservations.length}</strong><span>Cupos reservados</span></div>
+      </button>
+      <button type="button" class="student-summary-card student-summary-card--disabled" data-open-disabled-students aria-haspopup="dialog">
+        <span class="student-summary-icon" aria-hidden="true">!</span>
+        <div><strong>${this.disabledStudentCount ?? '-'}</strong><span>Inhabilitados</span></div>
       </button>`;
   }
 
@@ -5212,6 +5326,8 @@ class StudentsView extends Component {
   }
 
   cleanup() {
+    this.disabledStudentsDialog?.close();
+    this.disabledStudentsDialog?.remove();
     // Cerrar el modal de estudiantes si está abierto
     const modal = document.getElementById('student-modal-overlay');
     if (modal && modal.classList.contains('active')) {

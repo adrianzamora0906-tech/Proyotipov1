@@ -8,6 +8,7 @@ import SidebarLayout from '../../layouts/SidebarLayout.js';
 import ApiService from '../../core/api/apiService.js';
 import InstructorAssignmentService from '../../services/instructorAssignmentService.js';
 import { authService } from '../../core/auth/AuthService.js';
+import { openWeekendGroupEditor } from './WeekendGroupEditor.js';
 
 const DAYS = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes'];
 const NORMAL_PRACTICAL_SLOTS = [
@@ -46,7 +47,7 @@ class ScheduleView extends Component {
         <div class="page-header">
           <div>
             <h1>Horarios de instructores</h1>
-            <p>Consulta disponibilidad por instructor y horarios practicos normales</p>
+            <p>Horarios de cursos regulares y de fin de semana</p>
           </div>
           <div class="schedule-header-actions">
             <div class="monthly-course-switch schedule-vehicle-switch" role="group" aria-label="Tipo de instructor">
@@ -57,6 +58,7 @@ class ScheduleView extends Component {
               <button type="button" class="btn btn-secondary" id="edit-schedule-groups">Editar grupos</button>
             </div>
             <button type="button" class="btn btn-primary" id="view-monthly-availability">Ver disponibilidad mensual</button>
+            <label class="schedule-weekend-toggle"><input type="checkbox" id="schedule-weekend-mode" role="switch" ${this.calendarModality === 'intensivo' ? 'checked' : ''}><span>Fin de semana</span></label>
           </div>
         </div>
 
@@ -86,7 +88,12 @@ class ScheduleView extends Component {
   renderInstructorGroups(instructors, vehicleType = 'carro') {
     const groups = new Map();
     const filteredInstructors = instructors
-      .filter(instructor => instructor.practiceArea === vehicleType || instructor.practiceArea === 'mixto');
+      .filter(instructor => {
+        const area = this.calendarModality === 'intensivo'
+          ? instructor.weekendPracticeArea || instructor.practiceArea
+          : instructor.practiceArea;
+        return area === vehicleType || area === 'mixto';
+      });
     const otherBranchPriorityInstructors = this.scheduleEditMode
       ? []
       : filteredInstructors.filter(instructor => instructor.isPriorityInOtherBranch);
@@ -158,8 +165,8 @@ class ScheduleView extends Component {
         <div class="instructor-card-body">
           <h3>${instructor.name}</h3>
           <p>${specialty}</p>
-          <span class="badge badge-primary">${availableHours} disponibles</span>
-          <small class="instructor-performance-hint">Ver horario semanal</small>
+          <span class="badge badge-primary">${this.calendarModality === 'intensivo' ? 'Fin de semana' : `${availableHours} disponibles`}</span>
+          <small class="instructor-performance-hint">${this.calendarModality === 'intensivo' ? 'Ver horario de fin de semana' : 'Ver horario semanal'}</small>
         </div>
       </button>
     `;
@@ -181,6 +188,8 @@ class ScheduleView extends Component {
   }
 
   renderCalendar(calendar) {
+    const intensive = (calendar.course?.modality || this.calendarModality) === 'intensivo';
+    const modalitySwitch = `<div class="monthly-course-switch" role="group" aria-label="Modalidad del calendario"><button type="button" data-calendar-modality="normal" class="${intensive ? '' : 'active'}">Lunes a viernes</button><button type="button" data-calendar-modality="intensivo" class="${intensive ? 'active' : ''}">Fin de semana</button></div>`;
     if (!calendar.course) {
       return `
         <div class="modal instructor-calendar-modal">
@@ -192,7 +201,8 @@ class ScheduleView extends Component {
             <button class="modal-close" data-close-calendar-modal>&times;</button>
           </div>
           <div class="modal-body">
-            <div class="schedule-empty">Este instructor no tiene un próximo curso normal asignado en esta sucursal.</div>
+            ${modalitySwitch}
+            <div class="schedule-empty">Este instructor no tiene cursos ${intensive ? 'de fin de semana' : 'de lunes a viernes'} asignados en esta sucursal.</div>
           </div>
         </div>
       `;
@@ -239,6 +249,7 @@ class ScheduleView extends Component {
             <p class="card-subtitle">${calendar.instructor.branch || ''} · ${courseLabel} · ${calendar.week.startDate} a ${calendar.week.endDate}</p>
           </div>
           <div class="calendar-header-controls">
+            ${modalitySwitch}
             <div class="calendar-cycle-navigation" aria-label="Navegar entre cursos">
               <button type="button" class="btn btn-secondary btn-small" data-calendar-cycle="${calendar.courseNavigation?.previousCycleId || ''}" ${calendar.courseNavigation?.previousCycleId ? '' : 'disabled'}>Anterior</button>
               <span>Curso ${calendar.courseNavigation?.position || 0} de ${calendar.courseNavigation?.total || 0}</span>
@@ -256,11 +267,12 @@ class ScheduleView extends Component {
                 <span class="reserved">Reservado</span>
               </div>
               <button type="button" class="btn btn-secondary btn-small" id="view-instructor-students">Ver estudiantes de este curso</button>
+              ${intensive && authService.can('SCHEDULE_CHANGE') ? '<button type="button" class="btn btn-secondary btn-small" id="edit-weekend-course-group">Editar grupo</button>' : ''}
             </div>
             <div class="calendar-course-actions">
-              <span class="badge badge-primary">Prácticas normales · lunes a viernes</span>
-              <button type="button" class="btn btn-primary" id="reserve-selected-calendar-slot" ${calendar.reservationSelection ? '' : 'disabled'}>Reservar horario</button>
-              ${calendar.availabilityEditMode ? '' : '<button type="button" class="btn btn-secondary" id="configure-instructor-availability">Configurar disponibilidad</button>'}
+              <span class="badge badge-primary">${intensive ? 'Prácticas intensivas · fin de semana' : 'Prácticas normales · lunes a viernes'}</span>
+              ${intensive ? '' : `<button type="button" class="btn btn-primary" id="reserve-selected-calendar-slot" ${calendar.reservationSelection ? '' : 'disabled'}>Reservar horario</button>`}
+              ${calendar.availabilityEditMode || intensive ? '' : '<button type="button" class="btn btn-secondary" id="configure-instructor-availability">Configurar disponibilidad</button>'}
             </div>
           </div>
           ${calendar.availabilityEditMode ? `<div class="schedule-availability-actions">
@@ -381,6 +393,9 @@ class ScheduleView extends Component {
   }
 
   async mount() {
+    document.getElementById('schedule-weekend-mode')?.addEventListener('change', event => {
+      this.setScheduleModality(event.target.checked ? 'intensivo' : 'normal');
+    });
     document.getElementById('view-monthly-availability')?.addEventListener('click', () => this.openMonthlyAvailability());
     document.querySelectorAll('[data-schedule-vehicle]').forEach(button => {
       button.addEventListener('click', () => this.setScheduleVehicleType(button.dataset.scheduleVehicle));
@@ -515,6 +530,16 @@ class ScheduleView extends Component {
     document.querySelectorAll('[data-schedule-vehicle]').forEach(button => {
       button.classList.toggle('active', button.dataset.scheduleVehicle === vehicleType);
     });
+    this.refreshScheduleGroups();
+  }
+
+  setScheduleModality(modality) {
+    this.calendarModality = modality;
+    this.monthlyModality = modality;
+    this.monthlyCycleIndex = 0;
+    this.monthlyCycleDayStart = 0;
+    const toggle = document.getElementById('schedule-weekend-mode');
+    if (toggle) toggle.checked = modality === 'intensivo';
     this.refreshScheduleGroups();
   }
 
@@ -715,7 +740,7 @@ class ScheduleView extends Component {
     document.body.style.overflow = 'hidden';
 
     try {
-      const result = await ApiService.getInstructorCalendar(instructorId, cycleId);
+      const result = await ApiService.getInstructorCalendar(instructorId, cycleId, this.calendarModality || 'normal');
       if (!result.success) throw new Error(result.error || 'No se pudo cargar el calendario.');
       const calendar = result.data;
       const startDate = calendar.week?.startDate || calendar.slots?.[0]?.date;
@@ -744,6 +769,13 @@ class ScheduleView extends Component {
   }
 
   bindCalendarAvailabilityEditor(modal, calendar) {
+    modal.querySelector('#edit-weekend-course-group')?.addEventListener('click', () => {
+      openWeekendGroupEditor(calendar, () => this.openInstructorCalendar(calendar.instructor.id, calendar.course.id));
+    });
+    modal.querySelectorAll('[data-calendar-modality]').forEach(button => button.addEventListener('click', () => {
+      this.setScheduleModality(button.dataset.calendarModality);
+      this.openInstructorCalendar(calendar.instructor.id);
+    }));
     modal.querySelectorAll('[data-calendar-cycle]').forEach(button => button.addEventListener('click', () => {
       const cycleId = button.dataset.calendarCycle;
       if (cycleId) this.openInstructorCalendar(calendar.instructor.id, cycleId);

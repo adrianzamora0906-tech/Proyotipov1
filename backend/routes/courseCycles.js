@@ -6,6 +6,8 @@ const requirePermission = require('../middleware/requirePermission');
 const router = express.Router();
 
 router.use(authMiddleware);
+router.get('/:cycleId/weekend-group/:instructorId', requirePermission('SCHEDULE_CHANGE'), CourseCycleController.weekendGroup);
+router.put('/:cycleId/weekend-group/:instructorId', requirePermission('SCHEDULE_CHANGE'), CourseCycleController.updateWeekendGroup);
 
 router.get('/enrollment-options', requirePermission('ENROLLMENT_VIEW'), CourseCycleController.enrollmentOptions);
 router.get('/instructor-first-availability', requirePermission('ENROLLMENT_VIEW'), CourseCycleController.instructorFirstAvailability);

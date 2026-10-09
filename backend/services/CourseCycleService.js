@@ -198,6 +198,9 @@ function intensiveEndDate(startDate, vehicleType) {
 }
 
 class CourseCycleService {
+  static calendarLayout(cycle) {
+    return { dates: cycleDates(cycle), slots: practicalSlots(cycle) };
+  }
   static async ensureIntensiveRotation(user, filters = {}) {
     let branchId = filters.branch_id || user.branch_id;
     const vehicleType = filters.vehicle_type;

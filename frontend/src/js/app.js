@@ -13,10 +13,10 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=perfil-profesor-teoria-20260907";
 import DashboardView from "./views/dashboard/DashboardView.js?v=consultas-optimizadas-20260811";
-import StudentsView from "./views/students/StudentsView.js?v=eliminar-reserva-20260914";
+import StudentsView from "./views/students/StudentsView.js?v=activar-seleccion-real-20261008";
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=cambio-horario-por-instructor-20260928";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
-import ScheduleView from "./views/schedule/ScheduleView.js?v=seleccion-fila-por-hora-20260928";
+import ScheduleView from "./views/schedule/ScheduleView.js?v=editar-grupo-finde-20261008";
 import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";
 import NotificationsView from "./views/notifications/NotificationsView.js";
 import HistoryView from "./views/history/HistoryView.js";
@@ -35,7 +35,7 @@ import InstructorReferralsView from "./views/instructor/InstructorReferralsView.
 import InstructorEvaluationsView from "./views/instructor/InstructorEvaluationsView.js?v=examen-final-20260903";
 import InstructorIncidentsView from "./views/instructor/InstructorIncidentsView.js";
 import InstructorProfileView from "./views/instructor/InstructorProfileView.js";
-import MobileDocumentUploadView from "./views/mobile-upload/MobileDocumentUploadView.js?v=certificado-orientacion-20260824";
+import MobileDocumentUploadView from "./views/mobile-upload/MobileDocumentUploadView.js?v=bordes-suaves-20261008";
 import SidebarLayout from "./layouts/SidebarLayout.js?v=avisos-instructor-20260918-3";
 import AdminDashboardView from "./views/admin/AdminDashboardView.js";
 import AdminResourceMonitorView from "./views/admin/AdminResourceMonitorView.js?v=resource-actions-20260911";

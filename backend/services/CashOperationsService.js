@@ -74,21 +74,30 @@ class CashOperationsService {
   }
 
   static async createTransfer(data, actor, authorization, requestContext) {
-    const branchId = this.branch(actor, authorization);
-    if (!data.studentId && data.cedula) {
-      const student = data.serviceTransactionId
-        ? (await db.query(`SELECT s.id FROM students s
-            JOIN service_transactions st ON st.student_id=s.id
-            WHERE s.identification=$1 AND st.id=$2 AND st.status='PENDING'
-              AND s.status<>'inhabilitado' AND ($3::boolean=TRUE OR st.branch_id=$4)`,
-          [data.cedula,data.serviceTransactionId,Boolean(authorization?.global),branchId])).rows[0]
-        : (await db.query(`SELECT s.id FROM students s JOIN enrollments e ON e.student_id=s.id AND e.status='activo'
+    let branchId = authorization?.operationalCoverage?.operational_branch_id || this.branch(actor, authorization);
+    let service = null;
+    if (data.serviceTransactionId) {
+      service = (await db.query(`SELECT st.amount,st.student_id,st.branch_id FROM service_transactions st
+        JOIN students s ON s.id=st.student_id AND s.status<>'inhabilitado'
+        JOIN branches b ON b.id=st.branch_id LEFT JOIN cities bc ON bc.id=b.city_id
+        LEFT JOIN branches collector ON collector.id=$4::uuid LEFT JOIN cities cc ON cc.id=collector.city_id
+        LEFT JOIN users registrar ON registrar.id=st.created_by
+        WHERE st.id=$1 AND st.customer_identification=$2 AND st.status='PENDING'
+          AND ($3::boolean=TRUE OR st.branch_id=$4 OR registrar.branch_id=$4 OR (
+            NULLIF(LOWER(TRIM(COALESCE(NULLIF(b.province,''),bc.province,''))), '') IS NOT NULL
+            AND LOWER(TRIM(COALESCE(NULLIF(b.province,''),bc.province,'')))
+              =LOWER(TRIM(COALESCE(NULLIF(collector.province,''),cc.province,'')))
+          ))`, [data.serviceTransactionId,data.cedula,Boolean(authorization?.global),branchId])).rows[0];
+      if (!service) throw createError(404, 'Servicio pendiente no encontrado o fuera del alcance de cobro');
+      data.studentId = service.student_id;
+      branchId = service.branch_id;
+    } else if (!data.studentId && data.cedula) {
+      const student = (await db.query(`SELECT s.id FROM students s JOIN enrollments e ON e.student_id=s.id AND e.status='activo'
           WHERE s.identification=$1 AND ($2::boolean=TRUE OR e.branch_id=$3) ORDER BY e.created_at DESC LIMIT 1`,[data.cedula,Boolean(authorization?.global),branchId])).rows[0];
       data.studentId=student?.id;
     }
     if (!data.studentId || !data.amount || !data.reference || !data.transferDate) throw createError(422, 'Complete estudiante, monto, número de transferencia y fecha');
     if (data.serviceTransactionId) {
-      const service=(await db.query("SELECT amount FROM service_transactions WHERE id=$1 AND student_id=$2 AND status='PENDING' AND ($3::boolean=TRUE OR branch_id=$4)",[data.serviceTransactionId,data.studentId,Boolean(authorization?.global),branchId])).rows[0];
       if(!service||Number(data.amount)!==Number(service.amount)) throw createError(422,'El valor no coincide con el servicio pendiente');
       const pending=(await db.query("SELECT COALESCE(SUM(amount),0)::numeric total FROM transfer_payment_verifications WHERE service_transaction_id=$1 AND status='PENDING'",[data.serviceTransactionId])).rows[0];
       if(Number(pending.total)>0) throw createError(409,'Este servicio ya tiene una transferencia por confirmar');

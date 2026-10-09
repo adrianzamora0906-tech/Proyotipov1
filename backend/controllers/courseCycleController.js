@@ -1,7 +1,18 @@
 const CourseCycleService = require('../services/CourseCycleService');
 const TheoryCourseService = require('../services/TheoryCourseService');
+const WeekendGroupService = require('../services/WeekendGroupService');
 
 class CourseCycleController {
+  static async weekendGroup(req, res, next) {
+    const user = { ...req.user, branch_id: req.authorization?.operationalCoverage?.operational_branch_id || req.user.branch_id };
+    try { res.json({ success: true, data: await WeekendGroupService.get(user, req.params.cycleId, req.params.instructorId) }); }
+    catch (error) { next(error); }
+  }
+  static async updateWeekendGroup(req, res, next) {
+    const user = { ...req.user, branch_id: req.authorization?.operationalCoverage?.operational_branch_id || req.user.branch_id };
+    try { res.json({ success: true, data: await WeekendGroupService.save(user, req.params.cycleId, req.params.instructorId, req.body) }); }
+    catch (error) { next(error); }
+  }
   static async theoryOptions(req, res, next) {
     try { res.json({ success: true, data: await TheoryCourseService.options(req.user, req.query) }); }
     catch (error) { next(error); }

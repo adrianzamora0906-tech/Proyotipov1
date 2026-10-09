@@ -185,6 +185,22 @@
   background: rgba(79, 70, 229, .06);
 }
 
+.schedule-weekend-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.schedule-weekend-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
 .schedule-header-actions {
   display: flex;
   align-items: center;
@@ -836,7 +852,7 @@ button.calendar-slot {
 .weekly-availability-legend{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}.weekly-availability-legend span{display:inline-flex;align-items:center;padding:.35rem .7rem;border-radius:999px;font-size:.72rem;font-weight:700}.weekly-availability-legend .free{background:#d9f5ea;color:#08664d}.weekly-availability-legend .occupied{background:#fee2e2;color:#b42318}.weekly-availability-legend .reserved{background:#ffedcf;color:#9a4d08}
 .calendar-summary-actions{display:flex;align-items:flex-start;flex-direction:column;gap:.7rem}.instructor-students-overlay{background:rgba(15,23,42,.58)}.instructor-students-modal{width:min(760px,94vw);max-width:760px}.instructor-students-summary{display:flex;gap:.55rem;flex-wrap:wrap;margin-bottom:1rem}.instructor-students-summary span,.instructor-student-status{display:inline-flex;align-items:center;padding:.35rem .7rem;border-radius:999px;font-size:.72rem;font-weight:800}.instructor-students-summary .matriculated,.instructor-student-status.matriculado{background:#d9f5ea;color:#08664d}.instructor-students-summary .reserved,.instructor-student-status.reservado{background:#ffedcf;color:#9a4d08}.instructor-students-list{display:grid;gap:.65rem}.instructor-student-row{display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:.8rem;padding:.8rem;border:1px solid var(--gray-200);border-radius:10px;background:#fff}.instructor-student-avatar{display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:50%;background:rgba(79,70,229,.12);color:#4338ca;font-size:.76rem;font-weight:800}.instructor-student-person{display:grid;gap:.18rem;min-width:0}.instructor-student-person strong,.instructor-student-person span,.instructor-student-person small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.instructor-student-person span,.instructor-student-person small{color:var(--gray-500);font-size:.75rem}@media(max-width:640px){.instructor-student-row{grid-template-columns:38px minmax(0,1fr)}.instructor-student-status{grid-column:2;justify-self:start}}
 .calendar-course-actions{display:flex;align-items:flex-end;flex-direction:column;gap:.7rem}.calendar-summary-actions #view-instructor-students,.calendar-course-actions #configure-instructor-availability{display:inline-flex;align-items:center;justify-content:center;width:234px;min-height:47px}.instructor-calendar-modal .modal-body>.flex{align-items:flex-start}@media(max-width:640px){.instructor-calendar-modal .modal-body>.flex{align-items:stretch;flex-direction:column}.calendar-course-actions{align-items:flex-start}.calendar-summary-actions #view-instructor-students,.calendar-course-actions #configure-instructor-availability{width:100%}}
-.calendar-header-controls{display:flex;align-items:center;gap:1rem}.calendar-cycle-navigation{display:flex;align-items:center;gap:.55rem}.calendar-cycle-navigation span{color:var(--gray-600);font-size:.78rem;font-weight:700;white-space:nowrap}.calendar-cycle-navigation .btn{min-height:36px;padding:.45rem .75rem}.calendar-cycle-navigation .btn:disabled{cursor:not-allowed;opacity:.45}@media(max-width:640px){.instructor-calendar-modal .modal-header{align-items:flex-start}.calendar-header-controls{align-items:flex-start;gap:.5rem}.calendar-cycle-navigation{display:grid;grid-template-columns:1fr 1fr}.calendar-cycle-navigation span{grid-column:1/-1;grid-row:1;text-align:center}.calendar-cycle-navigation button{grid-row:2}.calendar-cycle-navigation .btn{padding:.4rem .55rem}}
+.calendar-header-controls{display:flex;align-items:center;flex-wrap:wrap;gap:1rem}.calendar-cycle-navigation{display:flex;align-items:center;gap:.55rem}.calendar-cycle-navigation span{color:var(--gray-600);font-size:.78rem;font-weight:700;white-space:nowrap}.calendar-cycle-navigation .btn{min-height:36px;padding:.45rem .75rem}.calendar-cycle-navigation .btn:disabled{cursor:not-allowed;opacity:.45}@media(max-width:640px){.instructor-calendar-modal .modal-header{align-items:flex-start;flex-wrap:wrap}.calendar-header-controls{align-items:flex-start;gap:.5rem}.calendar-cycle-navigation{display:grid;grid-template-columns:1fr 1fr}.calendar-cycle-navigation span{grid-column:1/-1;grid-row:1;text-align:center}.calendar-cycle-navigation button{grid-row:2}.calendar-cycle-navigation .btn{padding:.4rem .55rem}}
 
 .schedule-empty {
   padding: 2rem;
@@ -869,3 +885,20 @@ button.calendar-slot {
     grid-template-columns: 1fr;
   }
 }
+.weekend-group-editor { position: fixed; inset: 0; margin: auto; box-sizing: border-box; width: min(940px, calc(100vw - 24px)); max-height: 92dvh; padding: 0; border: 1px solid #dce1e8; border-radius: 8px; background: #fff; color: #18231f; }
+.weekend-group-editor::backdrop { background: #11182799; }
+.weekend-group-editor .modal-title { font-size: 20px; }
+.weekend-group-editor > .modal-header { position: sticky; top: 0; z-index: 2; background: #fff; }
+.weekend-group-editor .modal-footer { position: sticky; bottom: 0; background: #fff; }
+.weekend-group-editor label { display: grid; gap: 6px; }
+.weekend-group-editor [role=status]:empty { display: none; }
+.weekend-group-member { padding: 16px 0; border-bottom: 1px solid #dce1e8; }
+.weekend-group-member-header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.weekend-group-member-header small { display: block; }
+.weekend-group-member-header label { display: flex; align-items: center; }
+.weekend-group-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.weekend-group-slots > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.weekend-group-add { display: flex; align-items: end; gap: 12px; margin: 16px 0; }
+.weekend-group-add label { flex: 1; min-width: 0; }
+.weekend-group-editor input, .weekend-group-editor select, .weekend-group-editor textarea { max-width: 100%; min-width: 0; }
+@media (max-width: 600px) { .weekend-group-slots { grid-template-columns: 1fr; } .weekend-group-add { flex-wrap: wrap; } }

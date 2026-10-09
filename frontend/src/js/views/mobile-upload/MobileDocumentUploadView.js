@@ -1,5 +1,6 @@
 import Component from '../../components/Component.js';
 import ApiService from '../../core/api/apiService.js';
+import { editDocument, photoCanvas, loadScanner } from '../../services/DocumentScannerService.js?v=bordes-suaves-20261008';
 
 class MobileDocumentUploadView extends Component {
   async render() {
@@ -102,6 +103,10 @@ class MobileDocumentUploadView extends Component {
     if (!form) return;
 
     const previewUrls = new Map();
+    this.scannedImages = new WeakMap();
+    let pending = 0;
+    let edits = Promise.resolve();
+    loadScanner().catch(() => {});
     form.querySelectorAll('input[type="file"]').forEach(input => {
       input.addEventListener('change', () => {
         const preview = form.querySelector(`[data-preview-for="${input.id}"]`);
@@ -121,11 +126,39 @@ class MobileDocumentUploadView extends Component {
         preview.innerHTML = file.type === 'application/pdf'
           ? `<span><strong>PDF seleccionado:</strong> ${file.name}</span>`
           : `<img src="${fileUrl}" alt="Vista previa de ${input.previousElementSibling?.textContent || 'documento'}"><span>Vista previa</span>`;
+        if (file.type === 'application/pdf') return;
+        const scan = () => {
+          pending++;
+          document.getElementById('mobile-upload-submit').disabled = true;
+          edits = edits.then(async () => {
+            if (input.files?.[0] !== file) return;
+            const canvas = await editDocument(file);
+            if (input.files?.[0] !== file) return;
+            if (!canvas) {
+              if (!this.scannedImages.has(file)) { input.value = ''; preview.hidden = true; }
+              return;
+            }
+            this.scannedImages.set(file, canvas);
+            preview.querySelector('img').src = canvas.toDataURL('image/jpeg', 0.9);
+          }).catch(error => {
+            document.getElementById('mobile-upload-status').textContent = error.message;
+            input.value = ''; preview.hidden = true;
+          }).finally(() => {
+            pending--;
+            document.getElementById('mobile-upload-submit').disabled = pending > 0;
+          });
+        };
+        const edit = document.createElement('button');
+        edit.type = 'button'; edit.className = 'btn btn-secondary'; edit.textContent = 'Editar recorte';
+        edit.onclick = event => { event.preventDefault(); scan(); };
+        preview.append(edit);
+        scan();
       });
     });
 
     form.addEventListener('submit', async event => {
       event.preventDefault();
+      if (pending) return;
       const button = document.getElementById('mobile-upload-submit');
       const status = document.getElementById('mobile-upload-status');
       const isPackage = form.dataset.package === 'true';
@@ -369,144 +402,14 @@ class MobileDocumentUploadView extends Component {
   }
 
   async prepareImageForPdf(file, options = {}) {
-    const imageUrl = URL.createObjectURL(file);
-    try {
-      const image = await new Promise((resolve, reject) => {
-        const element = new Image();
-        element.onload = () => resolve(element);
-        element.onerror = () => reject(new Error('Una foto no es valida.'));
-        element.src = imageUrl;
-      });
-      const maximumSide = 1600;
-      const scale = Math.min(1, maximumSide / Math.max(image.naturalWidth, image.naturalHeight));
-      const width = Math.max(1, Math.round(image.naturalWidth * scale));
-      const height = Math.max(1, Math.round(image.naturalHeight * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const context = canvas.getContext('2d');
-      context.fillStyle = '#FFFFFF';
-      context.fillRect(0, 0, width, height);
-      context.drawImage(image, 0, 0, width, height);
-      const bounds = this.detectDocumentBounds(context.getImageData(0, 0, width, height), width, height);
-      const rotateDocument = options.autoRotate !== false && bounds.height > bounds.width;
-      const croppedCanvas = document.createElement('canvas');
-      croppedCanvas.width = rotateDocument ? bounds.height : bounds.width;
-      croppedCanvas.height = rotateDocument ? bounds.width : bounds.height;
-      const croppedContext = croppedCanvas.getContext('2d');
-      croppedContext.fillStyle = '#FFFFFF';
-      croppedContext.fillRect(0, 0, croppedCanvas.width, croppedCanvas.height);
-      if (rotateDocument) {
-        croppedContext.translate(croppedCanvas.width, 0);
-        croppedContext.rotate(Math.PI / 2);
-      }
-      croppedContext.drawImage(canvas, bounds.x, bounds.y, bounds.width, bounds.height, 0, 0, bounds.width, bounds.height);
-      return {
-        width: croppedCanvas.width,
-        height: croppedCanvas.height,
-        bytes: this.base64ToBytes(croppedCanvas.toDataURL('image/jpeg', 0.9).split(',')[1]),
-      };
-    } finally {
-      URL.revokeObjectURL(imageUrl);
-    }
-  }
-
-  detectDocumentBounds(imageData, width, height) {
-    const pixels = imageData.data;
-    const tileSize = Math.max(20, Math.round(Math.min(width, height) / 28));
-    const columns = Math.ceil(width / tileSize);
-    const rows = Math.ceil(height / tileSize);
-    const edgeCounts = new Uint32Array(columns * rows);
-    const luminanceAt = (x, y) => {
-      const offset = ((y * width) + x) * 4;
-      return (pixels[offset] * 0.299) + (pixels[offset + 1] * 0.587) + (pixels[offset + 2] * 0.114);
-    };
-
-    for (let y = 2; y < height - 2; y += 2) {
-      for (let x = 2; x < width - 2; x += 2) {
-        const horizontal = Math.abs(luminanceAt(x + 2, y) - luminanceAt(x - 2, y));
-        const vertical = Math.abs(luminanceAt(x, y + 2) - luminanceAt(x, y - 2));
-        if (horizontal + vertical < 58) continue;
-        const column = Math.floor(x / tileSize);
-        const row = Math.floor(y / tileSize);
-        edgeCounts[(row * columns) + column] += 1;
-      }
-    }
-
-    const active = new Uint8Array(columns * rows);
-    const minimumEdges = Math.max(5, Math.round((tileSize * tileSize) / 150));
-    edgeCounts.forEach((count, index) => {
-      if (count >= minimumEdges) active[index] = 1;
-    });
-
-    const visited = new Uint8Array(columns * rows);
-    let bestCluster = null;
-    for (let start = 0; start < active.length; start += 1) {
-      if (!active[start] || visited[start]) continue;
-      const queue = [start];
-      visited[start] = 1;
-      let minColumn = columns;
-      let maxColumn = 0;
-      let minRow = rows;
-      let maxRow = 0;
-      let score = 0;
-      while (queue.length) {
-        const index = queue.pop();
-        const row = Math.floor(index / columns);
-        const column = index % columns;
-        minColumn = Math.min(minColumn, column);
-        maxColumn = Math.max(maxColumn, column);
-        minRow = Math.min(minRow, row);
-        maxRow = Math.max(maxRow, row);
-        score += edgeCounts[index];
-        [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [-1, 1], [1, -1]].forEach(([dx, dy]) => {
-          const nextColumn = column + dx;
-          const nextRow = row + dy;
-          if (nextColumn < 0 || nextColumn >= columns || nextRow < 0 || nextRow >= rows) return;
-          const next = (nextRow * columns) + nextColumn;
-          if (!active[next] || visited[next]) return;
-          visited[next] = 1;
-          queue.push(next);
-        });
-      }
-      const clusterWidth = (maxColumn - minColumn + 1) * tileSize;
-      const clusterHeight = (maxRow - minRow + 1) * tileSize;
-      const centerX = ((minColumn + maxColumn + 1) * tileSize) / 2;
-      const centerY = ((minRow + maxRow + 1) * tileSize) / 2;
-      const centerDistance = Math.hypot((centerX - width / 2) / width, (centerY - height / 2) / height);
-      const weightedScore = score * Math.max(0.45, 1 - centerDistance);
-      if (clusterWidth < width * 0.12 || clusterHeight < height * 0.06) continue;
-      if (!bestCluster || weightedScore > bestCluster.score) {
-        bestCluster = { minColumn, maxColumn, minRow, maxRow, score: weightedScore };
-      }
-    }
-
-    if (!bestCluster) {
-      return { x: 0, y: 0, width, height };
-    }
-
-    let cropWidth = (bestCluster.maxColumn - bestCluster.minColumn + 1) * tileSize;
-    let cropHeight = (bestCluster.maxRow - bestCluster.minRow + 1) * tileSize;
-    const centerX = ((bestCluster.minColumn + bestCluster.maxColumn + 1) * tileSize) / 2;
-    const centerY = ((bestCluster.minRow + bestCluster.maxRow + 1) * tileSize) / 2;
-    const landscape = cropWidth >= cropHeight;
-    const expectedRatio = landscape ? 1.58 : (1 / 1.58);
-    const currentRatio = cropWidth / cropHeight;
-    if (currentRatio < expectedRatio) cropWidth = cropHeight * expectedRatio;
-    else cropHeight = cropWidth / expectedRatio;
-    cropWidth *= 1.12;
-    cropHeight *= 1.12;
-    cropWidth = Math.min(width, Math.round(cropWidth));
-    cropHeight = Math.min(height, Math.round(cropHeight));
-    const x = Math.max(0, Math.min(width - cropWidth, Math.round(centerX - (cropWidth / 2))));
-    const y = Math.max(0, Math.min(height - cropHeight, Math.round(centerY - (cropHeight / 2))));
+    const accepted = this.scannedImages?.get(file) || await photoCanvas(file);
     return {
-      x,
-      y,
-      width: cropWidth,
-      height: cropHeight,
+      width: accepted.width,
+      height: accepted.height,
+      bytes: this.base64ToBytes(accepted.toDataURL('image/jpeg', 0.9).split(',')[1]),
     };
   }
+
 
   fitImageInBox(width, height, maxWidth, maxHeight) {
     const scale = Math.min(maxWidth / width, maxHeight / height);

@@ -6,6 +6,12 @@
 import { apiClient } from './ApiClient.js';
 
 class ApiService {
+  static async getWeekendGroup(cycleId, instructorId) {
+    return apiClient.get(`/course-cycles/${encodeURIComponent(cycleId)}/weekend-group/${encodeURIComponent(instructorId)}`);
+  }
+  static async updateWeekendGroup(cycleId, instructorId, data) {
+    return apiClient.put(`/course-cycles/${encodeURIComponent(cycleId)}/weekend-group/${encodeURIComponent(instructorId)}`, data);
+  }
   // ── AUTH ──
   static async login(username, password) {
     return apiClient.login(username, password);
@@ -359,9 +365,10 @@ class ApiService {
     return apiClient.get(`/instructors${qs ? '?' + qs : ''}`);
   }
 
-  static async getInstructorCalendar(instructorId, cycleId = null) {
+  static async getInstructorCalendar(instructorId, cycleId = null, modality = 'normal') {
     const params = new URLSearchParams();
     if (cycleId) params.set('cycleId', cycleId);
+    params.set('modality', modality);
     const query = params.toString();
     return apiClient.get(`/instructors/${instructorId}/calendar${query ? `?${query}` : ''}`);
   }

@@ -287,6 +287,10 @@
   box-shadow: inset 0 0 0 2px #ef4444;
 }
 
+.profile-schedule-modal .schedule-option.current.move-origin {
+  box-shadow: inset 0 0 0 3px #2563eb;
+}
+
 .profile-schedule-modal .schedule-option-status.current {
   background: #fecaca;
   color: #b91c1c;

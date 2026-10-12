@@ -379,11 +379,8 @@ class PendingPaymentsView extends Component {
       }
       return true;
     });
-    if (this.initialSearch) this.applyPendingFilters();
-    else {
-      this.renderPendingTable();
-      this.renderReceiptsTable();
-    }
+    this.renderPendingTable();
+    this.renderReceiptsTable();
   }
 
   renderPendingTable() {
@@ -435,21 +432,25 @@ class PendingPaymentsView extends Component {
   }
 
   startAutomaticRefresh() {
-    this.refreshTimer = window.setInterval(async () => {
-      if (document.visibilityState !== 'visible') return;
-      if (this.receiptOpen || document.getElementById('receipt-modal')?.classList.contains('active')) return;
+    // Updates are delivered by the shared authenticated WebSocket connection.
+  }
 
-      try {
-        const pending = await PaymentService.getPendingPayments();
-        if (this.createSnapshot(pending) !== this.pendingSnapshot) {
-          window.dispatchEvent(new CustomEvent('erp:dataChanged', {
-            detail: { collection: 'payments', action: 'pending-payments-updated' },
-          }));
-        }
-      } catch (error) {
-        console.warn('No se pudo actualizar automáticamente los pagos pendientes:', error.message);
-      }
-    }, 2000);
+  async refreshRealtime() {
+    const [pending,receipts] = await Promise.all([PaymentService.getPendingPayments(),ApiService.getReceipts()]);
+    this.pendingAll = pending || [];
+    this.receiptsAll = receipts.success ? receipts.data || [] : this.receiptsAll;
+    const pendingPage = this.pendingPage, receiptsPage = this.receiptsPage;
+    this.applyPendingFilters();
+    this.pendingPage = pendingPage;
+    this.receiptsPage = receiptsPage;
+    this.renderPendingTable();
+    this.renderReceiptsTable();
+    const setText = (selector,value) => { const target = document.querySelector(selector); if (target) target.textContent = value; };
+    setText('.cash-kpi.pending strong',this.pendingAll.length);
+    setText('.cash-kpi.balance strong',this.money(this.pendingAll.reduce((sum,row) => sum+Number(row.balance || 0),0)));
+    setText('.cash-kpi.collected strong',this.money(this.receiptsAll.filter(row => row.payment_detail_status !== 'VOIDED').reduce((sum,row) => sum+Number(row.amount || 0),0)));
+    setText('[data-payment-tab="pending"] b',this.pendingAll.length);
+    setText('[data-payment-tab="receipts"] b',this.receiptsAll.length);
   }
 
   createSnapshot(payments) {

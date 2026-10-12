@@ -70,7 +70,11 @@ class ApiClient {
     } catch {}
     return sessionStorage.getItem(this.tokenKey) || null;
   }
-  setToken(token) { if (token) sessionStorage.setItem(this.tokenKey, token); else sessionStorage.removeItem(this.tokenKey); }
+  setToken(token) {
+    const previous = sessionStorage.getItem(this.tokenKey);
+    if (token) sessionStorage.setItem(this.tokenKey, token); else sessionStorage.removeItem(this.tokenKey);
+    if (previous !== token) queueMicrotask(() => window.dispatchEvent(new Event('erp:sessionChanged')));
+  }
   getHeaders() { const headers = { 'Content-Type': 'application/json' }; const token = this.getToken(); if (token) headers.Authorization = `Bearer ${token}`; return headers; }
 
   async handleResponse(response) {

@@ -105,9 +105,11 @@ class StudentRecordEditService {
       (SELECT json_agg(t) FROM branch_course_programs p JOIN branch_course_schedule_templates t ON t.program_id=p.id
         WHERE p.branch_id=cc.branch_id AND p.course_id=cc.course_id AND t.modality=cc.modality AND t.active=TRUE) schedule_templates
       FROM course_cycles cc JOIN courses c ON c.id=cc.course_id WHERE cc.branch_id=$1 AND cc.active=TRUE AND cc.deleted_at IS NULL
-        AND cc.status IN ('activo','proximo') AND CURRENT_DATE<=cc.start_date+2
+        AND cc.status IN ('activo','proximo') AND (CURRENT_DATE<=cc.start_date+2 OR EXISTS (
+          SELECT 1 FROM course_cycle_schedule_assignments own
+          WHERE own.cycle_id=cc.id AND own.student_id=$4 AND own.status='activo'))
         AND ($2::uuid IS NULL OR cc.course_id=$2) AND ($3::text IS NULL OR cc.modality=$3)
-      ORDER BY cc.start_date,cc.code LIMIT 40`, [branch.id,filters.course_id || null,filters.modality || null])).rows;
+      ORDER BY cc.start_date,cc.code LIMIT 40`, [branch.id,filters.course_id || null,filters.modality || null,id])).rows;
     const result = [];
     for (const cycle of cycles) {
       const instructors = (await db.query(`SELECT DISTINCT ip.id,TRIM(CONCAT(u.first_name,' ',u.last_name)) name
@@ -187,6 +189,10 @@ class StudentRecordEditService {
       }
       const before=key==='birthDate' ? iso(snapshot.student[column]) : snapshot.student[column];
       if (!same(before,value)) {
+        if (key==='email' && value && snapshot.account
+          && (await client.query('SELECT 1 FROM users WHERE email=$1 AND id<>$2',[value,snapshot.account.id])).rows.length) {
+          throw createError(409,'El correo ya pertenece a otra cuenta. Ingresa otro correo para este estudiante');
+        }
         personal[column]=value;
         let oldLabel=before,newLabel=value;
         if (key==='branch_id' || key==='pickupBranchId') {
@@ -432,7 +438,16 @@ class StudentRecordEditService {
       return {id,changes:prepared.changes};
     } catch(error) {
       if (!transactionClient) await client.query('ROLLBACK');
-      if (error.code==='23505') throw createError(409,'La cedula, correo o cupo ya esta ocupado. Revisa los cambios');
+      if (error.code==='23505') {
+        const messages={
+          users_email_key:'El correo ya pertenece a otra cuenta. Ingresa otro correo para este estudiante',
+          students_identification_key:'La cedula ya pertenece a otro estudiante',
+          users_username_key:'El usuario de acceso ya pertenece a otra cuenta',
+          uq_instructor_cycle_time_active:'El instructor ya tiene otro estudiante en ese horario',
+          idx_cycle_schedule_student_date_time_active:'El estudiante ya tiene una clase en esa fecha y horario',
+        };
+        throw createError(409,messages[error.constraint] || 'Los cambios coinciden con otro registro existente. Revisa los datos');
+      }
       throw error;
     } finally { if (!transactionClient) client.release(); }
   }

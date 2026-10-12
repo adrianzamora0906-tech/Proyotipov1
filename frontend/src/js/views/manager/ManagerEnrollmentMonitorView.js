@@ -38,8 +38,10 @@ export default class ManagerEnrollmentMonitorView extends Component {
     this.branch?.addEventListener('change', () => this.load(true)); this.type?.addEventListener('change', () => this.load(true));
     document.getElementById('monitor-refresh')?.addEventListener('click', () => this.load());
     document.getElementById('monitor-toggle')?.addEventListener('click', event => { this.paused = !this.paused; event.currentTarget.textContent = this.paused ? 'Reanudar monitor' : 'Pausar monitor'; document.querySelector('.enrollment-monitor__live')?.classList.toggle('paused', this.paused); if (!this.paused) this.load(); });
-    await this.load(true); this.timer = window.setInterval(() => { if (!this.paused) this.load(); }, 5000);
+    await this.load(true);
   }
+
+  async refreshRealtime() { if (!this.paused) await this.load(); }
 
   async load(reset = false) {
     if (this.loading) return; this.loading = true;

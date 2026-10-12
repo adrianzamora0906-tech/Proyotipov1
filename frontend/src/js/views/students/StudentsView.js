@@ -4,6 +4,7 @@
  */
 
 import Component from '../../components/Component.js';
+import { subscribeRealtime } from '../../core/realtime/RealtimeClient.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
 import StudentService from '../../services/StudentService.js?v=registro-sin-fallback-20260820';
 import ScheduleService from '../../services/ScheduleService.js';
@@ -66,11 +67,15 @@ class StudentsView extends Component {
     const summaryParams = { ...listParams };
     delete summaryParams.status;
     delete summaryParams.registration_type;
+    const summaryStudentsPromise = StudentService.getAllStudents(summaryParams);
+    const studentsPromise = listParams.status
+      ? StudentService.getAllStudents(listParams)
+      : summaryStudentsPromise.then(items => items.filter(student => student.registrationType === selectedRegistrationType));
     const [students, branches, reservations, summaryStudents, summaryReservations, disabledStudents] = await Promise.all([
-      StudentService.getAllStudents(listParams),
+      studentsPromise,
       StudentService.getBranches(),
       StudentService.getActiveReservations(listParams),
-      StudentService.getAllStudents(summaryParams),
+      summaryStudentsPromise,
       selectedStatus ? StudentService.getActiveReservations(summaryParams) : Promise.resolve(null),
       this.getDisabledStudents(summaryParams).catch(() => null),
     ]);
@@ -322,10 +327,15 @@ class StudentsView extends Component {
       const summaryParams = { ...params };
       delete summaryParams.status;
       delete summaryParams.registration_type;
+      const summaryStudentsPromise = StudentService.getAllStudents(summaryParams);
+      const studentsPromise = prefetched.students ? Promise.resolve(prefetched.students)
+        : params.status ? StudentService.getAllStudents(params)
+        : summaryStudentsPromise.then(items => params.registration_type
+          ? items.filter(student => student.registrationType === params.registration_type) : items);
       const [students, reservations, summaryStudents, summaryReservations, disabledStudents] = await Promise.all([
-        prefetched.students ? Promise.resolve(prefetched.students) : StudentService.getAllStudents(params),
+        studentsPromise,
         prefetched.reservations ? Promise.resolve(prefetched.reservations) : StudentService.getActiveReservations(params),
-        StudentService.getAllStudents(summaryParams),
+        summaryStudentsPromise,
         params.status ? StudentService.getActiveReservations(summaryParams) : Promise.resolve(null),
         this.getDisabledStudents(summaryParams).catch(() => null),
       ]);
@@ -779,6 +789,7 @@ class StudentsView extends Component {
                 </div>
 
                 <div class="staff-referral-field referral-eligible-field">
+                  <p style="color: #b42318; font-size: 13px; margin: 0 0 8px;">Si aplica una promoción, selecciónala en el campo de abajo.</p>
                   <label class="form-label" for="student-referrer-search">Referido por <small>(opcional)</small></label>
                   <div class="staff-referral-search">
                     <input type="search" class="form-input" id="student-referrer-search" autocomplete="off" placeholder="Buscar personal, Polic&iacute;a o universidad...">
@@ -1928,6 +1939,7 @@ class StudentsView extends Component {
           instructorBaseStart: schedule.instructorBaseStart,
           fullNormalSchedule: schedule.fullNormalSchedule,
           durationBusinessDays: schedule.durationBusinessDays,
+          calendarDates: schedule.calendarDates,
           instructors: schedule.instructors || [],
         });
         cycles.push(cycleMap.get(cycleKey));
@@ -1981,7 +1993,9 @@ class StudentsView extends Component {
       ? cycle.officialStartDate : cycle.startDate;
     const displayEndDate = String(cycle.officialEndDate || cycle.endDate) > String(cycle.endDate)
       ? cycle.officialEndDate : cycle.endDate;
-    const days = this.getCourseBusinessDays(displayStartDate, displayEndDate, courseKey, modality);
+    const days = cycle.calendarDates?.length ? cycle.calendarDates.map(date => ({
+      date, name: new Date(`${date}T12:00:00`).toLocaleDateString('es', { weekday: 'long' }), label: date.slice(5),
+    })) : this.getCourseBusinessDays(displayStartDate, displayEndDate, courseKey, modality);
     const selectedExternalInstructor = (this.modalBranchInstructors || []).some(instructor =>
       String(instructor.id) === String(this.scheduleInstructorFilterId || '')
       && instructor.branch_assignment === 'reserved_elsewhere');
@@ -2099,7 +2113,7 @@ class StudentsView extends Component {
     let certificatePreviewObjectUrl = null;
     let receivedFileUrl = '';
     const close = () => {
-      if (timer) window.clearInterval(timer);
+      timer?.();
       if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
       if (certificatePreviewObjectUrl) URL.revokeObjectURL(certificatePreviewObjectUrl);
       overlay.remove();
@@ -2155,11 +2169,11 @@ class StudentsView extends Component {
       `;
       overlay.querySelectorAll('[data-close-capture]').forEach(button => button.addEventListener('click', close));
 
-      timer = window.setInterval(async () => {
+      timer = subscribeRealtime(['documents'],async () => {
         try {
           const result = await ApiService.getMobileDocumentUploadResult(token.token);
           if (!result.success || !result.data?.completed || result.data.usedAt === previousCaptureTime) return;
-          window.clearInterval(timer);
+          timer?.();
           timer = null;
           receivedFileUrl = result.data.fileUrl;
           previewObjectUrl = this.createObjectUrlFromDataUrl(receivedFileUrl);
@@ -2238,7 +2252,7 @@ class StudentsView extends Component {
           const status = overlay.querySelector('#registration-mobile-capture-status');
           if (status) status.textContent = error.message || 'No se pudo consultar el estado.';
         }
-      }, 2000);
+      }, () => overlay.isConnected);
     } catch (error) {
       const requiresLogin = error.status === 401
         || /token no proporcionado|token invalido|token expirado/i.test(error.message || '');
@@ -2407,6 +2421,20 @@ class StudentsView extends Component {
     // Si el modal se cerró o se hizo otra selección mientras esperaba la API,
     // esta respuesta ya no puede modificar el calendario actual.
     if (requestId !== this.modalScheduleRequestId || !host.isConnected) return;
+    if (this.recordEditContext?.enrollments?.length) {
+      const courseId = document.querySelector('#student-modal-form [name="course_id"]')?.value;
+      const editOptions = await ApiService.getStudentEditOptions(this.editStudentId, {
+        branch_id: branchId, course_id: courseId, modality: selectedModality,
+      });
+      if (!editOptions?.success) throw new Error('No se pudo consultar la disponibilidad para editar');
+      const currentCycleIds = new Set(this.recordEditContext.assignments.map(item => item.cycleId));
+      const currentCycles = (editOptions.data || []).filter(cycle => currentCycleIds.has(cycle.id));
+      const currentSchedules = this.flattenRecordEditOptions(currentCycles, selectedInstructorId);
+      const loadedCycleIds = new Set(currentSchedules.map(item => item.cycleId));
+      schedules = [...schedules.filter(item => !loadedCycleIds.has(item.cycleId)), ...currentSchedules];
+    }
+    if (requestId !== this.modalScheduleRequestId || !host.isConnected) return;
+    schedules = this.includeRecordEditSchedules(schedules, branchId);
     const nextCalendar = document.createElement('div');
     nextCalendar.innerHTML = this.renderScheduleCalendar(schedules);
     const currentGrids = [...host.querySelectorAll('.enrollment-calendar-grid')];
@@ -2509,6 +2537,60 @@ class StudentsView extends Component {
         host.querySelectorAll('.enrollment-calendar-grid.is-refreshing').forEach(grid => grid.classList.remove('is-refreshing'));
       }
     }
+  }
+
+  flattenRecordEditOptions(cycles, instructorId) {
+    const course = this.recordEditContext?.enrollments?.[0]?.course_name;
+    return cycles.flatMap(cycle => {
+      const slots = cycle.slots.filter(slot => slot.instructorId === instructorId);
+      return [...new Set(slots.map(slot => `${slot.start} - ${slot.end}`))].map(time => {
+        const matching = slots.filter(slot => `${slot.start} - ${slot.end}` === time);
+        return {
+          id: `cycle:${cycle.id}:${time.replace(/\s/g, '')}`, cycleId: cycle.id,
+          course, modality: cycle.modality, time, cycleLabel: cycle.code,
+          day: `Inicio ${cycle.startDate}`, startDate: cycle.startDate, endDate: cycle.endDate,
+          calendarDates: cycle.dates, durationBusinessDays: cycle.requiredClasses,
+          instructors: cycle.instructors, capacity: 1,
+          available: matching.some(slot => slot.available) ? 1 : 0,
+          availabilityByDate: Object.fromEntries(matching.map(slot => [slot.date, {
+            capacity: 1, available: slot.available ? 1 : 0, occupied: slot.available ? 0 : 1,
+          }])),
+        };
+      });
+    });
+  }
+
+  includeRecordEditSchedules(schedules, branchId) {
+    const context = this.recordEditContext;
+    const enrollment = context?.enrollments?.[0];
+    const courseId = document.querySelector('#student-modal-form [name="course_id"]')?.value;
+    if (!enrollment || courseId !== enrollment.course_id || branchId !== context.student.branch_id) return schedules;
+    const assignments = (context.assignments || []).filter(item => item.instructorId === this.scheduleInstructorFilterId);
+    const result = [...schedules];
+    for (const assignment of assignments) {
+      const sameCycle = assignments.filter(item => item.cycleId === assignment.cycleId);
+      const dates = sameCycle.map(item => item.date).sort();
+      const index = result.findIndex(item => item.cycleId === assignment.cycleId
+        && String(item.time).replace(/\s/g, '') === assignment.time.replace(/\s/g, ''));
+      const base = index >= 0 ? result[index] : result.find(item => item.cycleId === assignment.cycleId);
+      const instructor = context.instructors?.find(item => item.id === assignment.instructorId);
+      const schedule = {
+        ...base,
+        id: base?.id || `cycle:${assignment.cycleId}:${assignment.time.replace(/\s/g, '')}`,
+        cycleId: assignment.cycleId, course: enrollment.course_name,
+        modality: assignment.modality || 'normal', time: assignment.time,
+        day: base?.day || `Inicio ${dates[0]}`, cycleLabel: base?.cycleLabel || assignment.code || '',
+        startDate: base?.startDate || dates[0], endDate: base?.endDate || dates.at(-1),
+        durationBusinessDays: base?.durationBusinessDays || sameCycle.length,
+        instructors: base?.instructors?.length ? base.instructors : [instructor || { id: assignment.instructorId, name: 'Instructor actual' }],
+        capacity: base?.capacity ?? 1, available: Math.max(Number(base?.available || 0), 1),
+        availabilityByDate: { ...base?.availabilityByDate,
+          [assignment.date]: { ...base?.availabilityByDate?.[assignment.date], capacity: 1, available: 1 } },
+      };
+      if (index >= 0) result[index] = schedule;
+      else result.push(schedule);
+    }
+    return result;
   }
 
   flattenEnrollmentOptions(cycles) {
@@ -3066,7 +3148,7 @@ class StudentsView extends Component {
           && item.time.replace(/\s/g, '') === String(payload.time || '').replace(/\s/g, ''));
       } catch (_) { return false; }
     });
-    if (matches.length === selections.length) {
+    if (matches.length) {
       const calendar = matches[0].closest('.enrollment-calendar');
       const cycleSet = calendar?.closest('.enrollment-cycle-set');
       if (cycleSet) {
@@ -3078,11 +3160,22 @@ class StudentsView extends Component {
       matches.forEach(cell => {
         cell.disabled = false;
         cell.classList.remove('disabled');
-        cell.classList.add('selected');
+        cell.classList.add('selected', 'record-edit-current-slot');
+        cell.setAttribute('aria-pressed', 'true');
+        cell.querySelector('.schedule-option-status').textContent = 'Horario actual';
+        cell.querySelector('.schedule-option-capacity').textContent = 'Seleccionado';
         cell.setAttribute('aria-disabled', 'false');
         cell.setAttribute('aria-hidden', 'false');
       });
       calendar.dataset.rotationEnabled = String(new Set(selections.map(item => item.time)).size > 1);
+      calendar.querySelectorAll('.schedule-rotation-toggle').forEach(toggle => {
+        toggle.classList.toggle('active', calendar.dataset.rotationEnabled === 'true');
+        toggle.setAttribute('aria-pressed', calendar.dataset.rotationEnabled);
+      });
+      this.syncRotationState(calendar);
+      matches.forEach(cell => {
+        cell.querySelector('.schedule-option-capacity').textContent = 'Seleccionado';
+      });
       this.updateCalendarWindow(calendar);
       this.updateScheduleSelectionSummary(selections);
     }
@@ -5607,14 +5700,11 @@ class StudentsView extends Component {
   }
 
   startAutomaticRefresh() {
-    if (this.refreshTimer) window.clearInterval(this.refreshTimer);
     this.refreshInProgress = false;
-    this.refreshTimer = window.setInterval(async () => {
-      if (!document.getElementById('students-list-content')) {
-        window.clearInterval(this.refreshTimer);
-        this.refreshTimer = null;
-        return;
-      }
+  }
+
+  async refreshRealtime() {
+      if (!document.getElementById('students-list-content')) return;
       if (document.visibilityState !== 'visible' || this.refreshInProgress) return;
 
       try {
@@ -5627,7 +5717,7 @@ class StudentsView extends Component {
         ]);
         const nextSnapshot = this.createSnapshot(students);
         const nextReservationsSnapshot = this.createReservationsSnapshot(reservations);
-        if (nextSnapshot !== this.studentsSnapshot || nextReservationsSnapshot !== this.reservationsSnapshot) {
+        {
           const form = document.getElementById('student-filter-form');
           if (form) {
             const page = Number(new URLSearchParams(window.location.search).get('page')) || 1;
@@ -5643,7 +5733,6 @@ class StudentsView extends Component {
       } finally {
         this.refreshInProgress = false;
       }
-    }, 45000);
   }
 
   createSnapshot(students) {

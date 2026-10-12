@@ -1488,7 +1488,7 @@ class CourseCycleService {
 
     const row = cycleResult.rows[0];
     const assignmentsResult = await db.query(`
-      SELECT a.schedule_date, a.start_time, a.end_time, a.instructor_id,
+      SELECT a.id, a.schedule_date, a.start_time, a.end_time, a.instructor_id,
              concat_ws(' ', u.first_name, u.last_name) AS instructor_name
       FROM course_cycle_schedule_assignments a
       LEFT JOIN instructor_profiles ip ON ip.id = a.instructor_id
@@ -1497,6 +1497,7 @@ class CourseCycleService {
       ORDER BY a.schedule_date
     `, [studentId, row.id]);
     const currentAssignments = assignmentsResult.rows.map(assignment => ({
+      id: assignment.id,
       date: toDateString(assignment.schedule_date),
       startTime: normalizeTime(assignment.start_time),
       endTime: normalizeTime(assignment.end_time),
@@ -1587,10 +1588,16 @@ class CourseCycleService {
     if (new Set(requestedChanges.map(change => change.date)).size !== requestedChanges.length) {
       throw createError(422, 'Solo puedes seleccionar un nuevo horario por dia');
     }
+    const sourceIds = requestedChanges.map(change => change.assignmentId).filter(Boolean);
+    if (sourceIds.some(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(id)))
+      || new Set(sourceIds).size !== sourceIds.length) {
+      throw createError(422, 'Selecciona una clase de origen distinta para cada cambio');
+    }
 
     const client = await db.getClient();
     try {
       await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`student-schedule-change:${studentId}`]);
       const cycleResult = await client.query(`
         SELECT cc.*
         FROM course_cycles cc
@@ -1611,7 +1618,11 @@ class CourseCycleService {
       const changes = requestedChanges.map(change => {
         if (change.date < today) throw createError(422, `No puedes modificar la fecha pasada ${change.date}`);
         if (!validDates.includes(change.date)) throw createError(422, `La fecha ${change.date} no pertenece al curso`);
-        return { date: change.date, ...parseTimeRange(change.time) };
+        const range = parseTimeRange(change.time);
+        if (!practicalSlots(cycle).some(([start,end]) => start === range.startTime && end === range.endTime)) {
+          throw createError(422,'El horario seleccionado no pertenece al curso');
+        }
+        return { date: change.date, assignmentId: change.assignmentId || null, ...range };
       }).sort((first, second) => `${first.date}:${first.startTime}`.localeCompare(`${second.date}:${second.startTime}`));
 
       const capacityResult = await client.query(`
@@ -1634,18 +1645,36 @@ class CourseCycleService {
         const { date, startTime, endTime } = change;
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`${cycleId}:${date}:${startTime}:${endTime}`]);
         const currentResult = await client.query(`
-          SELECT id, enrollment_id, instructor_id, start_time, end_time
+          SELECT id, enrollment_id, instructor_id, schedule_date, start_time, end_time
           FROM course_cycle_schedule_assignments
-          WHERE student_id = $1 AND cycle_id = $2 AND schedule_date = $3 AND status = 'activo'
+          WHERE student_id = $1 AND cycle_id = $2 AND status = 'activo'
+            AND (($4::uuid IS NOT NULL AND id=$4) OR ($4::uuid IS NULL AND schedule_date=$3))
           FOR UPDATE
-        `, [studentId, cycleId, date]);
+        `, [studentId, cycleId, date,change.assignmentId]);
         if (!currentResult.rows.length) {
           throw createError(404, `El estudiante no tiene un horario asignado para el dia ${date}`);
         }
         const current = currentResult.rows[0];
-        if (normalizeTime(current.start_time) === startTime && normalizeTime(current.end_time) === endTime) {
+        if (currentResult.rows.length > 1) throw createError(422,'Selecciona la clase actual que deseas trasladar');
+        const previousDate = toDateString(current.schedule_date);
+        if (previousDate < today) throw createError(422,'No puedes trasladar una clase de una fecha pasada');
+        const startedClass = await client.query(`SELECT 1 FROM practical_sessions
+          WHERE enrollment_id=$1 AND instructor_id=$2 AND deleted_at IS NULL
+            AND scheduled_start::date=$3 AND scheduled_start::time=$4::time
+            AND status NOT IN ('PROGRAMADA','PROXIMA','CANCELADA','REPROGRAMADA') LIMIT 1`,
+        [current.enrollment_id,current.instructor_id,previousDate,current.start_time]);
+        if (startedClass.rows.length) throw createError(409,'La clase ya fue iniciada o realizada y no puede trasladarse');
+        if (previousDate === date && normalizeTime(current.start_time) === startTime && normalizeTime(current.end_time) === endTime) {
           throw createError(409, `El horario seleccionado para ${date} ya es el actual`);
         }
+        const studentConflict = await client.query(`SELECT 1 FROM course_cycle_schedule_assignments
+          WHERE student_id=$1 AND schedule_date=$2 AND status='activo' AND id<>$3
+          AND start_time<$5::time AND end_time>$4::time LIMIT 1`,[studentId,date,current.id,startTime,endTime]);
+        if (studentConflict.rows.length) throw createError(409,'El estudiante ya tiene otra clase en ese horario');
+        const dailyCount = await client.query(`SELECT COUNT(*)::int total FROM course_cycle_schedule_assignments
+          WHERE student_id=$1 AND cycle_id=$2 AND schedule_date=$3 AND status='activo' AND id<>$4`,
+        [studentId,cycleId,date,current.id]);
+        if (dailyCount.rows[0].total >= 2) throw createError(422,'El estudiante no puede tener mas de dos bloques en un dia');
         const occupiedResult = await client.query(`
           SELECT COUNT(*)::int AS occupied
           FROM course_cycle_schedule_assignments
@@ -1658,11 +1687,22 @@ class CourseCycleService {
         }
         if (current.instructor_id) {
           const instructorConflict = await client.query(`
-            SELECT 1 FROM course_cycle_schedule_assignments
-            WHERE instructor_id = $1 AND schedule_date = $2
-              AND start_time = $3::time AND end_time = $4::time
-              AND status = 'activo' AND student_id <> $5
-            LIMIT 1
+            SELECT 1 FROM (
+              SELECT schedule_date,start_time,end_time FROM course_cycle_schedule_assignments
+                WHERE instructor_id=$1 AND status='activo' AND student_id<>$5
+              UNION ALL SELECT schedule_date,start_time,end_time FROM referred_instructor_schedule_blocks
+                WHERE instructor_id=$1 AND status='activo' AND student_id<>$5
+              UNION ALL SELECT schedule_date,start_time,end_time FROM instructor_availability_overrides
+                WHERE instructor_id=$1 AND active=TRUE
+              UNION ALL SELECT ps.scheduled_start::date,ps.scheduled_start::time,ps.scheduled_end::time
+                FROM practical_sessions ps JOIN enrollments e ON e.id=ps.enrollment_id
+                WHERE ps.instructor_id=$1 AND e.student_id<>$5 AND ps.deleted_at IS NULL
+                  AND ps.status NOT IN ('CANCELADA','REPROGRAMADA')
+              UNION ALL SELECT d::date,ap.daily_start_time,(ap.daily_start_time+INTERVAL '100 minutes')::time
+                FROM additional_driving_practices ap CROSS JOIN LATERAL
+                  generate_series(ap.start_date,ap.start_date+(ap.number_of_days-1),INTERVAL '1 day') d
+                WHERE ap.instructor_id=$1 AND ap.student_id<>$5 AND ap.status IN ('SCHEDULED','IN_PROGRESS')
+            ) busy WHERE schedule_date=$2::date AND start_time<$4::time AND end_time>$3::time LIMIT 1
           `, [current.instructor_id, date, startTime, endTime, studentId]);
           if (instructorConflict.rows.length) {
             throw createError(409, `El instructor del estudiante ya esta ocupado el ${date} en ese horario`);
@@ -1680,7 +1720,7 @@ class CourseCycleService {
             AND schedule_date = $4::date AND instructor_id = $5
             AND start_time = $6::time AND end_time = $7::time
             AND status = 'activo'
-        `, [current.enrollment_id, cycleId, studentId, date, current.instructor_id,
+        `, [current.enrollment_id, cycleId, studentId, previousDate, current.instructor_id,
           current.start_time, current.end_time]);
         const inserted = await client.query(`
           INSERT INTO course_cycle_schedule_assignments (
@@ -1694,14 +1734,14 @@ class CourseCycleService {
           const details = notificationDetails.get(String(current.instructor_id)) || [];
           details.push({
             date,
-            previous: `${normalizeTime(current.start_time)} - ${normalizeTime(current.end_time)}`,
+            previous: `${previousDate} ${normalizeTime(current.start_time)} - ${normalizeTime(current.end_time)}`,
             next: `${startTime} - ${endTime}`,
           });
           notificationDetails.set(String(current.instructor_id), details);
         }
         await client.query(
           'INSERT INTO history (student_id, action) VALUES ($1, $2)',
-          [studentId, `Cambio de horario del ${date}: ${normalizeTime(current.start_time)} - ${normalizeTime(current.end_time)} a ${startTime} - ${endTime}. Observacion: ${observation}`]
+          [studentId, `Cambio de horario por ${user.id}: ${previousDate} ${normalizeTime(current.start_time)}-${normalizeTime(current.end_time)} a ${date} ${startTime}-${endTime}. Observacion: ${observation}`.slice(0,255)]
         );
       }
       const enrollmentsToSync = new Map(insertedAssignments

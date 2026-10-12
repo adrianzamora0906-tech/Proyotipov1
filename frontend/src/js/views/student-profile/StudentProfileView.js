@@ -4,6 +4,7 @@
  */
 
 import Component from '../../components/Component.js';
+import { subscribeRealtime } from '../../core/realtime/RealtimeClient.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
 import StudentService from '../../services/StudentService.js';
 import ApiService from '../../core/api/apiService.js';
@@ -45,41 +46,25 @@ class StudentProfileView extends Component {
     }
 
     const isBranchAdmin = (authService.getCurrentUser()?.roles || []).includes('BRANCH_ADMIN');
-    let branchAdminAttendance = null;
-    if (isBranchAdmin) {
-      try {
-        const result = await ApiService.getBranchAdminAttendance(studentId);
-        branchAdminAttendance = result.success ? result.data : null;
-      } catch (error) {
-        console.warn('No se pudo consultar la asistencia administrativa:', error.message);
-      }
-    }
-
-    let documents = [];
-    try {
-      const result = await ApiService.getStudentDocuments(studentId);
-      documents = result.success ? result.data.filter(document => document.type !== 'foto') : [];
-    } catch (error) {
-      console.warn('No se pudieron cargar los documentos:', error.message);
-    }
-
-    const payments = await PaymentService.getStudentPayments(studentId);
+    this.documentsLoaded = false;
+    this.documentsLoadPromise = null;
+    const [attendanceResult, paymentsResult, balanceResult, scheduleResult, historyResult] = await Promise.allSettled([
+      isBranchAdmin ? ApiService.getBranchAdminAttendance(studentId) : Promise.resolve(null),
+      PaymentService.getStudentPayments(studentId),
+      PaymentService.getStudentBalance(studentId),
+      ApiService.getStudentSchedule(studentId),
+      StudentService.getStudentHistory(studentId),
+    ]);
+    const branchAdminAttendance = attendanceResult.status === 'fulfilled' && attendanceResult.value?.success
+      ? attendanceResult.value.data : null;
+    const payments = paymentsResult.status === 'fulfilled' ? paymentsResult.value : [];
     const totalPaid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    let balanceInfo = { total: 0, paid: totalPaid, balance: 0 };
-    try {
-      balanceInfo = await PaymentService.getStudentBalance(studentId);
-    } catch (error) {
-      console.warn('No se pudo cargar el saldo del estudiante:', error.message);
-    }
-    let schedule = ScheduleService.getStudentSchedule(studentId);
-    try {
-      const result = await ApiService.getStudentSchedule(studentId);
-      if (result.success) schedule = result.data;
-    } catch (error) {
-      console.warn('No se pudo cargar el horario desde la API:', error.message);
-    }
+    const balanceInfo = balanceResult.status === 'fulfilled'
+      ? balanceResult.value : { total: 0, paid: totalPaid, balance: 0 };
+    const schedule = scheduleResult.status === 'fulfilled' && scheduleResult.value?.success
+      ? scheduleResult.value.data : ScheduleService.getStudentSchedule(studentId);
     this.studentSchedule = schedule;
-    const history = await StudentService.getStudentHistory(studentId);
+    const history = historyResult.status === 'fulfilled' ? historyResult.value : [];
     const pendingBalance = Math.max(0, Number(balanceInfo?.balance || 0));
     const paidAmount = Number(balanceInfo?.paid ?? totalPaid);
     const canProcessPayments = authService.can('PAYMENT_CREATE');
@@ -319,54 +304,8 @@ class StudentProfileView extends Component {
             </div>
           </div>
 
-          <!-- Documents -->
-          <div class="tab-pane" data-tab="documents">
-            <div class="card">
-              <div class="card-header">
-                <h3 class="card-title">Documentación</h3>
-              </div>
-              <div class="card-body">
-                <div class="form-row" style="margin-bottom: 1.5rem;">
-                  ${this.renderCedulaPdfUpload(documents)}
-                  <div style="flex:1; min-width:min(100%,220px);" id="profile-study-document">
-                    <label class="registration-bachiller-check">
-                      <input type="checkbox" id="profile-cedula-bachiller"
-                        ${documents.some(doc => doc.type === 'certificado_bachiller' && doc.file_url && doc.observations === 'La cedula indica bachiller. No requiere certificado de estudio.') ? 'checked disabled' : ''}>
-                      La cédula indica bachiller
-                    </label>
-                    <div id="profile-study-document-status" role="status">
-                      ${this.renderDocumentUpload('certificado_bachiller', 'Certificado de estudio', 'application/pdf,image/*', documents)}
-                    </div>
-                  </div>
-                </div>
-                ${documents.length > 0 ? `
-                  <div class="documents-list">
-                    ${documents.map(doc => `
-                      <div class="document-item">
-                        <div class="document-info">
-                          <div class="document-name">${doc.name}</div>
-                        </div>
-                        <div class="document-actions">
-                          ${doc.file_url ? `<a class="btn btn-small btn-secondary view-document-btn" href="#" data-file-url="${doc.file_url}">Ver archivo</a>` : ''}
-                          <label class="btn btn-small btn-secondary" style="cursor:pointer;">
-                            Editar
-                            <input type="file" class="replace-document-input" data-document-type="${doc.type}"
-                              accept="application/pdf,image/jpeg,image/png" hidden>
-                          </label>
-                          <button type="button" class="btn btn-small btn-danger delete-document-btn"
-                            data-document-id="${doc.id}" data-document-name="${doc.name}">
-                            Eliminar
-                          </button>
-                        </div>
-                      </div>
-                    `).join('')}
-                  </div>
-                ` : `
-                  <p style="color: var(--gray-500); text-align: center;">No hay documentos</p>
-                `}
-              </div>
-            </div>
-          </div>
+          <!-- Documents load only when their tab is opened. -->
+          <div class="tab-pane" data-tab="documents"></div>
 
           <!-- Financial -->
           <div class="tab-pane" data-tab="financial">
@@ -578,6 +517,7 @@ class StudentProfileView extends Component {
 
         btn.classList.add('active');
         document.querySelector(`.tab-pane[data-tab="${tabName}"]`)?.classList.add('active');
+        if (tabName === 'documents') this.loadDocumentsTab();
       });
     });
 
@@ -636,6 +576,104 @@ class StudentProfileView extends Component {
       }));
     });
 
+    document.getElementById('save-notes-btn')?.addEventListener('click', () => {
+      const notes = document.getElementById('notes-textarea').value;
+      StudentService.updateStudent(studentId, { notes });
+      alert('Observaciones guardadas');
+    });
+
+    document.getElementById('select-schedule-btn')?.addEventListener('click', () => this.openScheduleModal(studentId, { allowInitial: true }));
+    document.getElementById('change-schedule-btn')?.addEventListener('click', () => this.openScheduleModal(studentId, { allowInitial: false }));
+    document.getElementById('change-theory-schedule-btn')?.addEventListener('click', () => this.openTheoryScheduleModal(studentId));
+
+    this.updateNotificationBadge();
+  }
+
+  renderDocumentsPane(documents) {
+    return `
+          <!-- Documents -->
+          <div class="tab-pane" data-tab="documents">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Documentación</h3>
+              </div>
+              <div class="card-body">
+                <div class="form-row" style="margin-bottom: 1.5rem;">
+                  ${this.renderCedulaPdfUpload(documents)}
+                  <div style="flex:1; min-width:min(100%,220px);" id="profile-study-document">
+                    <label class="registration-bachiller-check">
+                      <input type="checkbox" id="profile-cedula-bachiller"
+                        ${documents.some(doc => doc.type === 'certificado_bachiller' && doc.file_url && doc.observations === 'La cedula indica bachiller. No requiere certificado de estudio.') ? 'checked disabled' : ''}>
+                      La cédula indica bachiller
+                    </label>
+                    <div id="profile-study-document-status" role="status">
+                      ${this.renderDocumentUpload('certificado_bachiller', 'Certificado de estudio', 'application/pdf,image/*', documents)}
+                    </div>
+                  </div>
+                </div>
+                ${documents.length > 0 ? `
+                  <div class="documents-list">
+                    ${documents.map(doc => `
+                      <div class="document-item">
+                        <div class="document-info">
+                          <div class="document-name">${doc.name}</div>
+                        </div>
+                        <div class="document-actions">
+                          ${doc.file_url ? `<a class="btn btn-small btn-secondary view-document-btn" href="#" data-file-url="${doc.file_url}">Ver archivo</a>` : ''}
+                          <label class="btn btn-small btn-secondary" style="cursor:pointer;">
+                            Editar
+                            <input type="file" class="replace-document-input" data-document-type="${doc.type}"
+                              accept="application/pdf,image/jpeg,image/png" hidden>
+                          </label>
+                          <button type="button" class="btn btn-small btn-danger delete-document-btn"
+                            data-document-id="${doc.id}" data-document-name="${doc.name}">
+                            Eliminar
+                          </button>
+                        </div>
+                      </div>
+                    `).join('')}
+                  </div>
+                ` : `
+                  <p style="color: var(--gray-500); text-align: center;">No hay documentos</p>
+                `}
+              </div>
+            </div>
+          </div>
+    `;
+  }
+
+  async loadDocumentsTab() {
+    if (this.documentsLoaded || this.documentsLoadPromise) return this.documentsLoadPromise;
+    const pane = document.querySelector('.tab-pane[data-tab="documents"]');
+    if (!pane) return;
+    pane.setAttribute('aria-busy','true');
+    pane.textContent = 'Cargando documentos...';
+    this.documentsLoadPromise = (async () => {
+      try {
+        const result = await ApiService.getStudentDocuments(this.props.studentId);
+        if (!result.success) throw new Error(result.error || 'No se pudieron cargar los documentos.');
+        if (!pane.isConnected) return;
+        const template = document.createElement('template');
+        template.innerHTML = this.renderDocumentsPane(result.data.filter(document => document.type !== 'foto'));
+        pane.replaceChildren(...template.content.querySelector('[data-tab="documents"]').childNodes);
+        this.setupDocumentListeners(this.props.studentId);
+        this.documentsLoaded = true;
+      } catch (error) {
+        if (!pane.isConnected) return;
+        pane.textContent = error.message || 'No se pudieron cargar los documentos.';
+        const retry = document.createElement('button');
+        retry.type = 'button'; retry.className = 'btn btn-secondary'; retry.textContent = 'Reintentar';
+        retry.addEventListener('click', () => this.loadDocumentsTab());
+        pane.append(retry);
+      } finally {
+        pane.removeAttribute('aria-busy');
+        this.documentsLoadPromise = null;
+      }
+    })();
+    return this.documentsLoadPromise;
+  }
+
+  setupDocumentListeners(studentId) {
     document.getElementById('profile-cedula-bachiller')?.addEventListener('change', async event => {
       const checkbox = event.currentTarget;
       if (!checkbox.checked) return;
@@ -762,18 +800,6 @@ class StudentProfileView extends Component {
     document.getElementById('mobile-blood-card-capture')?.addEventListener('click', () => {
       this.openBloodCardCompletionCapture(studentId);
     });
-
-    document.getElementById('save-notes-btn')?.addEventListener('click', () => {
-      const notes = document.getElementById('notes-textarea').value;
-      StudentService.updateStudent(studentId, { notes });
-      alert('Observaciones guardadas');
-    });
-
-    document.getElementById('select-schedule-btn')?.addEventListener('click', () => this.openScheduleModal(studentId, { allowInitial: true }));
-    document.getElementById('change-schedule-btn')?.addEventListener('click', () => this.openScheduleModal(studentId, { allowInitial: false }));
-    document.getElementById('change-theory-schedule-btn')?.addEventListener('click', () => this.openTheoryScheduleModal(studentId));
-
-    this.updateNotificationBadge();
   }
 
   closeProfileModal(refresh = false) {
@@ -1579,7 +1605,10 @@ class StudentProfileView extends Component {
       const parsed = new Date(`${date}T12:00:00`);
       return { date, name: dayNames[parsed.getDay()], label: date.slice(5).split('-').reverse().join('/') };
     });
-    const slots = [...(cycle.slots || [])]
+    const slots = [...(cycle.slots || [])].filter(slot => days.some(day =>
+      Number(slot.occupancyByDate?.[day.date]?.available ?? slot.available ?? 0) > 0
+      || (cycle.currentAssignments || []).some(item => item.date === day.date
+        && item.startTime === slot.startTime && item.endTime === slot.endTime)))
       .sort((first, second) => String(first.startTime || '').localeCompare(String(second.startTime || '')));
     const instructorName = cycle.instructor?.name
       || (cycle.currentAssignments || []).find(item => item.instructorName)?.instructorName
@@ -1623,14 +1652,15 @@ class StudentProfileView extends Component {
   renderProfileScheduleCell(cycle, slot, day, dayIndex) {
     const availability = slot.occupancyByDate?.[day.date] || {};
     const available = Number(availability.available ?? slot.available ?? 0);
-    const assignment = (cycle.currentAssignments || []).find(item => item.date === day.date);
-    const isCurrent = Boolean(assignment
-      && assignment.startTime === slot.startTime
-      && assignment.endTime === slot.endTime);
+    const assignments = (cycle.currentAssignments || []).filter(item => item.date === day.date);
+    const isCurrent = assignments.some(item => item.startTime === slot.startTime && item.endTime === slot.endTime);
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const isPast = day.date < today;
-    const disabled = available <= 0 || !assignment || isPast || isCurrent;
+    const disabled = isPast || (!isCurrent && available <= 0);
+    if (!isCurrent && (available <= 0 || isPast)) {
+      return `<div class="enrollment-calendar-empty-cell" data-day-index="${dayIndex}" aria-label="Horario no disponible"></div>`;
+    }
     const time = `${slot.startTime} - ${slot.endTime}`;
     const payload = JSON.stringify({
       id: `cycle:${cycle.id}:${slot.startTime}-${slot.endTime}`,
@@ -1640,6 +1670,7 @@ class StudentProfileView extends Component {
       dayLabel: day.name,
       dayIndex,
       course: cycle.vehicleType,
+      assignmentId: isCurrent ? assignments.find(item => item.startTime === slot.startTime && item.endTime === slot.endTime)?.id : null,
     }).replace(/"/g, '&quot;');
     return `
       <button type="button"
@@ -1649,8 +1680,8 @@ class StudentProfileView extends Component {
         data-date="${day.date}"
         data-day-index="${dayIndex}"
         ${disabled ? 'disabled' : ''}>
-        <span class="schedule-option-status ${isCurrent ? 'current' : (disabled ? 'full' : 'available')}">${isCurrent ? 'Horario actual' : (isPast ? 'Pasado' : (!assignment ? 'Sin asignaci&oacute;n' : (available <= 0 ? 'Ocupado' : 'Disponible')))}</span>
-        <span class="schedule-option-capacity">${available}/${slot.capacity} cupos</span>
+        <span class="schedule-option-status ${isCurrent ? 'current' : 'available'}">${isCurrent ? 'Horario actual' : 'Disponible'}</span>
+        <span class="schedule-option-capacity">${isCurrent ? 'Seleccionado' : `${available} cupo${available === 1 ? '' : 's'} disponible${available === 1 ? '' : 's'}`}</span>
       </button>
     `;
   }
@@ -1689,6 +1720,7 @@ class StudentProfileView extends Component {
           changes: selections.map(selection => ({
             date: selection.date,
             time: selection.time,
+            assignmentId: selection.assignmentId,
           })),
           observation,
         });
@@ -1707,10 +1739,39 @@ class StudentProfileView extends Component {
     const calendar = option.closest('.enrollment-calendar');
     const error = modal.querySelector('#profile-schedule-error');
     if (error) error.textContent = '';
+    if (option.classList.contains('current')) {
+      const source = JSON.parse(option.dataset.schedule || '{}');
+      if (!source.assignmentId) {
+        if (error) error.textContent = 'Vuelve a abrir el calendario para cargar la clase actual';
+        return;
+      }
+      calendar.querySelectorAll('.move-origin').forEach(cell => cell.classList.remove('move-origin'));
+      option.classList.add('move-origin');
+      calendar.dataset.moveOrigin = JSON.stringify(source);
+      if (error) error.textContent = `Clase seleccionada: ${source.date} ${source.time}. Selecciona su nuevo cupo.`;
+      return;
+    }
     if (option.classList.contains('selected')) {
       option.classList.remove('selected');
       return;
     }
+    let source;
+    try { source = JSON.parse(calendar.dataset.moveOrigin || 'null'); } catch (_) { source = null; }
+    if (!source) {
+      const currentCells = [...calendar.querySelectorAll(`.schedule-option.current[data-date="${option.dataset.date}"]`)];
+      if (currentCells.length === 1) source = JSON.parse(currentCells[0].dataset.schedule || '{}');
+    }
+    if (!source?.assignmentId) {
+      if (error) error.textContent = 'Selecciona primero la clase actual en rojo que deseas trasladar';
+      return;
+    }
+    calendar.querySelectorAll('.schedule-option.selected').forEach(cell => {
+      const selection = JSON.parse(cell.dataset.schedule || '{}');
+      if (selection.assignmentId === source.assignmentId) cell.classList.remove('selected');
+    });
+    option.dataset.schedule = JSON.stringify({ ...JSON.parse(option.dataset.schedule || '{}'), assignmentId: source.assignmentId });
+    delete calendar.dataset.moveOrigin;
+    calendar.querySelectorAll('.move-origin').forEach(cell => cell.classList.remove('move-origin'));
     calendar.querySelectorAll(`.schedule-option.selected[data-date="${option.dataset.date}"]`)
       .forEach(cell => cell.classList.remove('selected'));
     option.classList.add('selected');
@@ -1895,7 +1956,7 @@ class StudentProfileView extends Component {
     modal.innerHTML = '<div class="modal"><div class="modal-body">Generando QR para este estudiante...</div></div>';
     let timer = null;
     const close = (refresh = false) => {
-      if (timer) window.clearInterval(timer);
+      timer?.();
       this.closeProfileModal(refresh);
     };
 
@@ -1934,11 +1995,11 @@ class StudentProfileView extends Component {
       `;
       modal.querySelectorAll('[data-close-blood-card]').forEach(button => button.addEventListener('click', () => close(false)));
 
-      timer = window.setInterval(async () => {
+      timer = subscribeRealtime(['documents'],async () => {
         try {
           const result = await ApiService.getMobileDocumentUploadResult(token.token);
           if (!result.success || !result.data?.completed) return;
-          window.clearInterval(timer);
+          timer?.();
           timer = null;
           const fileUrl = result.data.fileUrl;
           const status = modal.querySelector('#blood-card-capture-status');
@@ -1974,7 +2035,7 @@ class StudentProfileView extends Component {
           const status = modal.querySelector('#blood-card-capture-status');
           if (status) status.textContent = error.message || 'No se pudo consultar la captura.';
         }
-      }, 2000);
+      }, () => modal.isConnected && modal.classList.contains('active'));
     } catch (error) {
       modal.innerHTML = `
         <div class="modal">
@@ -2043,16 +2104,16 @@ class StudentProfileView extends Component {
         </div>
       `;
       this.bindProfileModalClose(modal, true);
-      resultTimer = window.setInterval(async () => {
+      resultTimer = subscribeRealtime(['documents'],async () => {
         if (!modal.classList.contains('active')) {
-          window.clearInterval(resultTimer);
+          resultTimer?.();
           resultTimer = null;
           return;
         }
         try {
           const result = await ApiService.getMobileDocumentUploadResult(token.token);
           if (!result.success || !result.data?.completed || !result.data.fileUrl) return;
-          window.clearInterval(resultTimer);
+          resultTimer?.();
           resultTimer = null;
           const status = modal.querySelector('#individual-document-capture-status');
           if (status) status.textContent = 'Documento recibido. Revisa la vista previa antes de cerrar.';
@@ -2082,9 +2143,9 @@ class StudentProfileView extends Component {
           const status = modal.querySelector('#individual-document-capture-status');
           if (status) status.textContent = pollError.message || 'No se pudo consultar el documento recibido.';
         }
-      }, 2000);
+      }, () => modal.isConnected && modal.classList.contains('active'));
     } catch (error) {
-      if (resultTimer) window.clearInterval(resultTimer);
+      resultTimer?.();
       modal.innerHTML = `
         <div class="modal mobile-capture-modal">
           <div class="modal-header">

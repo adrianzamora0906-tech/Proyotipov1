@@ -1,0 +1,42 @@
+{
+  "name": "sportmancarerp-backend",
+  "version": "1.0.0",
+  "description": "Backend API para SportmancarERP",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "jest --coverage",
+    "test:db": "node scripts/test-db-connection.js",
+    "migrate": "node migrations/run.js",
+    "seed": "node seeds/seed.js",
+    "seed:instructor": "node seeds/seed-instructor.js",
+    "seed:operations": "node seeds/seed-course-operations.js",
+    "seed:admin-system": "node seeds/seed-admin-system.js",
+    "distribute:active-students": "node scripts/distribute-active-students.js",
+    "import:route": "node scripts/import-training-route.js",
+    "migrate:instructor": "node migrations/009_create_instructor_operations.js && node migrations/010_align_instructor_role.js && node migrations/011_create_training_routes.js && node migrations/012_add_mobile_document_uploads.js && node migrations/013_add_course_cycles_and_capacity.js && node migrations/014_add_instructor_to_cycle_schedule.js && node migrations/015_create_attendance_qr_challenges.js && node migrations/016_create_attendance_geofences.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.1",
+    "express-rate-limit": "^7.4.1",
+    "express-validator": "^7.2.1",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "pdf-lib": "^1.17.1",
+    "pg": "^8.13.1",
+    "pizzip": "^3.2.0",
+    "uuid": "^11.0.3",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  }
+}

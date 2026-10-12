@@ -424,13 +424,16 @@ class SidebarLayout {
     const user = authService.getCurrentUser();
     const isInstructor = String(user?.role || '').trim().toLowerCase() === 'instructor';
     if (!isInstructor) {
-      if (this._scheduleChangePollId) clearInterval(this._scheduleChangePollId);
-      this._scheduleChangePollId = null;
+      window.removeEventListener('erp:realtime',this._scheduleChangeRealtime);
+      this._scheduleChangeRealtime = null;
       return;
     }
     this.pollInstructorScheduleChanges();
-    if (!this._scheduleChangePollId) {
-      this._scheduleChangePollId = setInterval(() => this.pollInstructorScheduleChanges(), 5000);
+    if (!this._scheduleChangeRealtime) {
+      this._scheduleChangeRealtime = event => {
+        if (event.detail?.topics?.some(topic => ['notifications','schedules','resync'].includes(topic))) this.pollInstructorScheduleChanges();
+      };
+      window.addEventListener('erp:realtime',this._scheduleChangeRealtime);
     }
   }
 

@@ -2557,3 +2557,13 @@
 }
 
 .temporary-reservation-toggle{display:flex;margin:.75rem 0 0 auto}.temporary-reservation-toggle.active{border-color:#d97706;background:#fff7ed;color:#9a4d08;box-shadow:0 0 0 3px rgba(217,119,6,.12)}
+.enrollment-calendar .schedule-option.record-edit-current-slot.selected {
+  background: #fff1f2;
+  border-color: #dc2626;
+  box-shadow: inset 0 0 0 2px #dc2626;
+}
+
+.enrollment-calendar .schedule-option.record-edit-current-slot.selected .schedule-option-status {
+  background: #fee2e2;
+  color: #b91c1c;
+}

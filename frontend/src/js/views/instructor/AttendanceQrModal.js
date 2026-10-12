@@ -1,5 +1,6 @@
 import '../../lib/qrcode.browser.js';
 import PracticalSessionService from '../../services/practicalSessionService.js';
+import { subscribeRealtime } from '../../core/realtime/RealtimeClient.js';
 
 function generateQrDataUrl(value) {
   return new Promise((resolve, reject) => {
@@ -63,7 +64,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
   let refreshing = false;
   let mileageFormVisible = false;
   const clearTimers = () => {
-    if (pollTimer) window.clearInterval(pollTimer);
+    pollTimer?.();
     if (countdownTimer) window.clearInterval(countdownTimer);
     if (rotationTimer) window.clearTimeout(rotationTimer);
     pollTimer = countdownTimer = rotationTimer = null;
@@ -223,7 +224,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
     }
   };
 
-  pollTimer = window.setInterval(async () => {
+  pollTimer = subscribeRealtime(['schedules'],async () => {
     if (closed) return;
     try {
       const response = await PracticalSessionService.getAttendanceQrStatus(sessionId, phase);
@@ -251,7 +252,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       const status = overlay.querySelector('[data-attendance-status]');
       if (status && !isNetworkError(error)) status.textContent = error.message || 'No se pudo consultar la asistencia.';
     }
-  }, 1500);
+  }, () => !closed && overlay.isConnected);
 
   if (isExit) {
     try {

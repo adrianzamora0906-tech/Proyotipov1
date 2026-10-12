@@ -7,14 +7,15 @@ import Router from "./core/router/Router.js";
 import BranchIncidentsView from './views/admin/BranchIncidentsView.js';
 import { authService } from "./core/auth/AuthService.js";
 import { storageService } from "./core/storage/StorageService.js";
+import { realtimeClient } from "./core/realtime/RealtimeClient.js";
 import StudentService from "./services/StudentService.js";
 import "./data/DemoDataGenerator.js";
 
 // Views
 import LoginView from "./views/auth/LoginView.js?v=perfil-profesor-teoria-20260907";
 import DashboardView from "./views/dashboard/DashboardView.js?v=consultas-optimizadas-20260811";
-import StudentsView from "./views/students/StudentsView.js?v=activar-seleccion-real-20261008";
-import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=student-edit-registration-20261009";
+import StudentsView from "./views/students/StudentsView.js?v=carga-perfil-20261012";
+import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=carga-perfil-20261012";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=editar-grupo-finde-20261008";
 import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";
@@ -24,7 +25,7 @@ import ProfileView from "./views/profile/ProfileView.js";
 // Cash module views
 import CashDashboardView from "./views/cash/CashDashboardView.js?v=caja-cobro-directo-20260825";
 import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";
-import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=caja-cobro-modal-20260825";
+import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=websocket-20261012";
 import CashHistoryView from "./views/cash/CashHistoryView.js";
 import CashOperationsView from "./views/cash/CashOperationsView.js";
 import InstructorDashboardView from "./views/instructor/InstructorDashboardView.js?v=mi-horario-tipo-20260930";
@@ -35,10 +36,10 @@ import InstructorReferralsView from "./views/instructor/InstructorReferralsView.
 import InstructorEvaluationsView from "./views/instructor/InstructorEvaluationsView.js?v=examen-final-20260903";
 import InstructorIncidentsView from "./views/instructor/InstructorIncidentsView.js";
 import InstructorProfileView from "./views/instructor/InstructorProfileView.js";
-import MobileDocumentUploadView from "./views/mobile-upload/MobileDocumentUploadView.js?v=bordes-suaves-20261008";
-import SidebarLayout from "./layouts/SidebarLayout.js?v=avisos-instructor-20260918-3";
+import MobileDocumentUploadView from "./views/mobile-upload/MobileDocumentUploadView.js?v=agarre-amplio-20261012";
+import SidebarLayout from "./layouts/SidebarLayout.js?v=websocket-20261012";
 import AdminDashboardView from "./views/admin/AdminDashboardView.js";
-import AdminResourceMonitorView from "./views/admin/AdminResourceMonitorView.js?v=resource-actions-20260911";
+import AdminResourceMonitorView from "./views/admin/AdminResourceMonitorView.js?v=recursos-estudiante-20261012";
 import AdminSecurityView from "./views/admin/AdminSecurityView.js?v=tipo-instructor-20260819";
 import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js";
 import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=capacidad-fin-semana-20260917";
@@ -52,7 +53,7 @@ import ManagerDashboardView from "./views/manager/ManagerDashboardView.js";
 import ManagerFinanceView from "./views/manager/ManagerFinanceView.js";
 import ManagerAcademicView from "./views/manager/ManagerAcademicView.js";
 import ManagerAuditView from "./views/manager/ManagerAuditView.js?v=auditoria-responsables-20260812";
-import ManagerEnrollmentMonitorView from "./views/manager/ManagerEnrollmentMonitorView.js?v=monitor-gerencia-20260930";
+import ManagerEnrollmentMonitorView from "./views/manager/ManagerEnrollmentMonitorView.js?v=websocket-20261012";
 import StudentPortalView from "./views/student-portal/StudentPortalView.js?v=inicio-teoria-20260910";
 
 class App {
@@ -484,6 +485,7 @@ class App {
     // Sincronizar estados de pago con student.status para que Caja y Secretaría compartan el mismo origen de verdad
     // Sincronizar cambios en datos locales entre vistas y pestañas
     this.setupDataSync();
+    realtimeClient.start();
 
     // Iniciar router
     this.router.init();
@@ -499,6 +501,20 @@ class App {
   }
 
   setupDataSync() {
+    this.realtimeTopics = new Set();
+    this.dirtyRealtimeForms = new WeakSet();
+    document.addEventListener('input', event => {
+      const form = event.target.closest?.('form');
+      if (event.isTrusted && form && !/filter|search/i.test(form.id)) this.dirtyRealtimeForms.add(form);
+    });
+    window.addEventListener('erp:realtime', event => {
+      (event.detail?.topics || []).forEach(topic => this.realtimeTopics.add(topic));
+      this.scheduleRealtimeRefresh();
+    });
+    document.addEventListener('visibilitychange', () => this.scheduleRealtimeRefresh());
+    document.addEventListener('focusout', () => this.scheduleRealtimeRefresh());
+    this.realtimeObserver = new MutationObserver(() => this.scheduleRealtimeRefresh());
+    this.realtimeObserver.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style','open']});
     window.addEventListener("storage", (event) => {
       if (!event.key || !event.key.startsWith(storageService.prefix)) return;
       this.refreshCurrentRoute();
@@ -513,6 +529,58 @@ class App {
     const currentRoute = this.router.getCurrentRoute();
     if (!currentRoute || currentRoute.name === "login") return;
     this.router.renderRoute(currentRoute);
+  }
+
+  scheduleRealtimeRefresh() {
+    if (!this.realtimeTopics.size || this.realtimeTimer || this.realtimeRefreshing) return;
+    this.realtimeTimer = setTimeout(() => { this.realtimeTimer = null; this.refreshRealtimeRoute(); },350);
+  }
+
+  async refreshRealtimeRoute() {
+    const route = this.router.getCurrentRoute();
+    if (!route || !authService.isAuthenticated()) { this.realtimeTopics.clear(); return; }
+    if (document.hidden || this.router._navigating) return;
+    if (['login','student-registration'].includes(route.name) || /\/mobile-upload\//.test(window.location.pathname)) {
+      this.realtimeTopics.clear(); return;
+    }
+    const visible = element => element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden';
+    if ([...document.querySelectorAll('.modal-overlay,.branch-modal-backdrop,dialog[open],[role="dialog"]')].some(visible)) return;
+    if ([...document.querySelectorAll('form')].some(form => visible(form) && this.dirtyRealtimeForms.has(form))) return;
+    if (document.activeElement?.matches('input,select,textarea,[contenteditable="true"]')) return;
+    const topics = [...this.realtimeTopics];
+    this.realtimeTopics.clear();
+    const path = window.location.pathname;
+    if (topics.every(topic => topic === 'resources') && path !== '/admin-system/resources') return;
+    const interested = path.startsWith('/cash') ? ['payments','students','admin']
+      : /students|student-profile/.test(path) ? ['students','schedules','payments','documents','admin']
+      : /schedule|instructor/.test(path) ? ['schedules','students','payments','documents','admin']
+      : /documents/.test(path) ? ['documents','students','admin']
+      : /notifications/.test(path) ? ['notifications','schedules','payments','admin']
+      : /history/.test(path) ? ['activity','students','payments','schedules','documents','admin']
+      : /manager|admin|dashboard/.test(path) || path === '/student' ? null : ['admin','referrals'];
+    if (!topics.includes('resync') && !topics.includes('authorization') && interested && !topics.some(topic => interested.includes(topic))) return;
+    this.realtimeRefreshing = true;
+    try {
+      if (topics.includes('authorization')) { authService.authorizationCheckedAt = 0; await authService.refreshAuthorization(); }
+      const component = this.router.currentComponent;
+      if (component?.refreshRealtime) await component.refreshRealtime(topics);
+      else {
+        const filters = [...document.querySelectorAll('form[id*="filter"] input,form[id*="filter"] select')]
+          .filter(field => field.id).map(field => ({id:field.id,value:field.value}));
+        const scroll = window.scrollY;
+        await this.router.renderRoute(route);
+        filters.forEach(({id,value}) => {
+          const field = document.getElementById(id);
+          if (field && field.value !== value) { field.value = value; field.dispatchEvent(new Event('change',{bubbles:true})); }
+        });
+        window.scrollTo(0,scroll);
+      }
+    } catch (error) {
+      console.warn('No se pudo actualizar la pantalla por WebSocket:',error.message);
+    } finally {
+      this.realtimeRefreshing = false;
+      this.scheduleRealtimeRefresh();
+    }
   }
 }
 

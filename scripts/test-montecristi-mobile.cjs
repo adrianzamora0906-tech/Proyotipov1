@@ -66,8 +66,37 @@ async function test() {
       await page.locator('#student-schedule-calendar').getByText('Jose Orlando Hidalgo Meza',{exact:false}).first().waitFor();
       await page.screenshot({path:`.tmp/montecristi-register-${width}.png`,fullPage:true});
       if(width===390) {
+        const calendar = page.locator('.enrollment-calendar:visible').first();
+        await calendar.scrollIntoViewIfNeeded();
+        assert.equal(await calendar.locator('.enrollment-calendar-grid').isVisible(),false);
+        await calendar.locator('.mobile-time-option').first().click();
+        assert.equal(await calendar.locator('.mobile-time-option[aria-pressed="true"]').count(),1);
+        assert.ok(await calendar.locator('.schedule-option.selected').count() > 0);
+        await page.screenshot({path:'.tmp/montecristi-compact-mobile.png'});
+        await calendar.locator('[data-instructor-availability-toggle]').click();
+        await page.waitForTimeout(600);
+        const fullCalendar = page.locator('.enrollment-calendar:visible').first();
+        assert.equal(await fullCalendar.locator('.enrollment-calendar-heading[data-day-index]:visible').count(),2);
+        const slot = fullCalendar.locator('.schedule-option:visible').first();
+        assert.ok((await slot.boundingBox()).height >= 60);
+        await slot.click();
+        assert.ok(await fullCalendar.locator('.schedule-option.selected').count() > 0);
+        await fullCalendar.locator('.calendar-window-btn[data-direction="1"]').click();
+        assert.equal(await fullCalendar.getAttribute('data-day-window-start'),'2');
+        await fullCalendar.locator('.calendar-window-btn[data-direction="-1"]').click();
+        assert.equal(await fullCalendar.getAttribute('data-day-window-start'),'0');
+        await page.screenshot({path:'.tmp/montecristi-calendar-mobile.png'});
         const paymentTab=await page.locator('.student-modal-step-tab[data-step="4"]').boundingBox();
         assert.ok(paymentTab.x+paymentTab.width<=390,'Los cuatro pasos deben caber en el telefono');
+        await context.route('**/api/documents/mobile-upload-token', route => route.fulfill({json:{success:true,data:{token:'mobile-ui-test',documentName:'Cedula y carnet'}}}));
+        await context.route('**/api/documents/mobile-upload-token/mobile-ui-test/result', route => route.fulfill({json:{success:true,data:{completed:false}}}));
+        await page.locator('#mobile-registration-package-capture').evaluate(button => button.click());
+        const capture = page.locator('.mobile-registration-capture-overlay');
+        await capture.getByRole('link',{name:'Tomar fotos',exact:true}).waitFor();
+        assert.equal(await capture.locator('.mobile-capture-qr').isVisible(),false);
+        assert.ok(!(await capture.innerText()).includes('Escanea'));
+        await page.screenshot({path:'.tmp/montecristi-documents-mobile.png'});
+        await capture.locator('[data-close-capture]').first().click();
       }
       await page.goto('http://localhost:8080/cash');
       await page.locator('.cash-open-charge').first().waitFor();

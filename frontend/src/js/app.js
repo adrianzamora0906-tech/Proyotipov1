@@ -14,7 +14,7 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=perfil-profesor-teoria-20260907";
 import DashboardView from "./views/dashboard/DashboardView.js?v=consultas-optimizadas-20260811";
-import StudentsView from "./views/students/StudentsView.js?v=registro-movil-montecristi-20261013";
+import StudentsView from "./views/students/StudentsView.js?v=registro-movil-qr-20261013";
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=metodo-pago-perfil-20261013";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=perfil-desde-instructor-20261013";

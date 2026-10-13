@@ -55,14 +55,14 @@ async function configure() {
       VALUES($1,$2,'carro',$3,$4,$5,$6,1,$7,$8,'groups',TRUE,$9,$10,$11)
       ON CONFLICT(branch_id,course_id) DO UPDATE SET updated_by=EXCLUDED.updated_by RETURNING id`,
       [branchId,base.course_id,base.duration_days,base.normal_duration_days,base.intensive_duration_days,
-        base.session_minutes,base.normal_enabled,base.intensive_enabled,base.normal_start_days,base.intensive_start_days,actor.id])).rows[0];
+        base.session_minutes,true,false,base.normal_start_days,base.intensive_start_days,actor.id])).rows[0];
     await client.query(`INSERT INTO branch_course_schedule_templates(program_id,modality,day_of_week,start_time,end_time,active)
       SELECT $1,t.modality,t.day_of_week,t.start_time,t.end_time,TRUE FROM branch_course_schedule_templates t
       WHERE t.program_id=$2 AND t.active=TRUE AND NOT EXISTS(SELECT 1 FROM branch_course_schedule_templates own
         WHERE own.program_id=$1 AND own.modality=t.modality AND own.day_of_week=t.day_of_week
           AND own.start_time=t.start_time AND own.end_time=t.end_time)`, [program.id,base.id]);
     const group = (await client.query(`INSERT INTO instructor_groups(branch_id,code,name,course_vehicle_type,max_instructors,program_id,next_start_date)
-      VALUES($1,'CARRO-G1','Orlando - Montecristi','carro',1,$2,CURRENT_DATE+1)
+      VALUES($1,'CARRO-G1','Orlando - Montecristi','carro',1,$2,'2026-10-16'::date)
       ON CONFLICT(branch_id,code) DO UPDATE SET active=TRUE RETURNING id`, [branchId,program.id])).rows[0];
     await client.query(`INSERT INTO instructor_group_members(group_id,instructor_id,position_order,active) VALUES($1,$2,1,TRUE)
       ON CONFLICT(group_id,instructor_id) DO UPDATE SET active=TRUE,ended_at=NULL`, [group.id,instructor.id]);
@@ -70,8 +70,8 @@ async function configure() {
       SELECT DISTINCT $1::uuid,day_of_week,start_time,end_time,TRUE
       FROM branch_course_schedule_templates WHERE program_id=$2 AND active=TRUE AND modality='normal' AND day_of_week BETWEEN 1 AND 5
       ON CONFLICT(instructor_id,weekday,start_time,end_time) DO UPDATE SET active=TRUE,updated_at=NOW()`, [instructor.id,program.id]);
-    await client.query(`INSERT INTO branch_course_intensive_rotation(program_id,instructor_id,position_order,updated_by)
-      VALUES($1,$2,1,$3) ON CONFLICT(program_id,instructor_id) DO UPDATE SET active=TRUE`, [program.id,instructor.id,actor.id]);
+    await client.query(`UPDATE branch_course_intensive_rotation SET active=FALSE
+      WHERE program_id=$1 AND instructor_id=$2`, [program.id,instructor.id]);
     await client.query(`INSERT INTO branch_payment_methods(branch_id,payment_method_id,active,requires_reference,updated_by)
       SELECT $1,payment_method_id,active,requires_reference,$3 FROM branch_payment_methods WHERE branch_id=$2
       ON CONFLICT(branch_id,payment_method_id) DO NOTHING`, [branchId,base.branch_id,actor.id]);

@@ -313,6 +313,26 @@
 
 /* Responsive */
 @media (max-width: 768px) {
+  .mobile-capture-qr[hidden] { display: none; }
+  .mobile-time-picker-active > .enrollment-calendar-grid,
+  .mobile-time-picker-active > .calendar-window-controls { display: none; }
+  .mobile-time-picker { padding: 16px 12px; }
+  .mobile-time-picker[hidden] { display: none; }
+  .mobile-time-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+  .mobile-time-option { min-height: 64px; padding: 10px 8px; border: 1px solid #d0d5dd; border-radius: 6px; background: white; color: #182230; cursor: pointer; }
+  .mobile-time-option span { display: block; font-size: .85rem; font-weight: 700; }
+  .mobile-time-option span + span { margin-top: 6px; color: #087b61; font-size: .75rem; }
+  .mobile-time-option.selected { border: 2px solid #087b61; background: #ecfdf5; }
+  .mobile-capture-content { display: flex; flex-direction: column; }
+  .mobile-capture-instructions { min-width: 0; width: 100%; }
+  .mobile-capture-instructions > .btn { min-height: 48px; justify-content: center; }
+  .student-modal-overlay .enrollment-calendar-grid { grid-template-columns: 66px repeat(var(--cycle-count), minmax(0, 1fr)); }
+  .student-modal-overlay .enrollment-calendar .schedule-option,
+  .student-modal-overlay .enrollment-calendar-time,
+  .student-modal-overlay .enrollment-calendar-empty-cell { height: 64px; }
+  .student-modal-overlay .schedule-option-status { font-size: .75rem; }
+  .student-modal-overlay .schedule-option-capacity { font-size: .65rem; }
+  .student-modal-overlay .calendar-window-btn { min-height: 44px; padding: .5rem; }
   /* Limpieza global móvil: títulos y cifras primero; instrucciones operativas se conservan. */
   .content .page-header > p,
   .content .page-header > div > p,
@@ -427,6 +447,7 @@
 
 /* El instructor trabaja principalmente desde telefono. */
 .mobile-operation-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1rem 0; }
+@media (min-width: 769px) { .mobile-time-picker { display: none; } }
 .operational-instructor-layout .btn svg { width: 20px; height: 20px; flex-shrink: 0; }
 @media (max-width: 768px) {
   .instructor-layout.operational-instructor-layout .sidebar-nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }

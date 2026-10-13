@@ -1253,6 +1253,16 @@ class StudentsView extends Component {
     });
     document.querySelectorAll('.schedule-option').forEach(option => this.bindScheduleOptionInteraction(option));
     document.getElementById('student-schedule-calendar')?.addEventListener('click', async event => {
+      const compactOption = event.target.closest('[data-mobile-time]');
+      if (compactOption) {
+        const calendar = compactOption.closest('.enrollment-calendar');
+        const source = [...calendar.querySelectorAll('.schedule-option')].find(cell =>
+          cell.dataset.time === compactOption.dataset.mobileTime && !cell.disabled
+          && !cell.classList.contains('disabled'));
+        if (source) await this.handleScheduleCellClick(source);
+        this.updateMobileTimePicker(calendar);
+        return;
+      }
       const availabilityToggle = event.target.closest('[data-instructor-availability-toggle]');
       if (availabilityToggle) {
         await this.toggleInstructorAvailabilityStart();
@@ -2139,26 +2149,27 @@ class StudentsView extends Component {
         ? token.localUploadUrl
         : `${window.location.origin}/mobile-upload/${token.token}`;
       const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(uploadUrl)}`;
+      const samePhone = window.matchMedia('(max-width: 768px)').matches;
 
       overlay.innerHTML = `
         <div class="modal mobile-capture-modal">
           <div class="modal-header">
-            <h3 class="modal-title">Capturar desde telefono</h3>
+            <h3 class="modal-title">${samePhone ? 'Documentos del estudiante' : 'Capturar desde telefono'}</h3>
             <button type="button" class="modal-close" data-close-capture>&times;</button>
           </div>
           <div class="modal-body">
             <div class="mobile-capture-content">
-              <div class="mobile-capture-qr">
+              <div class="mobile-capture-qr" ${samePhone ? 'hidden' : ''}>
                 <img src="${qrUrl}" alt="QR para capturar documento">
               </div>
               <div class="mobile-capture-instructions">
-                <a class="btn btn-primary" href="${escapeHtml(uploadUrl)}" target="_blank" rel="noopener">Abrir c&aacute;mara en este tel&eacute;fono</a>
+                ${samePhone ? `<a class="btn btn-primary" href="${escapeHtml(uploadUrl)}" target="_blank" rel="noopener">Tomar fotos</a>` : ''}
                 <strong>${token.documentName || 'Cedula y carnet de la Cruz Roja'}</strong>
-                <span>${isAdditionalPractice ? 'Escanea el QR con el tel&eacute;fono para tomar las fotos.' : 'Este QR sirve para todos los estudiantes durante la jornada.'}</span>
+                ${samePhone ? '' : `<span>${isAdditionalPractice ? 'Escanea el QR con el tel&eacute;fono para tomar las fotos.' : 'Este QR sirve para todos los estudiantes durante la jornada.'}</span>`}
                 ${isAdditionalPractice ? `<p>${this.additionalPracticeStudent
                   ? 'Fotograf&iacute;a el frente y reverso de la licencia. El sistema los convertir&aacute; en un solo PDF.'
                   : 'Fotograf&iacute;a el frente y reverso de la c&eacute;dula y de la licencia. El sistema organizar&aacute; las cuatro fotos en un solo PDF.'}</p>` : ''}
-                ${isAdditionalPractice ? '' : '<p>Escan&eacute;alo una sola vez. Captura la c&eacute;dula y el carnet. Si el estudiante trae el certificado de estudio, tambi&eacute;n puedes fotografiarlo o seleccionar su PDF.</p>'}
+                ${isAdditionalPractice || samePhone ? '' : '<p>Escan&eacute;alo una sola vez. Captura la c&eacute;dula y el carnet. Si el estudiante trae el certificado de estudio, tambi&eacute;n puedes fotografiarlo o seleccionar su PDF.</p>'}
                 <small id="registration-mobile-capture-status">Esperando captura desde el telefono...</small>
                 <div id="registration-mobile-capture-preview" class="mobile-capture-preview" hidden></div>
               </div>
@@ -3987,11 +3998,12 @@ class StudentsView extends Component {
   shiftCalendarWindow(calendar, direction) {
     if (!calendar) return;
     const dayCount = Number(calendar.dataset.dayCount || 0);
-    const maximumStart = Math.max(0, Math.floor((dayCount - 1) / 5) * 5);
+    const pageSize = window.matchMedia('(max-width: 768px)').matches ? 2 : 5;
+    const maximumStart = Math.max(0, Math.floor((dayCount - 1) / pageSize) * pageSize);
     const currentStart = Number(calendar.dataset.dayWindowStart || 0);
     const nextStart = direction > 0
-      ? Math.min(maximumStart, currentStart + 5)
-      : Math.max(0, currentStart - 5);
+      ? Math.min(maximumStart, currentStart + pageSize)
+      : Math.max(0, currentStart - pageSize);
     calendar.dataset.dayWindowStart = String(nextStart);
     this.updateCalendarWindow(calendar);
   }
@@ -4000,7 +4012,8 @@ class StudentsView extends Component {
     if (!calendar) return;
     const dayCount = Number(calendar.dataset.dayCount || 0);
     const start = Number(calendar.dataset.dayWindowStart || 0);
-    const end = Math.min(dayCount, start + 5);
+    const pageSize = window.matchMedia('(max-width: 768px)').matches ? 2 : 5;
+    const end = Math.min(dayCount, start + pageSize);
     const grid = calendar.querySelector('.enrollment-calendar-grid');
     if (grid) grid.style.setProperty('--cycle-count', String(Math.max(1, end - start)));
     calendar.querySelectorAll('[data-day-index]').forEach(element => {
@@ -4008,13 +4021,41 @@ class StudentsView extends Component {
       element.classList.toggle('calendar-day-hidden', dayIndex < start || dayIndex >= end);
     });
     const label = calendar.querySelector('.calendar-window-label');
-    if (label) label.textContent = dayCount > 5
+    if (label) label.textContent = dayCount > pageSize
       ? `Días ${start + 1} al ${end} de ${dayCount}`
       : `${dayCount} ${dayCount === 1 ? 'día' : 'días'}`;
     const previous = calendar.querySelector('.calendar-window-btn[data-direction="-1"]');
     const next = calendar.querySelector('.calendar-window-btn[data-direction="1"]');
     if (previous) previous.disabled = start <= 0;
     if (next) next.disabled = end >= dayCount;
+    this.updateMobileTimePicker(calendar);
+  }
+
+  updateMobileTimePicker(calendar) {
+    if (!calendar) return;
+    const controls = calendar.querySelector('.calendar-window-controls');
+    if (!controls) return;
+    const compact = window.matchMedia('(max-width: 768px)').matches
+      && authService.getCurrentUser()?.role === 'instructor' && authService.can('STUDENT_CREATE')
+      && !this.isRotationEnabled(calendar) && !this.useInstructorFirstAvailability
+      && document.getElementById('selected-practical-mode')?.value !== 'exam_only';
+    calendar.classList.toggle('mobile-time-picker-active', compact);
+    let picker = calendar.querySelector('.mobile-time-picker');
+    if (!compact) { if (picker) picker.hidden = true; return; }
+    if (!picker) {
+      picker = document.createElement('div');
+      picker.className = 'mobile-time-picker';
+      controls.before(picker);
+    }
+    picker.hidden = false;
+    const times = new Map();
+    calendar.querySelectorAll('.schedule-option').forEach(cell => {
+      if (cell.disabled || cell.classList.contains('disabled') || Number(cell.dataset.normalAvailable) <= 0) return;
+      const selected = cell.classList.contains('selected');
+      times.set(cell.dataset.time, Boolean(times.get(cell.dataset.time)) || selected);
+    });
+    picker.innerHTML = `<strong>Horario del curso</strong><div class="mobile-time-options">${[...times].map(([time, selected]) =>
+      `<button type="button" class="mobile-time-option ${selected ? 'selected' : ''}" data-mobile-time="${escapeHtml(time)}" aria-pressed="${selected}"><span>${escapeHtml(time)}</span><span>${selected ? 'Seleccionado' : 'Disponible'}</span></button>`).join('')}</div>${times.size ? '' : '<p>No hay turnos disponibles.</p>'}`;
   }
 
   async handleScheduleCellClick(option) {
@@ -4132,6 +4173,7 @@ class StudentsView extends Component {
 
   syncRotationState(calendar) {
     if (!calendar) return;
+    this.updateMobileTimePicker(calendar);
     const enabled = this.isRotationEnabled(calendar);
     const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';
     calendar.classList.toggle('rotation-enabled', enabled);
@@ -4217,6 +4259,7 @@ class StudentsView extends Component {
   }
 
   updateScheduleSelectionSummary(plan = []) {
+    document.querySelectorAll('.enrollment-calendar').forEach(calendar => this.updateMobileTimePicker(calendar));
     const summary = document.getElementById('schedule-selection-summary');
     if (!summary) return;
     const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';

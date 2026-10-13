@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v14-document-grips';
+const CACHE_NAME = 'sportmancar-offline-v25-montecristi-mobile';
 const APP_SHELL = [
   '/',
   '/index.html',

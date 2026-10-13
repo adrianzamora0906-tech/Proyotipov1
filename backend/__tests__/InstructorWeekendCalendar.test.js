@@ -28,4 +28,23 @@ describe('instructor weekend calendar', () => {
   test('unknown modality is rejected', async () => {
     await expect(Service.getInstructorCalendar({}, 'instructor', null, 'invalid')).rejects.toMatchObject({ status: 422 });
   });
+  test.each(['normal', 'intensivo'])('exam appointments appear as intensive rows without changing slots (%s)', async modality => {
+    const implementation = db.query.getMockImplementation();
+    db.query.mockImplementation(async (sql, params) => {
+      if (sql.includes("ps.appointment_type='EXAM_ONLY'") && sql.includes('exam_date')) {
+        expect(params).toEqual(['instructor', 'branch', 'course', '2026-10-10', '2026-10-18']);
+        expect(sql).toContain("ps.status NOT IN ('CANCELADA','REPROGRAMADA')");
+        expect(sql).toContain("s.status <> 'inhabilitado'");
+        return { rows: [{ id: 'exam', student_id: 'student', name: 'Monica',
+          identification: '1314246206', exam_date: '2026-10-14', start_time: '16:00',
+          end_time: '16:20', appointment_type: 'EXAM_ONLY' }] };
+      }
+      return implementation(sql, params);
+    });
+    const calendar = await Service.getInstructorCalendar({ branch_id: 'branch' }, 'instructor', null, modality);
+    expect(calendar.students).toContainEqual(expect.objectContaining({
+      status: 'clase_intensiva', appointment_type: 'EXAM_ONLY', exam_date: '2026-10-14',
+    }));
+    expect(calendar.slots.every(slot => slot.status === 'disponible')).toBe(true);
+  });
 });

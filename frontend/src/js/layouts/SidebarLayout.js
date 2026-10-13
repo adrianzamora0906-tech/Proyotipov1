@@ -13,6 +13,7 @@ class SidebarLayout {
     const currentTheorySection = new URLSearchParams(window.location.search).get('section') || 'dashboard';
     const role = String(user?.role || '').trim().toLowerCase();
     const isInstructor = role === 'instructor';
+    const isOperationalInstructor = isInstructor && user?.permissions?.includes('STUDENT_CREATE');
     const isTheoryInstructor = isInstructor && user?.practiceArea === 'teoria';
     const isCashOnly = role === 'caja';
     const isBranchSecretary = role === 'secretaria_sucursal' || role === 'secretaria';
@@ -44,7 +45,7 @@ class SidebarLayout {
     ];
 
     return `
-      <div class="layout ${isInstructor ? 'instructor-layout' : ''} ${isTheoryInstructor ? 'theory-instructor-layout' : ''} ${managerMobileLayoutClass}">
+      <div class="layout ${isInstructor ? 'instructor-layout' : ''} ${isOperationalInstructor ? 'operational-instructor-layout' : ''} ${isTheoryInstructor ? 'theory-instructor-layout' : ''} ${managerMobileLayoutClass}">
         <!-- Sidebar -->
         <aside class="sidebar">
           <div class="sidebar-header">
@@ -77,6 +78,16 @@ class SidebarLayout {
                   <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icon}</svg>
                   <span class="nav-text">${label}</span>
                 </a>`).join('')}
+            ` : isOperationalInstructor ? `
+              ${[
+                ['/instructor', 'Inicio', 'home'],
+                ['/instructor/agenda', 'Agenda', 'calendar'],
+                ['/students/new', 'Registrar', 'user-plus'],
+                ['/students', 'Alumnos', 'users'],
+                ...(canViewPayments ? [['/cash', 'Cobros', 'wallet']] : []),
+              ].map(([href,label,icon]) => `<a href="${href}" class="nav-item ${currentPath === href ? 'active' : ''}" ${currentPath === href ? 'aria-current="page"' : ''}>
+                <i data-lucide="${icon}" class="nav-icon" aria-hidden="true"></i><span class="nav-text">${label}</span>
+              </a>`).join('')}
             ` : isInstructor ? `
               <a href="${isTheoryInstructor ? '/instructor/theory?section=dashboard' : '/instructor'}" class="nav-item ${isTheoryInstructor ? (currentPath === '/instructor/theory' && currentTheorySection === 'dashboard' ? 'active' : '') : (currentPath === '/instructor' ? 'active' : '')}">
                 <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -227,7 +238,7 @@ class SidebarLayout {
             ${!isAdminSystem && !isGeneralManager && user?.permissions?.includes('GESTION_PERSONAL') ? `<a href="/branch-access" class="nav-item ${currentPath === '/branch-access' ? 'active' : ''}">
               <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="M9 12l2 2 4-4"></path></svg><span class="nav-text">Personal y accesos</span>
             </a>` : ''}
-            ${!isAdminSystem && !isGeneralManager && !isTheoryInstructor && !isCashOnly ? `<a href="/history" class="nav-item ${currentPath === '/history' ? 'active' : ''}">
+            ${!isAdminSystem && !isGeneralManager && !isTheoryInstructor && !isCashOnly && !isOperationalInstructor ? `<a href="/history" class="nav-item ${currentPath === '/history' ? 'active' : ''}">
               <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10"></circle>
                 <polyline points="12 7 12 12 15 14"></polyline>
@@ -413,6 +424,7 @@ class SidebarLayout {
   }
 
   static attachEventListeners() {
+    window.lucide?.createIcons();
     if (!this._initialized) {
       this.initializeEventListeners();
     }

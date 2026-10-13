@@ -1,6 +1,6 @@
 import Component from '../../components/Component.js';
 import ApiService from '../../core/api/apiService.js';
-import { editDocument, photoCanvas, loadScanner } from '../../services/DocumentScannerService.js?v=agarre-amplio-20261012';
+import { editDocument, photoCanvas, loadScanner } from '../../services/DocumentScannerService.js?v=agarre-fino-20261012';
 
 class MobileDocumentUploadView extends Component {
   async render() {

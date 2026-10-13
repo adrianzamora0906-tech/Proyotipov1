@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { deadlineSql } = require('./EnrollmentWindow');
 const { createError } = require('../middleware/errorHandler');
 const CycleInstructorAssignmentService = require('./CycleInstructorAssignmentService');
 const AutomaticCycleService = require('./AutomaticCycleService');
@@ -815,7 +816,7 @@ class CourseCycleService {
         WHERE rotation.branch_id=$1 AND rotation.vehicle_type=$2
           AND rotation.active=TRUE AND rotation.cycle_id IS NOT NULL
           AND cc.active=TRUE AND cc.deleted_at IS NULL
-          AND cc.status IN ('activo','proximo') AND CURRENT_DATE<=cc.start_date+2
+          AND cc.status IN ('activo','proximo') AND CURRENT_DATE<=${deadlineSql}
         ORDER BY cc.start_date,rotation.position_order
       `, [branchId, filters.vehicle_type]);
       intensiveRotation.cycleIds = [...new Set([
@@ -839,9 +840,9 @@ class CourseCycleService {
       where += ` AND cc.start_date >= $${params.length}::date`;
     } else {
       where += `
-        -- REGLA PROTEGIDA: una matricula nueva admite como maximo los dos dias
+        -- REGLA PROTEGIDA: una matricula nueva admite como maximo los dos dias habiles
         -- posteriores al inicio. No reemplazar esta condicion por end_date.
-        AND CURRENT_DATE <= cc.start_date + 2
+        AND CURRENT_DATE <= ${deadlineSql}
       `;
     }
 
@@ -1032,6 +1033,7 @@ class CourseCycleService {
     const selectedInstructorIsBenito = String(selectedInstructorRule?.instructor_name || '')
       .trim().toLowerCase() === 'benito alonzo';
     const fullScheduleRequested = filters.full_schedule === true || filters.full_schedule === 'true';
+    const includeOccupied = filters.include_occupied === true || filters.include_occupied === 'true';
     const selectedInstructorShowsFullSchedule = selectedInstructorIsBenito || fullScheduleRequested;
     const requestedStartAppliesToRow = row => Boolean(filters.practical_start_date
       && (!filters.practical_cycle_id || String(filters.practical_cycle_id) === String(row.id)));
@@ -1249,7 +1251,7 @@ class CourseCycleService {
         vehicleType: row.vehicle_type,
         startDate: toDateString(row.start_date),
         endDate: toDateString(row.end_date),
-        enrollmentDeadline: toDateString(new Date(new Date(row.start_date).setDate(new Date(row.start_date).getDate() + 2))),
+        enrollmentDeadline: addBusinessDays(row.start_date, 2),
         enrollmentStarted: toDateString(row.start_date) <= toDateString(new Date()),
         practicalStartDate: practicalDates[0] || toDateString(row.start_date),
         practicalEndDate: practicalDates[practicalDates.length - 1] || toDateString(row.end_date),
@@ -1263,7 +1265,7 @@ class CourseCycleService {
           name: row.group_name,
         } : null,
         instructors: (Array.isArray(row.instructors) ? row.instructors : [])
-          .filter(instructor => filters.instructor_id || instructorHasAvailability(instructor)),
+          .filter(instructor => filters.instructor_id || includeOccupied || instructorHasAvailability(instructor)),
         theoryOptions: row.theory_options,
         slotCapacity: configuredCapacity,
         fullNormalSchedule: showFullNormalSchedule,
@@ -1372,7 +1374,7 @@ class CourseCycleService {
     const bookableOptions = options.filter(option =>
       (option.slots || []).some(slot => Number(slot.available || 0) > 0));
 
-    if (!selectedInstructorShowsFullSchedule) return bookableOptions;
+    if (!selectedInstructorShowsFullSchedule) return includeOccupied ? options : bookableOptions;
     if (!selectedInstructorIsBenito) return options;
 
     // Benito trabaja sobre una sola secuencia semanal, cuyo inicio base es el
@@ -1381,7 +1383,7 @@ class CourseCycleService {
     // Conservamos un ciclo tecnico por tipo/modalidad y semana para registrar
     // la matricula, mientras la agenda global sigue evitando cruces entre ambos.
     const weeklyOptions = new Map();
-    bookableOptions.forEach(option => {
+    (includeOccupied ? options : bookableOptions).forEach(option => {
       if (option.modality === 'intensivo') {
         weeklyOptions.set(`intensivo:${option.id}`, option);
         return;
@@ -1980,7 +1982,7 @@ class CourseCycleService {
           AND cc.status IN ('activo', 'proximo')
           -- En matricula nueva aplica la ventana del ciclo destino; en
           -- reagendamiento manda la ventana del curso actual del estudiante.
-          AND ($2::uuid IS NOT NULL OR CURRENT_DATE <= cc.start_date + 2)
+          AND ($2::uuid IS NOT NULL OR CURRENT_DATE <= ${deadlineSql})
         FOR UPDATE
       `, [cycleId, rescheduleFromCycleId]);
 

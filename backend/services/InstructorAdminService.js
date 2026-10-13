@@ -1030,6 +1030,24 @@ class InstructorAdminService {
       ORDER BY requested.start_time,name
     `, [nextCycle.id, instructorId]);
 
+    const examStudents = await db.query(`
+      SELECT ps.id,s.id student_id,s.identification,
+        TRIM(CONCAT(s.first_name,' ',s.last_name)) name,s.phone,
+        to_char(ps.scheduled_start AT TIME ZONE 'America/Guayaquil','YYYY-MM-DD') exam_date,
+        to_char(ps.scheduled_start AT TIME ZONE 'America/Guayaquil','HH24:MI') start_time,
+        to_char(ps.scheduled_end AT TIME ZONE 'America/Guayaquil','HH24:MI') end_time,
+        ps.appointment_type
+      FROM practical_sessions ps
+      JOIN enrollments e ON e.id=ps.enrollment_id
+      JOIN students s ON s.id=e.student_id AND s.status <> 'inhabilitado'
+      WHERE ps.instructor_id=$1 AND ps.branch_id=$2 AND e.course_id=$3
+        AND ps.appointment_type='EXAM_ONLY' AND ps.deleted_at IS NULL
+        AND ps.status NOT IN ('CANCELADA','REPROGRAMADA')
+        AND LOWER(e.status) NOT IN ('cancelado','anulado')
+        AND (ps.scheduled_start AT TIME ZONE 'America/Guayaquil')::date BETWEEN $4::date AND $5::date
+      ORDER BY ps.scheduled_start,name
+    `, [instructorId, effectiveBranchId, nextCycle.course_id, toDateString(rangeStart), toDateString(rangeEnd)]);
+
     const slots = calendarDates.flatMap(date => calendarAvailability
       .filter(slot => Number(slot.weekday) === Number(date.getDay()))
       .map(slot => {
@@ -1124,6 +1142,7 @@ class InstructorAdminService {
       },
       students: canViewEffectiveBranchStudents ? [
         ...enrolledStudents.rows.map(student => ({ ...student, status: 'matriculado' })),
+        ...examStudents.rows.map(student => ({ ...student, status: 'clase_intensiva' })),
         ...[...new Map(additionalPractices.rows
           .filter(practice => String(practice.branch_id)===String(scheduleBranchId))
           .map(practice => [practice.id, {

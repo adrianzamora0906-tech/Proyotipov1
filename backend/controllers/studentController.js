@@ -14,6 +14,9 @@ async function getStudentScope(req, useDefaultBranch = true) {
     return req.query.branch_id ? { branch_id: req.query.branch_id } : {};
   }
   const branchId = effectiveBranchId(req);
+  if (req.user.role === 'instructor' && req.authorization?.permissions?.includes('STUDENT_CREATE')) {
+    return { branch_id: branchId };
+  }
   const location = await db.query('SELECT city_id FROM branches WHERE id = $1', [branchId]);
   const cityId = location.rows[0]?.city_id || null;
   if (req.query.scope === 'created') {
@@ -194,6 +197,13 @@ class StudentController {
         ...req.body,
         pickupBranchId: req.body.pickupBranchId || effectiveBranchId(req),
       };
+      if (req.user.role === 'instructor' && !req.authorization?.global) {
+        const branchId = effectiveBranchId(req);
+        if (studentData.branch_id && String(studentData.branch_id) !== String(branchId)) {
+          return res.status(403).json({ success:false,error:'Solo puedes registrar estudiantes en tu sucursal' });
+        }
+        studentData.branch_id = branchId;
+      }
       const student = await StudentService.create(studentData, req.user.id, {
         allowDiscount: req.authorization?.permissions?.includes('PAYMENT_CREATE') || false,
         requestContext: req.requestContext,

@@ -839,9 +839,27 @@ button.calendar-slot {
   color: #075985;
 }
 
+.instructor-students-summary .intensive,
+.instructor-student-status.clase_intensiva {
+  background: #e0f2fe;
+  color: #075985;
+}
+
 .instructor-student-status.ocupacion {
   background: #fee2e2;
   color: #b42318;
+}
+
+.instructor-student-profile-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.instructor-student-profile-link:hover,
+.instructor-student-profile-link:focus-visible {
+  border-color: #2563eb;
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
 }
 
 .calendar-slot.unavailable .slot-status {

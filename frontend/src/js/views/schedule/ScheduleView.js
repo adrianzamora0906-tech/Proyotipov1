@@ -1069,6 +1069,7 @@ class ScheduleView extends Component {
     const matriculated = students.filter(student => student.status === 'matriculado').length;
     const reserved = students.filter(student => student.status === 'reservado').length;
     const transport = students.filter(student => student.status === 'transporte').length;
+    const intensive = students.filter(student => student.status === 'clase_intensiva').length;
     return `
       <div class="modal instructor-students-modal" role="dialog" aria-modal="true" aria-label="Estudiantes de ${this.escapeHtml(calendar.instructor.name)}">
         <div class="modal-header">
@@ -1083,20 +1084,25 @@ class ScheduleView extends Component {
             <span class="matriculated">${matriculated} matriculado${matriculated === 1 ? '' : 's'}</span>
             <span class="reserved">${reserved} reservado${reserved === 1 ? '' : 's'}</span>
             ${transport ? `<span class="transport">${transport} por transporte</span>` : ''}
+            ${intensive ? `<span class="intensive">${intensive} clase${intensive === 1 ? '' : 's'} intensiva${intensive === 1 ? '' : 's'}</span>` : ''}
           </div>
           ${students.length ? `
             <div class="instructor-students-list">
-              ${students.map(student => `
-                <article class="instructor-student-row">
+              ${students.map(student => {
+                const profileId = student.status === 'transporte' || student.status === 'reservado'
+                  ? null : student.student_id || student.id;
+                const tag = profileId ? 'a' : 'article';
+                return `
+                <${tag} class="instructor-student-row${profileId ? ' instructor-student-profile-link' : ''}"${profileId ? ` href="/student-profile/${encodeURIComponent(profileId)}" data-instructor-student-profile` : ''}>
                   <div class="instructor-student-avatar">${this.escapeHtml(this.initials(student.name))}</div>
                   <div class="instructor-student-person">
                     <strong>${this.escapeHtml(student.name)}</strong>
                     <span>${student.identification ? `Cédula: ${this.escapeHtml(student.identification)}` : 'Cédula pendiente'}${student.phone ? ` · ${this.escapeHtml(student.phone)}` : ''}</span>
-                    <small>${student.start_time ? `${this.escapeHtml(student.start_time)}–${this.escapeHtml(student.end_time)}` : 'Horario pendiente'}</small>
+                    <small>${student.exam_date ? `${this.escapeHtml(student.exam_date.split('-').reverse().join('/'))} · ` : ''}${student.start_time ? `${this.escapeHtml(student.start_time)}–${this.escapeHtml(student.end_time)}` : 'Horario pendiente'}</small>
                   </div>
-                  <span class="instructor-student-status ${student.status}">${student.status === 'reservado' ? 'Reservado' : student.status === 'transporte' ? 'Transporte' : student.status === 'practica_adicional' ? 'Practica adicional' : 'Matriculado'}</span>
-                </article>
-              `).join('')}
+                  <span class="instructor-student-status ${student.status}">${student.status === 'clase_intensiva' ? 'Clase intensiva' : student.status === 'reservado' ? 'Reservado' : student.status === 'transporte' ? 'Transporte' : student.status === 'practica_adicional' ? 'Practica adicional' : 'Matriculado'}</span>
+                </${tag}>
+              `; }).join('')}
             </div>
           ` : `<div class="schedule-empty">Este instructor no tiene estudiantes ni reservas en ${this.escapeHtml(calendar.course?.code || 'este curso')}. Las horas marcadas como ocupadas pueden pertenecer a otros cursos o sucursales, clases te&oacute;ricas o bloqueos de disponibilidad.</div>`}
         </div>
@@ -1118,6 +1124,18 @@ class ScheduleView extends Component {
       if (event.key === 'Escape') close();
     };
     overlay.querySelectorAll('[data-close-instructor-students]').forEach(button => button.addEventListener('click', close));
+    overlay.querySelectorAll('[data-instructor-student-profile]').forEach(link => {
+      link.addEventListener('click', event => {
+        if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
+        event.preventDefault();
+        const path = link.getAttribute('href');
+        close();
+        this.closeCalendarModal();
+        document.body.style.overflow = '';
+        window.history.pushState(null, null, path);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+    });
     overlay.addEventListener('click', event => {
       if (event.target === overlay) close();
     });

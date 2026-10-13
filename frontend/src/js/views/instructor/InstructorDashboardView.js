@@ -26,6 +26,9 @@ class InstructorDashboardView extends Component {
             <span class="badge badge-success">${escapeHtml(dashboard.instructor.status || 'activo')}</span>
           </div>
 
+          ${authService.can('STUDENT_CREATE') ? `<div class="mobile-operation-actions"><a class="btn btn-primary" href="/students/new"><i data-lucide="user-plus" aria-hidden="true"></i>Registrar estudiante</a>
+              <a class="btn btn-secondary" href="/students"><i data-lucide="users" aria-hidden="true"></i>Mis alumnos</a>
+              ${authService.can('PAYMENT_CREATE') ? '<a class="btn btn-secondary" href="/cash"><i data-lucide="wallet" aria-hidden="true"></i>Registrar cobro</a>' : ''}</div>` : ''}
           <div class="stats-grid">
             ${this.renderStat(dashboard.summary.nextSession ? formatTime(dashboard.summary.nextSession.scheduledStart) : 'Sin clases', 'Próxima clase', 'next')}
             ${this.renderStat(dashboard.summary.scheduledToday, 'Clases de hoy', 'today')}
@@ -46,7 +49,7 @@ class InstructorDashboardView extends Component {
                 ${this.renderQuickAction('/instructor/incidents', 'Reportar incidencia', 'Informar novedades operativas')}
               </div>
             </div>
-            ${this.renderRecommendedRoute(dashboard.summary.nextSession, dashboard.routePreview)}
+            ${authService.can('STUDENT_CREATE') ? '' : this.renderRecommendedRoute(dashboard.summary.nextSession, dashboard.routePreview)}
           </div>
         </div>
       `;

@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const db = require('../config/database');
+const { deadlineSql } = require('./EnrollmentWindow');
 const { createError } = require('../middleware/errorHandler');
 const Cycles = require('./CourseCycleService');
 const Sessions = require('./CycleInstructorAssignmentService');
@@ -105,7 +106,7 @@ class StudentRecordEditService {
       (SELECT json_agg(t) FROM branch_course_programs p JOIN branch_course_schedule_templates t ON t.program_id=p.id
         WHERE p.branch_id=cc.branch_id AND p.course_id=cc.course_id AND t.modality=cc.modality AND t.active=TRUE) schedule_templates
       FROM course_cycles cc JOIN courses c ON c.id=cc.course_id WHERE cc.branch_id=$1 AND cc.active=TRUE AND cc.deleted_at IS NULL
-        AND cc.status IN ('activo','proximo') AND (CURRENT_DATE<=cc.start_date+2 OR EXISTS (
+        AND cc.status IN ('activo','proximo') AND (CURRENT_DATE<=${deadlineSql} OR EXISTS (
           SELECT 1 FROM course_cycle_schedule_assignments own
           WHERE own.cycle_id=cc.id AND own.student_id=$4 AND own.status='activo'))
         AND ($2::uuid IS NULL OR cc.course_id=$2) AND ($3::text IS NULL OR cc.modality=$3)

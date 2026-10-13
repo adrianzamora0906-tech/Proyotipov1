@@ -26,7 +26,7 @@ const date = (value) =>
     : "—";
 const types = {
   today_enrollments: {
-    label: "Matriculados hoy",
+    label: "Registrados hoy",
     description: "Personas registradas durante el día de hoy",
   },
   active_students: {
@@ -62,7 +62,6 @@ const columns = {
     ["branch", "Sucursal"],
     ["registered_by", "Registrado por"],
     ["enrollment_date", "Fecha de registro", "date"],
-    ["status", "Estado"],
     ["amount", "Valor", "money"],
     ["balance", "Pendiente", "money"],
   ],
@@ -174,7 +173,7 @@ export default class ManagerReportsView extends Component {
     <section class="report-assistant"><h2>Consulta rápida</h2><p>Escribe una pregunta sencilla. Ejemplo: “¿Cuántos estudiantes activos hay en Manta 2000?”</p><form class="assistant-input" id="report-question"><input id="report-question-input" placeholder="Escribe tu consulta…" autocomplete="off"><button class="btn btn-primary">Consultar</button></form><div class="assistant-answer" id="assistant-answer"></div></section>
     <form class="report-filters" id="universal-report-filters">${this.isBranchScopedReport ? `<select name="province" hidden disabled></select><label>Cantón / ciudad<select name="city" disabled><option value="${esc(this.filters.city)}">${esc(this.filters.city || "Cantón asignado")}</option></select></label><label>Sucursal<select name="branchId"><option value="">Todas las sucursales</option></select></label>` : `<label>Provincia<select name="province"><option value="">Todas</option></select></label><label>Cantón / ciudad<select name="city"><option value="">Todos</option></select></label><label>Sucursal<select name="branchId"><option value="">Todas las sucursales</option></select></label>`}<label>Tipo de curso<select name="courseType"><option value="">Todos</option><option value="moto">Moto</option><option value="carro">Automóvil</option></select></label><label>Desde<input type="date" name="dateFrom" value="${this.filters.dateFrom}"></label><label>Hasta<input type="date" name="dateTo" value="${this.filters.dateTo}"></label><button type="button" class="btn btn-secondary" id="report-clear-filters">Limpiar filtros</button></form>
     <section class="report-kpis" id="report-kpis"></section>
-    <section class="report-panel"><div class="report-panel-head"><div><h2 id="report-title">Matriculados hoy</h2><small id="report-description">Personas registradas durante el día de hoy y usuario responsable del registro.</small></div><button class="btn" id="report-export" ${this.canExport ? "" : "hidden"}>Exportar Excel</button></div><div class="report-table-wrap"><table class="report-table"><thead id="report-table-head"></thead><tbody id="report-table-body"></tbody></table></div><div class="report-pagination" id="report-pagination"></div></section>
+    <section class="report-panel"><div class="report-panel-head"><div><h2 id="report-title">Registrados hoy</h2><small id="report-description">Personas registradas durante el día de hoy y usuario responsable del registro.</small></div><button class="btn" id="report-export" ${this.canExport ? "" : "hidden"}>Exportar Excel</button></div><div class="report-table-wrap"><table class="report-table"><thead id="report-table-head"></thead><tbody id="report-table-body"></tbody></table></div><div class="report-pagination" id="report-pagination"></div></section>
     </main>`);
   }
   async mount() {
@@ -480,7 +479,7 @@ export default class ManagerReportsView extends Component {
       computed.services = s.services ?? this.branchInstructorReport.services ?? 0;
     }
     const cards = [
-      ["today_enrollments", s.today_enrollments, "Matriculados hoy"],
+      ["today_enrollments", s.today_enrollments, "Registrados hoy"],
       ["enrollments", computed.enrollments ?? s.enrollments, "Matrículas"],
       ["cycles", computed.cycles ?? s.cycles, "Ciclos"],
       ["instructors", computed.instructors ?? s.instructors, "Instructores"],

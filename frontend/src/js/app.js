@@ -14,10 +14,10 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=perfil-profesor-teoria-20260907";
 import DashboardView from "./views/dashboard/DashboardView.js?v=consultas-optimizadas-20260811";
-import StudentsView from "./views/students/StudentsView.js?v=carga-perfil-20261012";
-import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=carga-perfil-20261012";
+import StudentsView from "./views/students/StudentsView.js?v=registro-movil-montecristi-20261013";
+import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=metodo-pago-perfil-20261013";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
-import ScheduleView from "./views/schedule/ScheduleView.js?v=editar-grupo-finde-20261008";
+import ScheduleView from "./views/schedule/ScheduleView.js?v=perfil-desde-instructor-20261013";
 import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";
 import NotificationsView from "./views/notifications/NotificationsView.js";
 import HistoryView from "./views/history/HistoryView.js";
@@ -28,7 +28,7 @@ import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";
 import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=websocket-20261012";
 import CashHistoryView from "./views/cash/CashHistoryView.js";
 import CashOperationsView from "./views/cash/CashOperationsView.js";
-import InstructorDashboardView from "./views/instructor/InstructorDashboardView.js?v=mi-horario-tipo-20260930";
+import InstructorDashboardView from "./views/instructor/InstructorDashboardView.js?v=registro-movil-montecristi-20261013";
 import InstructorAgendaView from "./views/instructor/InstructorAgendaView.js?v=agenda-sin-resumen-20260930";
 import InstructorTheoryView from "./views/instructor/InstructorTheoryView.js?v=dashboard-profesor-teoria-20260907";
 import InstructorStudentsView from "./views/instructor/InstructorStudentsView.js?v=filtro-etapa-20260812";
@@ -43,7 +43,7 @@ import AdminResourceMonitorView from "./views/admin/AdminResourceMonitorView.js?
 import AdminSecurityView from "./views/admin/AdminSecurityView.js?v=tipo-instructor-20260819";
 import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js";
 import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=capacidad-fin-semana-20260917";
-import ManagerReportsView from "./views/manager/ManagerReportsView.js?v=modal-ciclo-ancho-completo-20260812";
+import ManagerReportsView from "./views/manager/ManagerReportsView.js?v=registrados-sin-estado-20261012";
 import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=permiso-sin-filtro-pago-20260820";
 import AdminSettingsView from "./views/admin/AdminSettingsView.js";
 import AdminReferralCampaignView from "./views/admin/AdminReferralCampaignView.js";
@@ -340,6 +340,7 @@ class App {
         isAuthenticated &&
         currentRole === "instructor" &&
         !route.name.startsWith("instructor-") &&
+        !(currentUser?.permissions?.includes('STUDENT_CREATE') && ['students','student-registration','student-profile','cash','cash-register','cash-pending','cash-operations','receipts'].includes(route.name)) &&
         !(route.name === "profile" && currentUser?.mustChangePassword) &&
         !["notifications", "course-reports"].includes(route.name) &&
         !isPublicPage

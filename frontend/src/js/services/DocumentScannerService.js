@@ -249,10 +249,10 @@ export async function editDocument(file) {
           Math.max(inset, Math.min(editor.height - inset, handle.y)));
         context.rotate(Math.atan2(b.y - a.y, b.x - a.x));
         context.fillStyle = '#00b89c';
-        context.beginPath(); context.roundRect(-32 * unit, -14 * unit, 64 * unit, 28 * unit, 7 * unit);
+        context.beginPath(); context.roundRect(-32 * unit, -7 * unit, 64 * unit, 14 * unit, 4 * unit);
         context.fill(); context.strokeStyle = '#fff'; context.lineWidth = 2 * unit; context.stroke();
         context.fillStyle = '#fff';
-        for (const x of [-7, 0, 7]) context.fillRect((x - 1) * unit, -5 * unit, 2 * unit, 10 * unit);
+        for (const x of [-7, 0, 7]) context.fillRect((x - 1) * unit, -3 * unit, 2 * unit, 6 * unit);
         context.restore();
       });
     };

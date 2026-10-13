@@ -559,15 +559,16 @@ class PaymentService {
     return result.rows[0];
   }
 
-  static async getHistory() {
+  static async getHistory(branchId = null) {
     const result = await db.query(`
       SELECT ph.id, ph.student_id AS "studentId", ph.payment_id AS "paymentId",
         ph.action, ph.amount, ph.date,
         s.first_name || ' ' || s.last_name AS "studentName", s.identification AS cedula
       FROM payment_history ph
       JOIN students s ON s.status <> 'inhabilitado' AND s.id = ph.student_id
+      WHERE ($1::uuid IS NULL OR s.branch_id=$1)
       ORDER BY ph.date DESC
-    `);
+    `, [branchId]);
     return result.rows.map(row => ({ ...row, amount: Number(row.amount || 0) }));
   }
 

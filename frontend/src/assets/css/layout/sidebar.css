@@ -426,7 +426,24 @@
 }
 
 /* El instructor trabaja principalmente desde telefono. */
+.mobile-operation-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1rem 0; }
+.operational-instructor-layout .btn svg { width: 20px; height: 20px; flex-shrink: 0; }
 @media (max-width: 768px) {
+  .instructor-layout.operational-instructor-layout .sidebar-nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .operational-instructor-layout .sidebar-nav .logout-btn { display: none; }
+  .operational-instructor-registration .student-modal-steps {
+    display: grid; grid-template-columns: repeat(var(--student-modal-step-count, 4), minmax(0, 1fr)); overflow: visible;
+  }
+  .operational-instructor-registration .student-modal-step-tab { min-width: 0; padding: .6rem .15rem; font-size: .68rem; }
+  .operational-instructor-registration .form-input,
+  .operational-instructor-registration .form-select,
+  .operational-instructor-registration .form-textarea { min-height: 46px; font-size: 16px; }
+  .operational-instructor-layout .content { min-width: 0; }
+  .operational-instructor-layout .form-input,
+  .operational-instructor-layout .form-select,
+  .operational-instructor-layout .form-textarea { min-height: 46px; font-size: 16px; }
+  .operational-instructor-layout .btn { min-height: 44px; white-space: normal; }
+  .operational-instructor-layout .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
   .instructor-layout { min-height: 100dvh; height: 100dvh; }
   .instructor-layout .sidebar {
     top: auto; right: 0; bottom: 0; width: 100%; height: calc(68px + env(safe-area-inset-bottom));

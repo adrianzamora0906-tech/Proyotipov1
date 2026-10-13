@@ -412,6 +412,8 @@ Todavía pueden existir ajustes visuales, validaciones específicas y mejoras de
 
 ## 9. Conclusión
 
+Operacion movil Montecristi, 13 de octubre de 2026: Jose Orlando Hidalgo Meza conserva el rol de instructor y puede registrar estudiantes y cobrar exclusivamente en Sportmancar Montecristi (SP_MC). Solo carro, tarifa institucional $190, sin oficina, rutas ni lugar de recogida. La interfaz movil reutiliza agenda, registro, documentos y caja; las transferencias conservan la aprobacion central. No tiene permisos de administracion, anulacion ni aprobacion de transferencias. Migracion 109 agrega pickup_enabled, TRUE por defecto para conservar las demas sucursales. Configuracion auditada: scripts/configure-montecristi-mobile.cjs. Pruebas: MobileBranchRegistration.test.js y scripts/test-montecristi-mobile.cjs. El frontend actualizado debe publicarse en Netlify para usarlo en el sitio desplegado.
+
 Recursos por estudiante, 12 de octubre de 2026: el Administrador del Sistema puede filtrar el monitor por estudiante y ver etapas de registro, busqueda, perfil, actualizacion, documentos, pagos, horarios e historial, junto con almacenamiento logico del expediente y exportacion Excel. CPU/memoria son observaciones del proceso compartido, no recursos exclusivos. Alcance y validaciones: [Medicion de recursos por estudiante](05_SISTEMA_GENERAL/MEDICION_RECURSOS_POR_ESTUDIANTE.md).
 
 Primeros pasos de rendimiento del 12 de octubre de 2026: el perfil carga documentos al abrir su pestana y consulta sus datos pequenos en paralelo; el listado evita una consulta duplicada cuando no hay filtro de estado. Medicion, pruebas y limites: [Diagnostico de rendimiento de estudiantes](05_SISTEMA_GENERAL/DIAGNOSTICO_RENDIMIENTO_ESTUDIANTES.md).

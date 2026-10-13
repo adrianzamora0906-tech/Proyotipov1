@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { deadlineSql } = require('./EnrollmentWindow');
 const StudentAccountService = require('./StudentAccountService');
 const ReferralCampaignService = require('./ReferralCampaignService');
 const AuditService = require('./AuditService');
@@ -129,6 +130,7 @@ class StudentService {
         reservation.referred_name name,
         reservation.referred_identification identification,reservation.referred_phone phone,
         reservation.created_at,reservation.expires_at,reservation.reservation_kind,reservation.draft_data,
+        reservation.created_by,TRIM(CONCAT(reservation_creator.first_name,' ',reservation_creator.last_name)) created_by_name,
         branch.name branch_name,branch.city_id,branch.city,branch.province,
         course.name course_name,cycle.code cycle_code,cycle.start_date,cycle.end_date,
         TRIM(CONCAT(instructor_user.first_name,' ',instructor_user.last_name)) instructor_name,
@@ -139,6 +141,7 @@ class StudentService {
       JOIN course_cycles cycle ON cycle.id=reservation.cycle_id
       JOIN instructor_profiles instructor ON instructor.id=reservation.instructor_id
       JOIN users instructor_user ON instructor_user.id=instructor.user_id
+      LEFT JOIN users reservation_creator ON reservation_creator.id=reservation.created_by
       LEFT JOIN LATERAL (
         SELECT to_char(o.start_time,'HH24:MI') start_time,to_char(o.end_time,'HH24:MI') end_time
         FROM instructor_availability_overrides o
@@ -176,7 +179,7 @@ class StudentService {
           requested_course.name ILIKE '%tipo f%' AND cc.vehicle_type='carro'
         )) AND cc.active=TRUE
           AND cc.deleted_at IS NULL AND cc.status IN('activo','proximo')
-          AND CURRENT_DATE<=cc.start_date+2`,[cycleId,courseId])).rows[0];
+          AND CURRENT_DATE<=${deadlineSql}`,[cycleId,courseId])).rows[0];
       if(!cycle)throw createError(409,'El curso seleccionado ya no admite reservas');
       const effectiveBranch=(await client.query(`SELECT COALESCE(reference.id,requested.id) AS id
         FROM branches requested
@@ -605,19 +608,21 @@ class StudentService {
       if (branch.rows.length === 0) throw createError(422, 'Sucursal no vÃ¡lida');
       branchId = branch.rows[0].id;
     }
+    let pickupEnabled = true;
     if (branchId) {
-      const branchLocation = await db.query('SELECT city_id FROM branches WHERE id = $1 AND active = true', [branchId]);
+      const branchLocation = await db.query('SELECT city_id,pickup_enabled FROM branches WHERE id = $1 AND active = true', [branchId]);
       if (branchLocation.rows.length === 0) throw createError(422, 'Sucursal no válida');
       if (cityId && cityId !== branchLocation.rows[0].city_id) throw createError(422, 'La sucursal no pertenece a la ciudad seleccionada');
       cityId = branchLocation.rows[0].city_id;
+      pickupEnabled = branchLocation.rows[0].pickup_enabled !== false;
     }
 
-    const pickupBranchId = data.pickupBranchId || user.branch_id || branchId;
-    const pickupBranch = await db.query(
+    const pickupBranchId = pickupEnabled ? (data.pickupBranchId || branchId) : null;
+    const pickupBranch = pickupEnabled ? await db.query(
       'SELECT id FROM branches WHERE id=$1 AND active=TRUE',
       [pickupBranchId]
-    );
-    if (!pickupBranch.rows.length) throw createError(422, 'Selecciona una sucursal válida para recoger al estudiante');
+    ) : null;
+    if (pickupEnabled && !pickupBranch.rows.length) throw createError(422, 'Selecciona una sucursal válida para recoger al estudiante');
 
     // La atribución capturada en la landing prevalece sobre una selección manual.
     // Así el código oculto no puede alterarse durante la matrícula.
@@ -1001,7 +1006,7 @@ class StudentService {
    */
   static async getBranches() {
     const result = await db.query(`
-      SELECT b.id, b.name, b.province, b.city, COALESCE(b.city_id, c.id) city_id, b.phone
+      SELECT b.id, b.name, b.province, b.city, COALESCE(b.city_id, c.id) city_id, b.phone, b.pickup_enabled
       FROM branches b
       LEFT JOIN cities c ON LOWER(c.name) = LOWER(b.city) AND LOWER(c.province) = LOWER(b.province)
       WHERE b.active = true

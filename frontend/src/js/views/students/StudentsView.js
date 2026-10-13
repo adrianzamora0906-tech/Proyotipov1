@@ -625,7 +625,7 @@ class StudentsView extends Component {
       </div>
     `;
     return `
-      <div class="modal-overlay student-modal-overlay" id="student-modal-overlay" aria-hidden="true">
+      <div class="modal-overlay student-modal-overlay ${authService.getCurrentUser()?.role === 'instructor' && authService.can('STUDENT_CREATE') ? 'operational-instructor-registration' : ''}" id="student-modal-overlay" aria-hidden="true">
         <div class="modal student-modal" role="dialog" aria-modal="true" aria-labelledby="student-modal-title">
           <div class="modal-header">
             <div>
@@ -1824,7 +1824,12 @@ class StudentsView extends Component {
       practicalStartDate: schedule.practicalStartDate,
       instructorBaseStart: schedule.instructorBaseStart,
     }).replace(/"/g, '&quot;');
-    if (disabled && schedule.fullNormalSchedule) {
+    const showOccupied = Boolean(this.useInstructorFirstAvailability)
+      || Boolean(this.recordEditContext && schedule.fullNormalSchedule);
+    if (disabled && !showOccupied) {
+      return `<div class="enrollment-calendar-empty-cell" data-day-index="${schedule.dayIndex ?? ''}" aria-label="Horario no disponible"></div>`;
+    }
+    if (disabled) {
       const occupied = Number(dateCapacity.occupied || 0) > 0
         || dateCapacity.status === 'reserved';
       const statusLabel = occupied ? 'Ocupado' : 'No disponible';
@@ -1846,9 +1851,6 @@ class StudentsView extends Component {
         </button>
       `;
     }
-    // En el registro solo se presentan opciones utilizables. Las horas sin
-    // cupo permanecen fuera de la vista para reducir ruido y errores.
-    if (disabled) return `<div class="enrollment-calendar-empty-cell" data-day-index="${schedule.dayIndex ?? ''}" aria-label="Horario no disponible"></div>`;
     const normalDisabled = normalAvailable <= 0;
     return `
       <button type="button"
@@ -1862,7 +1864,7 @@ class StudentsView extends Component {
         data-normal-available="${normalAvailable}"
         data-daily-available="${available}"
         data-normal-disabled="${normalDisabled}"
-        ${normalDisabled ? 'disabled aria-hidden="true"' : ''}>
+        ${normalDisabled ? 'disabled aria-disabled="true"' : ''}>
         <span class="schedule-option-status available">Disponible</span>
         ${examCount ? `<span class="schedule-option-exams">Intensivo ${examCount}/2</span>` : ''}
         <span class="schedule-option-capacity">${normalAvailable} ${normalAvailable === 1 ? 'cupo disponible' : 'cupos disponibles'}</span>
@@ -1911,7 +1913,9 @@ class StudentsView extends Component {
     const availableCycleKeys = new Set(schedules
       .filter(schedule => Number(schedule.available || 0) > 0)
       .map(schedule => schedule.cycleId || schedule.day));
-    schedules = schedules.filter(schedule => availableCycleKeys.has(schedule.cycleId || schedule.day));
+    if (this.recordEditContext) {
+      schedules = schedules.filter(schedule => availableCycleKeys.has(schedule.cycleId || schedule.day));
+    }
     if (!schedules.length) {
       return `
         <div class="enrollment-calendar" data-course="${courseKey}" data-modality="${modality}" style="display: none;">
@@ -1977,17 +1981,14 @@ class StudentsView extends Component {
     const cycleSchedules = schedules.filter(item =>
       (item.cycleId || item.day) === cycle.key
     );
-    const isBenitoCalendar = (cycle.instructors || []).some(instructor =>
-      String(instructor.name || '').trim().toLowerCase() === 'benito alonzo');
-    const isManta2000Calendar = cycleSchedules.some(schedule =>
-      String(schedule.branch || '').trim().toLowerCase() === 'manta 2000');
-    const showCompleteHours = cycleSchedules.some(schedule => schedule.fullNormalSchedule)
-      || (modality === 'normal' && (isBenitoCalendar || isManta2000Calendar));
+    const showCompleteHours = Boolean(this.useInstructorFirstAvailability) || Boolean(this.recordEditContext &&
+      (cycleSchedules.some(schedule => schedule.fullNormalSchedule)
+      || (modality === 'normal' && ((cycle.instructors || []).some(instructor =>
+        String(instructor.name || '').trim().toLowerCase() === 'benito alonzo') || cycleSchedules.some(schedule =>
+        String(schedule.branch || '').trim().toLowerCase() === 'manta 2000')))));
     const times = [...new Set(cycleSchedules.map(schedule => schedule.time))]
-      .filter(time => showCompleteHours || cycleSchedules
-        .filter(schedule => schedule.time === time)
-        .some(schedule => Object.values(schedule.availabilityByDate || {})
-          .some(availability => Number(availability?.available || 0) > 0)))
+      .filter(time => showCompleteHours || cycleSchedules.filter(schedule => schedule.time === time)
+        .some(schedule => Object.values(schedule.availabilityByDate || {}).some(availability => Number(availability?.available || 0) > 0)))
       .sort((first, second) => first.localeCompare(second));
     const displayStartDate = String(cycle.officialStartDate || cycle.startDate) < String(cycle.startDate)
       ? cycle.officialStartDate : cycle.startDate;
@@ -2151,6 +2152,7 @@ class StudentsView extends Component {
                 <img src="${qrUrl}" alt="QR para capturar documento">
               </div>
               <div class="mobile-capture-instructions">
+                <a class="btn btn-primary" href="${escapeHtml(uploadUrl)}" target="_blank" rel="noopener">Abrir c&aacute;mara en este tel&eacute;fono</a>
                 <strong>${token.documentName || 'Cedula y carnet de la Cruz Roja'}</strong>
                 <span>${isAdditionalPractice ? 'Escanea el QR con el tel&eacute;fono para tomar las fotos.' : 'Este QR sirve para todos los estudiantes durante la jornada.'}</span>
                 ${isAdditionalPractice ? `<p>${this.additionalPracticeStudent
@@ -2279,6 +2281,7 @@ class StudentsView extends Component {
   async getSchedulesForModal(branchId = null, instructorId = null, practicalStartDate = null, practicalCycleId = null) {
     try {
       const branchFilter = {
+        include_occupied: 'true',
         ...(branchId ? { branch_id: branchId } : {}),
         ...(instructorId ? { instructor_id: instructorId } : {}),
         ...(instructorId && this.useInstructorFirstAvailability ? { full_schedule: 'true' } : {}),
@@ -2347,6 +2350,7 @@ class StudentsView extends Component {
         vehicle_type: selectedCourse,
         modality: selectedModality,
         instructor_id: selectedInstructorId,
+        include_occupied: 'true',
         ...(activationReservationId ? { reservation_id: activationReservationId } : {}),
         ...(this.useInstructorFirstAvailability ? { full_schedule: 'true' } : {}),
         ...(selectedPracticalStart ? { practical_start_date: selectedPracticalStart } : {}),
@@ -2441,11 +2445,11 @@ class StudentsView extends Component {
     const nextGrids = [...nextCalendar.querySelectorAll('.enrollment-calendar-grid')];
     const gridKey = grid => {
       const calendar = grid.closest('.enrollment-calendar');
-      return `${calendar?.dataset.course || ''}|${calendar?.dataset.modality || ''}|${calendar?.dataset.cycleIndex || ''}`;
+      return `${calendar?.dataset.course || ''}|${calendar?.dataset.modality || ''}|${calendar?.dataset.cycleId || ''}`;
     };
     const nextGridByKey = new Map(nextGrids.map(grid => [gridKey(grid), grid]));
     const nextCalendarByKey = new Map([...nextCalendar.querySelectorAll('.enrollment-calendar')]
-      .map(calendar => [`${calendar.dataset.course || ''}|${calendar.dataset.modality || ''}|${calendar.dataset.cycleIndex || ''}`, calendar]));
+      .map(calendar => [`${calendar.dataset.course || ''}|${calendar.dataset.modality || ''}|${calendar.dataset.cycleId || ''}`, calendar]));
     const currentUsesAdvancedStart = Boolean(host.querySelector('.advanced-practical-start-official'));
     const nextUsesAdvancedStart = Boolean(nextCalendar.querySelector('.advanced-practical-start-official'));
     const currentUsesInstructorBase = Boolean(host.querySelector('.instructor-base-start-official'));
@@ -2463,6 +2467,7 @@ class StudentsView extends Component {
         const updatedCalendar = nextCalendarByKey.get(key);
         return nextGridByKey.has(key)
           && updatedCalendar
+          && currentCalendar?.dataset.cycleIndex === updatedCalendar.dataset.cycleIndex
           && currentCalendar?.dataset.dayCount === updatedCalendar.dataset.dayCount;
       });
 
@@ -2667,7 +2672,9 @@ class StudentsView extends Component {
         ApiService.getBranches(),
       ]);
       const cities = citiesResult.success ? citiesResult.data : [];
-      const branches = branchesResult.success ? branchesResult.data : [];
+      const operationalInstructor = authService.getCurrentUser()?.role === 'instructor' && authService.can('STUDENT_CREATE');
+      const branches = (branchesResult.success ? branchesResult.data : []).filter(branch =>
+        !operationalInstructor || String(branch.id) === String(authService.getEffectiveBranchId()));
       const provinces = [...new Set(cities.map(city => city.province).filter(Boolean))];
       this.modalLocationCatalog = { cities, branches };
       const pickupBranchSelect = document.getElementById('student-pickup-branch');
@@ -2784,6 +2791,7 @@ class StudentsView extends Component {
     if (locationRow) locationRow.hidden = true;
     if (branchRow) branchRow.hidden = true;
     if (changeButton && !changeButton.dataset.listenerAttached) {
+      changeButton.hidden = authService.getCurrentUser()?.role === 'instructor' && authService.can('STUDENT_CREATE');
       changeButton.addEventListener('click', () => {
         summary.hidden = true;
         if (locationRow) locationRow.hidden = false;
@@ -2798,6 +2806,16 @@ class StudentsView extends Component {
     const courseSelect = document.getElementById('modal-course-select');
     if (!courseSelect) return;
     const branchId = branchSelect?.selectedOptions?.[0]?.dataset?.branchId;
+    const branch = this.modalLocationCatalog?.branches?.find(item => String(item.id) === String(branchId));
+    this.modalPickupEnabled = branch?.pickup_enabled !== false;
+    const pickup = document.getElementById('student-pickup-branch');
+    const pickupField = document.getElementById('student-pickup-branch-field');
+    if (pickupField) pickupField.hidden = !this.modalPickupEnabled;
+    if (pickup) {
+      pickup.disabled = !this.modalPickupEnabled;
+      pickup.required = this.modalPickupEnabled;
+      if (!this.modalPickupEnabled) pickup.value = '';
+    }
     if (!branchId) { courseSelect.innerHTML='<option value="">Seleccione primero una sucursal...</option>'; courseSelect.disabled=true; return; }
     try {
       const response = await ApiService.getBranchCourses(branchId);
@@ -3791,7 +3809,9 @@ class StudentsView extends Component {
   async shiftEnrollmentCycle(button, direction) {
     const currentCalendar = button?.closest('.enrollment-calendar');
     const cycleSet = currentCalendar?.closest('.enrollment-cycle-set');
-    if (!cycleSet || !Number.isFinite(direction)) return;
+    if (!cycleSet || !Number.isFinite(direction) || this.changingEnrollmentCycle) return;
+    this.changingEnrollmentCycle = true;
+    try {
     const calendars = [...cycleSet.querySelectorAll(':scope > .enrollment-calendar')];
     const currentIndex = Number(currentCalendar.dataset.cycleIndex || 0);
     const nextIndex = Math.max(0, Math.min(calendars.length - 1, currentIndex + direction));
@@ -3827,6 +3847,9 @@ class StudentsView extends Component {
     if (form?.elements.scheduleId) form.elements.scheduleId.value = '';
     if (form?.elements.schedulePlan) form.elements.schedulePlan.value = '';
     this.syncScheduleOptions();
+    } finally {
+      this.changingEnrollmentCycle = false;
+    }
   }
 
   async loadNextEnrollmentCycle(button, currentIndex) {
@@ -4123,7 +4146,7 @@ class StudentsView extends Component {
       option.classList.toggle('disabled', blockedForClass && !examOnly);
       option.classList.toggle('normal-slot-unavailable', blockedForClass && !examOnly && !isFullScheduleCell);
       option.setAttribute('aria-disabled', String(blockedForClass && !examOnly));
-      option.setAttribute('aria-hidden', String(blockedForClass && !examOnly && !isFullScheduleCell));
+      option.setAttribute('aria-hidden', 'false');
       const capacity = option.querySelector('.schedule-option-capacity');
       if (capacity) capacity.textContent = `${available} ${available === 1 ? 'cupo disponible' : 'cupos disponibles'}`;
     });
@@ -4448,7 +4471,7 @@ class StudentsView extends Component {
       ],
       address: additionalPractice || renewal ? [] : [{ type: 'required', message: 'La dirección es requerida' }],
       bloodType: temporaryReservation || additionalPractice || renewal ? [] : [{ type: 'required', message: 'Debes seleccionar el tipo de sangre' }],
-      pickupBranchId: additionalPractice || renewal || (this.recordEditContext && !this.recordEditContext.student.pickup_branch_id)
+      pickupBranchId: this.modalPickupEnabled === false || additionalPractice || renewal || (this.recordEditContext && !this.recordEditContext.student.pickup_branch_id)
         ? [] : [{ type: 'required', message: 'Selecciona dónde recoger al estudiante' }],
       course_id: additionalPractice || renewal || (this.recordEditContext && !this.recordEditContext.enrollments.length)
         ? [] : [{ type: 'required', message: 'Debes seleccionar un curso' }],
@@ -5641,7 +5664,7 @@ class StudentsView extends Component {
   renderReservationRows(reservations = []) {
     return reservations.map(reservation => `
       <div class="table-row student-reservation-table-row">
-        <div class="table-cell"><div class="student-name"><div class="avatar" style="width:32px;height:32px;font-size:.75rem;">${this.getInitials(reservation.name || 'CR')}</div><div><div class="font-weight-600">${escapeHtml(reservation.name || 'Nombre pendiente')}</div><div class="text-sm text-gray-500">Cupo protegido</div></div></div></div>
+        <div class="table-cell"><div class="student-name"><div class="avatar" style="width:32px;height:32px;font-size:.75rem;">${this.getInitials(reservation.name || 'CR')}</div><div><div class="font-weight-600">${escapeHtml(reservation.name || 'Nombre pendiente')}</div><div class="text-sm text-gray-500">Reservado por: ${escapeHtml(reservation.created_by_name || 'Sin registro')}</div></div></div></div>
         <div class="table-cell">${escapeHtml(reservation.identification || 'Cédula pendiente')}${reservation.phone ? `<br>${escapeHtml(reservation.phone)}` : ''}</div>
         <div class="table-cell">${escapeHtml(reservation.instructor_name || 'Sin instructor')}</div>
         <div class="table-cell"><div><strong>${escapeHtml(reservation.course_name || 'Curso pendiente')}</strong><div class="text-sm text-gray-500">${escapeHtml(reservation.cycle_code || '')}</div></div></div>

@@ -344,7 +344,8 @@ class StudentProfileView extends Component {
                     ${payments.map(payment => `
                       <div class="payment-item">
                         <div>
-                          <div class="payment-concept">${payment.concept || payment.payment_method || payment.method || 'Pago registrado'}</div>
+                          <div class="payment-concept">${escapeHtml(payment.concept || 'Pago registrado')}</div>
+                          ${this.renderPaymentMethod(payment)}
                           <div class="payment-date">${DateHelper.format(payment.created_at || payment.date, 'DD/MM/YYYY HH:MM')}</div>
                         </div>
                         <div style="display:flex; align-items:center; gap:.75rem;">
@@ -2316,6 +2317,14 @@ class StudentProfileView extends Component {
       reader.onerror = () => reject(new Error('No se pudo leer el archivo seleccionado.'));
       reader.readAsDataURL(file);
     });
+  }
+
+  renderPaymentMethod(payment) {
+    const method = String(payment.payment_method || payment.method || '').trim().toLowerCase();
+    const labels = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta', cheque: 'Cheque', deposito: 'Depósito' };
+    const batch = payment.card_batch || payment.cardBatch;
+    const reference = payment.reference || payment.payment_reference;
+    return `<div class="payment-date">Método de pago: ${escapeHtml(labels[method] || method || 'Sin registro')}${batch ? ` · Lote: ${escapeHtml(batch)}` : ''}${reference ? ` · Referencia: ${escapeHtml(reference)}` : ''}</div>`;
   }
 
   getStatusLabel(status) {

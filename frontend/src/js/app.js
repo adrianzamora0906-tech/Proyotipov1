@@ -13,12 +13,12 @@ import StudentService from "./services/StudentService.js";
 import "./data/DemoDataGenerator.js";
 
 // Views
-import LoginView from "./views/auth/LoginView.js?v=perfil-profesor-teoria-20260907";
+import LoginView from "./views/auth/LoginView.js?v=manos-password-20261014";
 import DashboardView from "./views/dashboard/DashboardView.js?v=actualizacion-parcial-20261014";
-import StudentsView from "./views/students/StudentsView.js?v=galeria-registro-20261014";
-import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=metodo-pago-perfil-20261013";
+import StudentsView from "./views/students/StudentsView.js?v=habilitar-horario-20261014";
+import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=perfil-transferencias-20261014";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
-import ScheduleView from "./views/schedule/ScheduleView.js?v=perfil-desde-instructor-20261013";
+import ScheduleView from "./views/schedule/ScheduleView.js?v=horarios-sin-barra-20261014";
 import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";
 import NotificationsView from "./views/notifications/NotificationsView.js";
 import HistoryView from "./views/history/HistoryView.js";
@@ -26,7 +26,7 @@ import ProfileView from "./views/profile/ProfileView.js";
 // Cash module views
 import CashDashboardView from "./views/cash/CashDashboardView.js?v=actualizacion-parcial-20261014";
 import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";
-import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=websocket-20261012";
+import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=pagos-carga-rapida-20261014";
 import CashHistoryView from "./views/cash/CashHistoryView.js";
 import CashOperationsView from "./views/cash/CashOperationsView.js";
 import InstructorDashboardView from "./views/instructor/InstructorDashboardView.js?v=actualizacion-parcial-20261014";
@@ -38,12 +38,12 @@ import InstructorEvaluationsView from "./views/instructor/InstructorEvaluationsV
 import InstructorIncidentsView from "./views/instructor/InstructorIncidentsView.js";
 import InstructorProfileView from "./views/instructor/InstructorProfileView.js";
 import MobileDocumentUploadView from "./views/mobile-upload/MobileDocumentUploadView.js?v=agarre-amplio-20261012";
-import SidebarLayout from "./layouts/SidebarLayout.js?v=websocket-20261012";
+import SidebarLayout from "./layouts/SidebarLayout.js?v=horarios-permisos-20261014";
 import AdminDashboardView from "./views/admin/AdminDashboardView.js?v=actualizacion-parcial-20261014";
 import AdminResourceMonitorView from "./views/admin/AdminResourceMonitorView.js?v=recursos-estudiante-20261012";
 import AdminSecurityView from "./views/admin/AdminSecurityView.js?v=tipo-instructor-20260819";
 import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js?v=actualizacion-parcial-20261014";
-import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=capacidad-fin-semana-20260917";
+import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=horarios-permisos-20261014";
 import ManagerReportsView from "./views/manager/ManagerReportsView.js?v=registrados-sin-estado-20261012";
 import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=permiso-sin-filtro-pago-20260820";
 import AdminSettingsView from "./views/admin/AdminSettingsView.js";

@@ -274,12 +274,19 @@ class PaymentService {
 
     const p = payment.rows[0];
     const finalAmount = Number(p.final_amount ?? p.total ?? 0);
+    const transfers = (await db.query(`SELECT id,amount,status,reference,created_at
+      FROM transfer_payment_verifications WHERE student_id=$1 AND service_transaction_id IS NULL
+        AND status IN ('PENDING','AWAITING_APPROVAL') ORDER BY created_at DESC`,[studentId])).rows;
+    const pendingVerification = transfers.reduce((sum,transfer)=>sum+Number(transfer.amount || 0),0);
     return {
       total: finalAmount,
       originalTotal: Number(p.total || 0),
       discount: Number(p.discount || 0),
       paid: finalAmount - Number(p.balance || 0),
       balance: Number(p.balance || 0),
+      pendingVerification,
+      balanceAfterApproval: Math.max(0,Number(p.balance || 0)-pendingVerification),
+      pendingTransfers: transfers.map(transfer=>({...transfer,amount:Number(transfer.amount)})),
     };
   }
 

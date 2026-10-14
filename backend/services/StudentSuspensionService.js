@@ -15,6 +15,24 @@ const records = [
 ];
 
 class StudentSuspensionService {
+  static async enableWithNewSchedule(client, id, enrollmentId, user) {
+    const suspension = (await client.query('SELECT snapshot FROM student_suspensions WHERE student_id=$1 FOR UPDATE', [id])).rows[0];
+    if (!suspension) throw createError(409, 'El estudiante no tiene una inhabilitacion reversible');
+    const snapshot = suspension.snapshot;
+    const original = snapshot.records.enrollments.find(row => row.id===enrollmentId && row.status==='activo');
+    if (!original) throw createError(422, 'La matricula no estaba activa antes de inhabilitar');
+    await client.query("UPDATE enrollments SET status='activo',updated_at=NOW() WHERE id=$1 AND student_id=$2", [enrollmentId,id]);
+    for (const account of snapshot.records.users) {
+      await client.query('UPDATE users SET active=$2 WHERE id=$1 AND student_id=$3', [account.id,account.active,id]);
+    }
+    await client.query('UPDATE students SET status=$2,updated_by=$3,updated_at=NOW() WHERE id=$1', [id,snapshot.status,user.id]);
+    await client.query('DELETE FROM student_suspensions WHERE student_id=$1', [id]);
+    await client.query('INSERT INTO history(student_id,action) VALUES($1,$2)', [id,'Estudiante habilitado con nuevo horario; no se restauraron los cupos anteriores']);
+    await client.query(`INSERT INTO audit_logs(user_id,role,branch_id,action,entity,entity_id,metadata)
+      SELECT $2,$3,branch_id,'STUDENT_ENABLED','students',id,$4::jsonb FROM students WHERE id=$1`,
+    [id,user.id,user.role || null,JSON.stringify({newSchedule:true,enrollmentId,previousStatus:snapshot.status})]);
+  }
+
   static async setEnabled(id, enabled, user = {}) {
     const client = await db.getClient();
     try {

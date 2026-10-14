@@ -63,6 +63,7 @@ async function test() {
       await page.screenshot({path:`.tmp/montecristi-home-${width}.png`,fullPage:true});
       await page.locator('.mobile-operation-actions a[href="/students/new"]').click();
       await page.locator('#modal-course-select option[data-course-type="carro"]').waitFor({state:'attached'});
+      await page.waitForFunction(()=>document.getElementById('student-modal-form')?.dataset.initializing==='false');
       await page.waitForTimeout(600);
       assert.equal(await page.locator('.student-modal-step-tab[data-step="4"]').count(),1,'El registro debe incluir el paso Pago');
       assert.equal(await page.locator('#student-pickup-branch-field').isVisible(),false);

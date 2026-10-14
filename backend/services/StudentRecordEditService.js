@@ -9,6 +9,7 @@ const Cash = require('./CashOperationsService');
 const AccountSessions = require('./SessionService');
 const Payments = require('./PaymentService');
 const Audit = require('./AuditService');
+const Suspension = require('./StudentSuspensionService');
 
 const fields = {
   identification: ['identification', 'Cedula'], firstName: ['first_name', 'Nombres'],
@@ -30,12 +31,24 @@ const uuid = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{
 const time = value => String(value || '').slice(0, 5);
 
 class StudentRecordEditService {
+  static canTransferSuspendedStudent(snapshot, actor) {
+    const secretary = (actor.roles || []).includes('SECRETARY')
+      || ['secretaria_sucursal','secretaria_caja','secretaria'].includes(actor.role);
+    return snapshot.student.status==='inhabilitado' && secretary
+      && has(actor,'STUDENT_CREATE') && has(actor,'STUDENT_UPDATE');
+  }
+
   static async snapshot(id, client = db, lock = false) {
     const student = (await client.query(`SELECT * FROM students WHERE id=$1 ${lock ? 'FOR UPDATE' : ''}`, [id])).rows[0];
     if (!student) throw createError(404, 'Estudiante no encontrado');
     const enrollments = (await client.query(`SELECT e.*,c.name course_name,c.price course_price FROM enrollments e
-      JOIN courses c ON c.id=e.course_id WHERE e.student_id=$1 AND e.status='activo' ORDER BY e.id
-      ${lock ? 'FOR UPDATE OF e' : ''}`, [id])).rows;
+      JOIN courses c ON c.id=e.course_id WHERE e.student_id=$1 AND (e.status='activo' OR
+        ($2::boolean AND e.status='inhabilitado' AND EXISTS (
+          SELECT 1 FROM student_suspensions sp,
+            jsonb_array_elements(sp.snapshot->'records'->'enrollments') saved
+          WHERE sp.student_id=e.student_id AND saved->>'id'=e.id::text AND saved->>'status'='activo')))
+      ORDER BY e.id
+      ${lock ? 'FOR UPDATE OF e' : ''}`, [id, student.status==='inhabilitado'])).rows;
     const assignments = (await client.query(`SELECT a.*,cc.code,cc.modality FROM course_cycle_schedule_assignments a
       JOIN course_cycles cc ON cc.id=a.cycle_id WHERE a.student_id=$1 AND a.status='activo'
       ORDER BY a.schedule_date,a.start_time,a.id ${lock ? 'FOR UPDATE OF a' : ''}`, [id])).rows;
@@ -43,7 +56,7 @@ class StudentRecordEditService {
       WHERE e.student_id=$1 AND ps.deleted_at IS NULL AND ps.status NOT IN ('CANCELADA','REPROGRAMADA')
       ORDER BY ps.scheduled_start,ps.id ${lock ? 'FOR UPDATE OF ps' : ''}`, [id])).rows;
     const payments = (await client.query(`SELECT p.* FROM payments p JOIN enrollments e ON e.id=p.enrollment_id
-      WHERE e.student_id=$1 AND e.status='activo' AND p.status<>'anulado' ORDER BY p.id ${lock ? 'FOR UPDATE OF p' : ''}`, [id])).rows;
+      WHERE e.student_id=$1 AND e.id=ANY($2::uuid[]) AND p.status<>'anulado' ORDER BY p.id ${lock ? 'FOR UPDATE OF p' : ''}`, [id,enrollments.map(e=>e.id)])).rows;
     const documents = (await client.query(`SELECT d.id,t.code type,t.name,d.file_path,d.observations,d.uploaded_at
       FROM student_documents d JOIN document_types t ON t.id=d.document_type_id
       WHERE d.student_id=$1 ORDER BY t.code ${lock ? 'FOR UPDATE OF d' : ''}`, [id])).rows;
@@ -72,7 +85,7 @@ class StudentRecordEditService {
     const [branches, cities, courses, instructors, documentTypes] = await Promise.all([
       db.query(`SELECT b.id,b.name,b.city_id FROM branches b WHERE b.active=TRUE AND
         ($1::boolean OR b.city_id=(SELECT city_id FROM branches WHERE id=$2) OR b.id=$3) ORDER BY b.name`,
-      [!!access.global,access.branchId || actor.branch_id,snapshot.student.branch_id]),
+      [!!access.global || this.canTransferSuspendedStudent(snapshot,actor),access.branchId || actor.branch_id,snapshot.student.branch_id]),
       db.query('SELECT id,name,province FROM cities ORDER BY province,name'),
       db.query(`SELECT c.id,c.name,c.price,bc.branch_id FROM courses c JOIN branch_courses bc ON bc.course_id=c.id
         WHERE bc.active=TRUE ORDER BY c.name`),
@@ -158,7 +171,7 @@ class StudentRecordEditService {
     if (!uuid(branchId)) throw createError(422,'Sucursal invalida');
     const result = (await client.query(`SELECT b.id FROM branches b WHERE b.id=$1 AND b.active=TRUE AND
       ($2::boolean OR b.city_id=(SELECT city_id FROM branches WHERE id=$3) OR b.id=$4)`,
-    [branchId,!!access.global,access.branchId || actor.branch_id,snapshot.student.branch_id])).rows;
+    [branchId,!!access.global || this.canTransferSuspendedStudent(snapshot,actor),access.branchId || actor.branch_id,snapshot.student.branch_id])).rows;
     if (!result.length) throw createError(403,'La sucursal seleccionada no pertenece a tu alcance');
   }
 
@@ -224,6 +237,14 @@ class StudentRecordEditService {
     const enrollment=snapshot.enrollments[0] || null;
     if (snapshot.enrollments.length>1 && (payload.academic || payload.finance || payload.newPayment)) throw createError(409,'Este estudiante tiene varias matriculas activas; selecciona la matricula desde su expediente');
     const academic=payload.academic || null;
+    if (payload.reactivate) {
+      if (!has(actor,'STUDENT_UPDATE')) throw createError(403,'No tienes permiso para habilitar estudiantes');
+      if (snapshot.student.status!=='inhabilitado') throw createError(409,'El estudiante ya no esta inhabilitado');
+      if (!academic?.schedulePlan?.selections?.length) throw createError(422,'Selecciona un nuevo horario para habilitar al estudiante');
+      changes.push({field:'Estado',before:'Inhabilitado',after:'Habilitado con nuevo horario'});
+    } else if (snapshot.student.status==='inhabilitado' && academic) {
+      throw createError(422,'Confirma la habilitacion con el nuevo horario');
+    }
     let cycle=null;
     if (academic) {
       if (!has(actor,'SCHEDULE_CHANGE') && !has(actor,'SCHEDULE_ASSIGN')) throw createError(403,'No tienes permiso para cambiar horarios');
@@ -344,6 +365,7 @@ class StudentRecordEditService {
     const client=transactionClient || await db.getClient();
     try {
       if (!transactionClient) await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`student-suspension:${id}`]);
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`student-edit:${id}`]);
       const snapshot=await this.snapshot(id,client,true);
       await this.assertScope(snapshot,actor,access,client);
@@ -351,6 +373,7 @@ class StudentRecordEditService {
       if (!payload || payload.revision!==snapshot.revision || confirmationToken!==confirmation({revision:snapshot.revision,payload,actorId:actor.id})) throw createError(409,'Los datos cambiaron o falta confirmar el resumen. Revisa los cambios nuevamente');
       const prepared=await this.prepare(snapshot,payload,actor,access,client);
       const {personal,academic,documents,enrollment,cycle}=prepared;
+      if (payload.reactivate) await Suspension.enableWithNewSchedule(client,id,enrollment.id,actor);
       const entries=Object.entries(personal);
       if (entries.length) await client.query(`UPDATE students SET ${entries.map(([key],i)=>`${key}=$${i+2}`).join(',')},
         updated_by=$${entries.length+2},updated_at=NOW() WHERE id=$1`,[id,...entries.map(([,value])=>value),actor.id]);

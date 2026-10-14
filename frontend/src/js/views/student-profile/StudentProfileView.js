@@ -66,6 +66,8 @@ class StudentProfileView extends Component {
     this.studentSchedule = schedule;
     const history = historyResult.status === 'fulfilled' ? historyResult.value : [];
     const pendingBalance = Math.max(0, Number(balanceInfo?.balance || 0));
+    const pendingVerification = Math.max(0,Number(balanceInfo?.pendingVerification || 0));
+    const pendingTransfers = balanceInfo?.pendingTransfers || [];
     const paidAmount = Number(balanceInfo?.paid ?? totalPaid);
     const canProcessPayments = authService.can('PAYMENT_CREATE');
     const canVoidPayments = authService.can('PAYMENT_VOID');
@@ -327,6 +329,12 @@ class StudentProfileView extends Component {
                   </div>
                 </div>
 
+                ${pendingVerification > 0 ? `<div class="financial-info mt-4">
+                  <div class="financial-item"><span>Transferencias pendientes de aprobaci&oacute;n</span><strong class="financial-value">$${pendingVerification.toFixed(2)}</strong></div>
+                  <div class="financial-item"><span>Saldo contable</span><strong class="financial-value">$${pendingBalance.toFixed(2)}</strong></div>
+                  <div class="financial-item"><span>Saldo si se aprueban</span><strong class="financial-value">$${Math.max(0,pendingBalance-pendingVerification).toFixed(2)}</strong></div>
+                </div><div class="mt-4">${pendingTransfers.map(transfer=>`<p><strong>$${Number(transfer.amount).toFixed(2)}</strong> &middot; ${transfer.status==='AWAITING_APPROVAL'?'Pendiente de aprobaci&oacute;n':'Pendiente de verificaci&oacute;n'}${transfer.reference ? ` &middot; Referencia: ${escapeHtml(transfer.reference)}` : ''}</p>`).join('')}</div>` : ''}
+
                 ${pendingBalance > 0 && canProcessPayments ? `
                   <button class="btn btn-primary mt-4" id="record-payment-btn"
                     data-cedula="${student.cedula}" data-balance="${pendingBalance}">
@@ -549,6 +557,9 @@ class StudentProfileView extends Component {
 
     document.getElementById('disable-student-btn')?.addEventListener('click', async event => {
       if (event.currentTarget.dataset.disabled !== 'true') return this.openDisableStudentModal(studentId);
+      if (this.student?.registrationType === 'REGULAR') {
+        return this.openEditStudentModal(studentId);
+      }
       const button = event.currentTarget;
       button.disabled = true;
       try {

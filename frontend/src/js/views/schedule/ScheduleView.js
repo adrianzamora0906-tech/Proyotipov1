@@ -55,7 +55,7 @@ class ScheduleView extends Component {
               <button type="button" data-schedule-vehicle="moto" class="${this.scheduleVehicleType === 'moto' ? 'active' : ''}">Moto</button>
             </div>
             <div id="schedule-group-actions">
-              <button type="button" class="btn btn-secondary" id="edit-schedule-groups">Editar grupos</button>
+              ${authService.can('INSTRUCTOR_ASSIGN') ? '<button type="button" class="btn btn-secondary" id="edit-schedule-groups">Editar grupos</button>' : ''}
             </div>
             <button type="button" class="btn btn-primary" id="view-monthly-availability">Ver disponibilidad mensual</button>
             <label class="schedule-weekend-toggle"><input type="checkbox" id="schedule-weekend-mode" role="switch" ${this.calendarModality === 'intensivo' ? 'checked' : ''}><span>Fin de semana</span></label>
@@ -271,8 +271,8 @@ class ScheduleView extends Component {
             </div>
             <div class="calendar-course-actions">
               <span class="badge badge-primary">${intensive ? 'Prácticas intensivas · fin de semana' : 'Prácticas normales · lunes a viernes'}</span>
-              ${intensive ? '' : `<button type="button" class="btn btn-primary" id="reserve-selected-calendar-slot" ${calendar.reservationSelection ? '' : 'disabled'}>Reservar horario</button>`}
-              ${calendar.availabilityEditMode || intensive ? '' : '<button type="button" class="btn btn-secondary" id="configure-instructor-availability">Configurar disponibilidad</button>'}
+              ${intensive || !authService.can('INSTRUCTOR_ASSIGN') ? '' : `<button type="button" class="btn btn-primary" id="reserve-selected-calendar-slot" ${calendar.reservationSelection ? '' : 'disabled'}>Reservar horario</button>`}
+              ${calendar.availabilityEditMode || intensive || !authService.can('INSTRUCTOR_ASSIGN') ? '' : '<button type="button" class="btn btn-secondary" id="configure-instructor-availability">Configurar disponibilidad</button>'}
             </div>
           </div>
           ${calendar.availabilityEditMode ? `<div class="schedule-availability-actions">
@@ -372,7 +372,7 @@ class ScheduleView extends Component {
     const selected = calendar?.reservationSelection?.startTime === slot.startTime
       && calendar?.reservationSelection?.endTime === slot.endTime;
     return `
-      <button type="button" class="calendar-slot free ${selected ? 'is-reservation-selected' : ''}" data-week-reservation="${slot.startTime}|${slot.endTime}">
+      <button type="button" class="calendar-slot free ${selected ? 'is-reservation-selected' : ''}" ${authService.can('INSTRUCTOR_ASSIGN') ? `data-week-reservation="${slot.startTime}|${slot.endTime}"` : 'disabled'}>
         <span class="slot-status">Disponible</span>
       </button>
     `;
@@ -418,9 +418,14 @@ class ScheduleView extends Component {
     });
   }
 
+
   updateScheduleGroupActions(status = '', isError = false) {
     const actions = document.getElementById('schedule-group-actions');
     if (!actions) return;
+    if (!authService.can('INSTRUCTOR_ASSIGN')) {
+      actions.innerHTML = '';
+      return;
+    }
     actions.innerHTML = this.scheduleEditMode ? `
       <span class="schedule-edit-indicator">Modo edición de grupos</span>
       <button type="button" class="btn btn-primary" id="save-schedule-groups">Guardar cambios</button>
@@ -435,6 +440,7 @@ class ScheduleView extends Component {
   }
 
   enterScheduleEditMode() {
+    if (!authService.can('INSTRUCTOR_ASSIGN')) return;
     this.scheduleEditMode = true;
     this.updateScheduleGroupActions();
     this.refreshScheduleGroups();
@@ -454,6 +460,7 @@ class ScheduleView extends Component {
   }
 
   async saveScheduleGroupChanges() {
+    if (!authService.can('INSTRUCTOR_ASSIGN')) return;
     const changes = this.getScheduleChanges();
     if (!changes.length) {
       this.updateScheduleGroupActions('No existen cambios para guardar');
@@ -1156,6 +1163,7 @@ class ScheduleView extends Component {
   }
 
   async openAvailabilityConfiguration(calendar) {
+    if (!authService.can('INSTRUCTOR_ASSIGN')) return;
     const modal = document.getElementById('instructor-calendar-modal');
     if (!modal) return;
     try {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v32-practical-hours';
+const CACHE_NAME = 'sportmancar-offline-v42-password-hands';
 const APP_SHELL = [
   '/',
   '/index.html',

@@ -1102,6 +1102,10 @@ class StudentsView extends Component {
     const citySelect = document.getElementById('modal-city-select');
     const branchSelect = document.getElementById('modal-branch-select');
     this.prepareScheduleFirstLayout();
+    const initializingSteps = [...(form?.querySelectorAll('.student-modal-step') || [])];
+    initializingSteps.forEach(step => { step.inert = true; });
+    if (form) { form.dataset.initializing = 'true'; form.setAttribute('aria-busy','true'); }
+    try {
     this.bindRegistrationFileDropzones(form);
     form?.querySelector('[name="cedulaIndicatesBachiller"]')?.addEventListener('change', event => {
       form.querySelectorAll('[name="certificadoBachillerFile"]').forEach(input => {
@@ -1440,6 +1444,10 @@ class StudentsView extends Component {
       const branchId = branchSelect?.selectedOptions?.[0]?.dataset?.branchId;
       if (branchId) await this.reloadModalSchedules(branchId);
     });
+    } finally {
+      initializingSteps.forEach(step => { step.inert = false; });
+      if (form) { form.dataset.initializing = 'false'; form.removeAttribute('aria-busy'); }
+    }
   }
 
   prepareScheduleFirstLayout() {
@@ -2494,7 +2502,7 @@ class StudentsView extends Component {
       const editOptions = await ApiService.getStudentEditOptions(this.editStudentId, {
         branch_id: branchId, course_id: courseId, modality: selectedModality,
       });
-      if (!editOptions?.success) throw new Error('No se pudo consultar la disponibilidad para editar');
+      if (!editOptions?.success) throw new Error(editOptions?.error?.message || editOptions?.error || 'No se pudo consultar la disponibilidad para editar');
       const currentCycleIds = new Set(this.recordEditContext.assignments.map(item => item.cycleId));
       const currentCycles = (editOptions.data || []).filter(cycle => currentCycleIds.has(cycle.id));
       const currentSchedules = this.flattenRecordEditOptions(currentCycles, selectedInstructorId);
@@ -2806,10 +2814,16 @@ class StudentsView extends Component {
       provinceSelect.addEventListener('change', () => renderCities());
       citySelect.addEventListener('change', () => renderBranches());
       branchSelect.addEventListener('change', async () => {
+        const courseSelect = document.getElementById('modal-course-select');
+        if (courseSelect) courseSelect.inert = true;
+        try {
         await this.loadModalBranchCourses(branchSelect);
         const branchId = branchSelect.selectedOptions?.[0]?.dataset?.branchId;
         await this.loadModalReferredInstructors(branchId);
         if (branchId) await this.reloadModalSchedules(branchId);
+        } finally {
+          if (courseSelect) courseSelect.inert = false;
+        }
       });
 
       const sessionBranchId = String(authService.getEffectiveBranchId() || '');
@@ -2871,6 +2885,8 @@ class StudentsView extends Component {
     if (!courseSelect) return;
     const branchId = branchSelect?.selectedOptions?.[0]?.dataset?.branchId;
     const branch = this.modalLocationCatalog?.branches?.find(item => String(item.id) === String(branchId));
+    const branchSummaryName = document.getElementById('registration-session-branch-name');
+    if (branch && branchSummaryName) branchSummaryName.textContent = branch.name;
     this.modalPickupEnabled = branch?.pickup_enabled !== false;
     const pickup = document.getElementById('student-pickup-branch');
     const pickupField = document.getElementById('student-pickup-branch-field');
@@ -3081,7 +3097,7 @@ class StudentsView extends Component {
       form.reset();
       await this.setRegistrationMode('regular');
       this.openStudentModal();
-      document.getElementById('student-modal-title').textContent = `Editar estudiante: ${context.student.first_name} ${context.student.last_name}`;
+      document.getElementById('student-modal-title').textContent = `${context.student.status === 'inhabilitado' ? 'Habilitar estudiante' : 'Editar estudiante'}: ${context.student.first_name} ${context.student.last_name}`;
       document.getElementById('student-modal-submit').textContent = 'Revisar cambios';
       document.getElementById('temporary-reservation-toggle')?.remove();
       form.querySelectorAll('.student-registration-types input').forEach(input => { input.disabled = true; });
@@ -3150,7 +3166,7 @@ class StudentsView extends Component {
         });
         document.getElementById('selected-enrollment-modality').value = modality;
         this.syncScheduleOptions();
-        this.restoreRecordEditSchedule();
+        if (student.status !== 'inhabilitado') this.restoreRecordEditSchedule();
         const theory = enrollment.theory_modality === 'presencial_intensivo'
           ? String(enrollment.theory_start_time || '').startsWith('13') ? 'presencial_intensivo_13' : 'presencial_intensivo_08'
           : enrollment.theory_modality || 'por_confirmar';
@@ -3602,6 +3618,7 @@ class StudentsView extends Component {
   }
 
   goToNextModalStep() {
+    if (document.getElementById('student-modal-form')?.dataset.initializing === 'true') return;
     const currentStep = this.getCurrentModalStep();
     if (currentStep === 1 && !this.validateScheduleFirstStep()) return;
     if (currentStep === 2 && !this.validateStudentFields()) return;
@@ -4592,6 +4609,10 @@ class StudentsView extends Component {
   }
 
   async handleStudentSubmit(event) {
+    if (document.getElementById('student-modal-form')?.dataset.initializing === 'true') {
+      event.preventDefault();
+      return;
+    }
     event.preventDefault();
     const form = event.target;
     const formData = new FormData(form);
@@ -4896,7 +4917,7 @@ class StudentsView extends Component {
       pickupBranchId: formData.get('pickupBranchId'),
       course_id: formData.get('course_id'),
       disabilityPercentage: selectedCatalogType === 'tipo-f' ? disabilityPercentage : null,
-      city_id: this.currentBranchRecord?.city_id || formData.get('city_id'),
+      city_id: this.modalLocationCatalog?.branches?.find(branch => String(branch.id) === String(selectedBranchId))?.city_id || formData.get('city_id'),
       branch_id: selectedBranchId || authService.getEffectiveBranchId() || null,
       branch: formData.get('branch'),
       referredByUserId: formData.get('referredByUserId') || null,
@@ -5047,6 +5068,7 @@ class StudentsView extends Component {
       personal.disabilityPercentage = formData.get('disabilityPercentage') || null;
     }
     const payload = { revision: context.revision, personal, documents: [] };
+    if (student.status === 'inhabilitado' && context.enrollments.length) payload.reactivate = true;
     const enrollment = context.enrollments[0];
     if (enrollment) {
       let plan;
@@ -5061,7 +5083,7 @@ class StudentsView extends Component {
         ? String(enrollment.theory_start_time || '').startsWith('13') ? 'presencial_intensivo_13' : 'presencial_intensivo_08'
         : enrollment.theory_modality || 'por_confirmar';
       const theory = form.querySelector('[name="theorySchedule"]:checked')?.value || oldTheory;
-      const academicChanged = newCourse !== enrollment.course_id || branchId !== student.branch_id
+      const academicChanged = Boolean(payload.reactivate) || newCourse !== enrollment.course_id || branchId !== student.branch_id
         || newInstructor !== oldInstructor || JSON.stringify(selected) !== JSON.stringify(original) || theory !== oldTheory;
       if (academicChanged) {
         if (!context.canSchedule) throw new Error('No tienes permiso para cambiar el curso u horario');

@@ -7,6 +7,48 @@ import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
 
 class PendingPaymentsView extends Component {
+  static branchCache = null;
+
+  async getCachedBranches() {
+    const user=authService.getCurrentUser() || {};
+    const key=JSON.stringify([user.id,user.apiToken,user.branch_id,user.scope,user.permissions]);
+    const cached=PendingPaymentsView.branchCache;
+    if (cached?.key===key && cached.expires>Date.now()) return cached.data;
+    const data=await ApiService.getBranches();
+    if (data.success) PendingPaymentsView.branchCache={key,data,expires:Date.now()+60000};
+    return data;
+  }
+
+  async loadReceipts() {
+    if (this.receiptsRequest) return this.receiptsRequest;
+    this.receiptsRequest=(async()=>{
+      try {
+        const response=await ApiService.getReceipts();
+        if (!response.success) throw new Error('No se pudieron cargar los comprobantes');
+        if (this.disposed) return;
+        this.receiptsAll=response.data || [];
+        this.receiptsLoaded=true;
+        this.receiptsError='';
+      } catch(error) {
+        if (this.disposed) return;
+        this.receiptsError=error.message || 'No se pudieron cargar los comprobantes';
+      } finally {
+        this.receiptsRequest=null;
+        if (!this.disposed) {
+          const pendingPage=this.pendingPage,receiptsPage=this.receiptsPage;
+          this.applyPendingFilters();
+          this.pendingPage=pendingPage;this.receiptsPage=receiptsPage;
+          this.renderPendingTable();this.renderReceiptsTable();
+          const total=document.querySelector('.cash-kpi.collected strong');
+          if (total) total.textContent=this.receiptsLoaded ? this.money(this.receiptsAll.filter(row=>row.payment_detail_status!=='VOIDED').reduce((sum,row)=>sum+Number(row.amount || 0),0)) : 'No disponible';
+          const count=document.querySelector('[data-payment-tab="receipts"] b');
+          if (count) count.textContent=this.receiptsLoaded ? this.receiptsAll.length : '-';
+        }
+      }
+    })();
+    return this.receiptsRequest;
+  }
+
   money(value) {
     return new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
   }
@@ -55,16 +97,15 @@ class PendingPaymentsView extends Component {
     try { await authService.refreshAuthorization(); } catch (error) { console.warn('No se actualizaron los permisos de Caja:', error.message); }
     const canVoidPayments = authService.can('PAYMENT_VOID');
     this.canVoidPayments = canVoidPayments;
-    const [pending, receiptsResult, branchOptionsResult] = await Promise.all([
+    this.disposed=false;
+    this.receiptsLoaded=false;
+    this.receiptsError='';
+    const [pending, branchOptionsResult] = await Promise.all([
       PaymentService.getPendingPayments(),
-      ApiService.getReceipts().catch(error => {
-        console.warn('No se pudieron cargar los comprobantes de la API:', error.message);
-        return { success: false, data: [] };
-      }),
-      ApiService.getBranches().catch(() => ({ success: false, data: [] })),
+      this.getCachedBranches().catch(() => ({ success: false, data: [] })),
     ]);
     this.pendingSnapshot = this.createSnapshot(pending);
-    const receipts = receiptsResult.success ? receiptsResult.data : [];
+    const receipts = [];
 
     // store lists for client-side filtering and pagination
     this.pendingAll = pending || [];
@@ -80,9 +121,6 @@ class PendingPaymentsView extends Component {
     this.filteredPending = pending || [];
     this.filteredReceipts = receipts || [];
     const pendingBalance = this.pendingAll.reduce((total, payment) => total + Number(payment.balance || 0), 0);
-    const collectedTotal = this.receiptsAll
-      .filter(receipt => String(receipt.payment_detail_status || 'ACTIVE').toUpperCase() !== 'VOIDED')
-      .reduce((total, receipt) => total + Number(receipt.amount || 0), 0);
     const pendingRows = (this.pendingAll || []).slice(0, this.pendingPageSize).map(p => {
       const cedula = StringHelper.normalizeCedula(p.student.cedula);
       const branchId = p.branchId || p.student.branchId || p.student.branch_id || '';
@@ -128,7 +166,7 @@ class PendingPaymentsView extends Component {
         <section class="cash-kpis" aria-label="Resumen de pagos">
           <article class="cash-kpi pending"><strong>${this.pendingAll.length}</strong><span>Estudiantes con saldo pendiente</span></article>
           <article class="cash-kpi balance"><strong>${this.money(pendingBalance)}</strong><span>Saldo total por cobrar</span></article>
-          <article class="cash-kpi collected"><strong>${this.money(collectedTotal)}</strong><span>Pagos registrados</span></article>
+          <article class="cash-kpi collected"><strong>Cargando...</strong><span>Pagos registrados</span></article>
         </section>
         <form class="report-filters" id="payments-filters">
           <label>Buscar estudiante<input id="filter-cedula" value="${this.escape(initialSearch)}" placeholder="Nombre o cédula" class="form-input" autocomplete="off"></label>
@@ -138,7 +176,7 @@ class PendingPaymentsView extends Component {
           <div class="filter-actions"><button type="button" class="btn btn-secondary" id="filter-clear">Limpiar filtros</button></div>
         </form>
         <section class="payment-workspace">
-          <nav class="payment-tabs" aria-label="Tipos de pagos"><button class="payment-tab active" type="button" data-payment-tab="pending">Pendientes <b>${this.pendingAll.length}</b></button><button class="payment-tab" type="button" data-payment-tab="receipts">Realizados <b>${this.receiptsAll.length}</b></button></nav>
+          <nav class="payment-tabs" aria-label="Tipos de pagos"><button class="payment-tab active" type="button" data-payment-tab="pending">Pendientes <b>${this.pendingAll.length}</b></button><button class="payment-tab" type="button" data-payment-tab="receipts">Realizados <b>-</b></button></nav>
           <div class="payment-panel active" data-payment-panel="pending"><div class="payment-panel-title"><h2>Pagos pendientes</h2><span id="pending-result-count">${this.pendingAll.length} resultados</span></div><div class="cash-table-wrap"><table class="cash-table"><thead><tr><th>Estudiante</th><th>Cédula</th><th>Curso</th><th>Transferencia</th><th>Saldo</th><th>Acción</th></tr></thead><tbody id="pending-payments-body">${pendingRows}</tbody></table></div><div id="pending-payments-pagination" class="cash-pagination"></div></div>
           <div class="payment-panel" data-payment-panel="receipts"><div class="payment-panel-title"><h2>Pagos realizados</h2><span id="receipts-result-count">${this.receiptsAll.length} resultados</span></div><div class="cash-table-wrap"><table class="cash-table"><thead><tr><th>Estudiante</th><th>Cédula</th><th>Curso</th><th>Abonó</th><th>Comprobante</th><th>Acción</th></tr></thead><tbody id="receipts-body">${receiptRows}</tbody></table></div><div id="receipts-pagination" class="cash-pagination"></div></div>
         </section>
@@ -275,6 +313,14 @@ class PendingPaymentsView extends Component {
 
     // delegate charge button clicks from the pending table body
     document.getElementById('pending-payments-body')?.addEventListener('click', (event) => {
+      const profile = event.target.closest('[data-payment-student-profile]');
+      if (profile) {
+        if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
+        event.preventDefault();
+        window.history.pushState(null, null, profile.getAttribute('href'));
+        window.dispatchEvent(new PopStateEvent('popstate'));
+        return;
+      }
       const btn = event.target.closest('.charge-btn');
       if (btn) openModal(btn.getAttribute('data-student-id'), btn.getAttribute('data-branch-id'), btn.getAttribute('data-service-transaction-id'));
     });
@@ -313,9 +359,11 @@ class PendingPaymentsView extends Component {
       const tab = button.dataset.paymentTab;
       document.querySelectorAll('[data-payment-tab]').forEach(item => item.classList.toggle('active', item === button));
       document.querySelectorAll('[data-payment-panel]').forEach(panel => panel.classList.toggle('active', panel.dataset.paymentPanel === tab));
+      if (tab==='receipts' && !this.receiptsLoaded) this.loadReceipts();
     }));
     document.getElementById('payments-refresh')?.addEventListener('click', () => {
-      window.dispatchEvent(new PopStateEvent('popstate'));
+      PendingPaymentsView.branchCache=null;
+      this.refreshRealtime().catch(error=>this.showMessageModal(error.message,{type:'error'}));
     });
 
     // Pagination delegates
@@ -337,6 +385,7 @@ class PendingPaymentsView extends Component {
     this.renderReceiptsTable();
 
     this.startAutomaticRefresh();
+    this.loadReceipts();
   }
 
   applyPendingFilters() {
@@ -400,7 +449,7 @@ class PendingPaymentsView extends Component {
         const transferCell = pendingVerification > 0
           ? `<div class="transfer-pending-cell"><span class="transfer-pending-badge">POR CONFIRMAR</span><strong>${this.money(pendingVerification)}</strong></div>`
           : '';
-        return `<tr data-student-id="${this.escape(p.student.id)}" data-branch-id="${this.escape(branchId)}"><td class="student-cell"><strong>${this.escape(fullName)}</strong><small>${this.escape(p.branchName || '')}</small></td><td>${this.escape(cedula)}</td><td><span class="course-pill">${this.escape(p.student.course)}</span></td><td>${transferCell}</td><td><span class="balance-value">${this.money(availableToCollect)}</span></td><td><button class="btn btn-primary charge-btn" data-student-id="${this.escape(p.student.id)}" data-branch-id="${this.escape(branchId)}" data-service-transaction-id="${this.escape(p.serviceTransactionId || '')}" ${availableToCollect <= 0 ? 'disabled title="Transferencia pendiente de verificaci&oacute;n"' : ''}>${availableToCollect <= 0 ? 'Por confirmar' : 'Cobrar'}</button></td></tr>`;
+        return `<tr data-student-id="${this.escape(p.student.id)}" data-branch-id="${this.escape(branchId)}"><td class="student-cell"><a href="/student-profile/${encodeURIComponent(p.student.id)}" data-payment-student-profile><strong>${this.escape(fullName)}</strong></a><small>${this.escape(p.branchName || '')}</small></td><td>${this.escape(cedula)}</td><td><span class="course-pill">${this.escape(p.student.course)}</span></td><td>${transferCell}</td><td><span class="balance-value">${this.money(availableToCollect)}</span></td><td><button class="btn btn-primary charge-btn" data-student-id="${this.escape(p.student.id)}" data-branch-id="${this.escape(branchId)}" data-service-transaction-id="${this.escape(p.serviceTransactionId || '')}" ${availableToCollect <= 0 ? 'disabled title="Transferencia pendiente de verificaci&oacute;n"' : ''}>${availableToCollect <= 0 ? 'Por confirmar' : 'Cobrar'}</button></td></tr>`;
       })
       .join('') || '<tr><td colspan="6" class="dashboard-empty">No hay pagos pendientes.</td></tr>';
     const body = document.getElementById('pending-payments-body');
@@ -415,6 +464,15 @@ class PendingPaymentsView extends Component {
   }
 
   renderReceiptsTable() {
+    if (!this.receiptsLoaded) {
+      const body=document.getElementById('receipts-body');
+      if (body) body.innerHTML=`<tr><td colspan="6" role="status">${this.receiptsError ? this.escape(this.receiptsError) : 'Cargando comprobantes...'}</td></tr>`;
+      const pagination=document.getElementById('receipts-pagination');
+      if (pagination) pagination.innerHTML='';
+      const count=document.getElementById('receipts-result-count');
+      if (count) count.textContent=this.receiptsError ? 'No disponible' : 'Cargando...';
+      return;
+    }
     const rows = this.filteredReceipts || this.receiptsAll || [];
     const total = rows.length;
     const pages = Math.max(Math.ceil(total / this.receiptsPageSize), 1);
@@ -436,9 +494,9 @@ class PendingPaymentsView extends Component {
   }
 
   async refreshRealtime() {
-    const [pending,receipts] = await Promise.all([PaymentService.getPendingPayments(),ApiService.getReceipts()]);
+    const pending = await PaymentService.getPendingPayments();
+    if (this.disposed) return;
     this.pendingAll = pending || [];
-    this.receiptsAll = receipts.success ? receipts.data || [] : this.receiptsAll;
     const pendingPage = this.pendingPage, receiptsPage = this.receiptsPage;
     this.applyPendingFilters();
     this.pendingPage = pendingPage;
@@ -448,9 +506,10 @@ class PendingPaymentsView extends Component {
     const setText = (selector,value) => { const target = document.querySelector(selector); if (target) target.textContent = value; };
     setText('.cash-kpi.pending strong',this.pendingAll.length);
     setText('.cash-kpi.balance strong',this.money(this.pendingAll.reduce((sum,row) => sum+Number(row.balance || 0),0)));
-    setText('.cash-kpi.collected strong',this.money(this.receiptsAll.filter(row => row.payment_detail_status !== 'VOIDED').reduce((sum,row) => sum+Number(row.amount || 0),0)));
     setText('[data-payment-tab="pending"] b',this.pendingAll.length);
     setText('[data-payment-tab="receipts"] b',this.receiptsAll.length);
+    if (this.receiptsRequest) await this.receiptsRequest;
+    if (!this.disposed) await this.loadReceipts();
   }
 
   createSnapshot(payments) {
@@ -461,6 +520,7 @@ class PendingPaymentsView extends Component {
   }
 
   unmount() {
+    this.disposed=true;
     if (this.refreshTimer) window.clearInterval(this.refreshTimer);
     super.unmount();
   }

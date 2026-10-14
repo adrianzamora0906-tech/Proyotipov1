@@ -1,5 +1,24 @@
 /* Login Page */
 
+.login-password-field { position: relative; }
+.login-password-field .form-input { width: 100%; box-sizing: border-box; padding-right: 60px; }
+.login-password-field .form-input::-ms-reveal,
+.login-password-field .form-input::-ms-clear { display: none; }
+.login-form .login-password-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 48px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; border: 0; background: transparent; color: #526077; cursor: pointer; border-radius: 4px; }
+.password-face { position: relative; display: block; width: 28px; height: 28px; border: 1.5px solid #7373a1; border-radius: 50%; background: #f4f4fc; }
+.password-face-eyes { position: absolute; top: 8px; left: 6px; right: 6px; display: flex; justify-content: space-between; }
+.password-face-eyes span { width: 3px; height: 4px; border-radius: 50%; background: #343456; }
+.password-face-smile { position: absolute; left: 9px; bottom: 5px; width: 8px; height: 4px; border-bottom: 1.5px solid #7373a1; border-radius: 0 0 8px 8px; }
+.password-hand { position: absolute; top: 2px; width: 18px; height: 22px; transition: transform .3s ease; color: #5b55b0; }
+.password-hand svg { display: block; width: 18px; height: 22px; fill: #e6e4ff; stroke-width: 1.7; }
+.password-hand-left { left: -1px; transform: rotate(-12deg); }
+.password-hand-right { right: -1px; transform: scaleX(-1) rotate(-12deg); }
+.is-password-visible .password-hand-left { transform: translate(-7px, 11px) rotate(-35deg); }
+.is-password-visible .password-hand-right { transform: translate(7px, 11px) scaleX(-1) rotate(-35deg); }
+@media (prefers-reduced-motion: reduce) { .password-hand { transition: none; } }
+.login-password-toggle:hover { background: #eef0f4; }
+.login-password-toggle:focus-visible { outline: 2px solid #5145ec; outline-offset: -2px; }
+
 .login-container {
   display: flex;
   align-items: center;

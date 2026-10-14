@@ -28,7 +28,9 @@ const permissionImpact = code => ({
   PAYMENT_VOID: 'Financiero: permite solicitar o ejecutar la anulación de un pago',
   STUDENT_VIEW: 'Menú: Estudiantes',
   DOCUMENT_VIEW: 'Menú: Documentación',
-  SCHEDULE_VIEW: 'Menú: Horarios',
+  SCHEDULE_VIEW: 'Horarios: consultar sin modificar',
+  SCHEDULE_CHANGE: 'Horarios: cambiar horarios y grupos de fin de semana',
+  INSTRUCTOR_ASSIGN: 'Horarios: editar grupos, configurar disponibilidad y reservar',
   REPORT_VIEW: 'Menú: Reportes de cursos de su propia sucursal',
   REPORT_EXPORT: 'Reportes: permite exportar datos de su sucursal',
 })[code] || '';

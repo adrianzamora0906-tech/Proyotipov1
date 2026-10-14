@@ -29,7 +29,12 @@ class LoginView extends Component {
 
             <div class="form-group">
               <label class="form-label required">Contraseña</label>
-              <input type="password" class="form-input" id="password" name="password" placeholder="Ingrese su contraseña" required>
+              <div class="login-password-field">
+                <input type="password" class="form-input" id="password" name="password" placeholder="Ingrese su contraseña" autocomplete="current-password" required>
+                <button type="button" class="login-password-toggle" id="toggle-password" aria-label="Mostrar contraseña" title="Mostrar contraseña" aria-controls="password" aria-pressed="false">
+                  <span class="password-face" aria-hidden="true"><span class="password-face-eyes"><span></span><span></span></span><span class="password-face-smile"></span><span class="password-hand password-hand-left"><i data-lucide="hand"></i></span><span class="password-hand password-hand-right"><i data-lucide="hand"></i></span></span>
+                </button>
+              </div>
               <div class="form-error" id="password-error"></div>
             </div>
 
@@ -49,6 +54,18 @@ class LoginView extends Component {
   }
 
   async mount() {
+    window.lucide?.createIcons();
+    document.getElementById('toggle-password')?.addEventListener('click', event => {
+      const input = document.getElementById('password');
+      const button = event.currentTarget;
+      const visible = input.type === 'password';
+      input.type = visible ? 'text' : 'password';
+      const label = visible ? 'Ocultar contrase\u00f1a' : 'Mostrar contrase\u00f1a';
+      button.setAttribute('aria-label', label);
+      button.title = label;
+      button.setAttribute('aria-pressed', String(visible));
+      button.classList.toggle('is-password-visible', visible);
+    });
     const form = document.getElementById('login-form');
     if (form) {
       form.addEventListener('submit', (e) => this.handleLogin(e));

@@ -162,6 +162,7 @@ class SidebarLayout {
                 </svg>
                 <span class="nav-text">Estudiantes</span>
               </a>` : ''}
+              ${user?.permissions?.includes('SCHEDULE_VIEW') ? `<a href="/schedule" class="nav-item ${currentPath === '/schedule' ? 'active' : ''}"><i data-lucide="calendar-days" class="nav-icon"></i><span class="nav-text">Horarios</span></a>` : ''}
               <a href="/cash/history" class="nav-item ${currentPath === '/cash/history' ? 'active' : ''}">
                 <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="12" cy="12" r="10"></circle>

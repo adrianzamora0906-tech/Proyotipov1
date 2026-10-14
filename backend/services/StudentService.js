@@ -179,7 +179,7 @@ class StudentService {
           requested_course.name ILIKE '%tipo f%' AND cc.vehicle_type='carro'
         )) AND cc.active=TRUE
           AND cc.deleted_at IS NULL AND cc.status IN('activo','proximo')
-          AND CURRENT_DATE<=${deadlineSql}`,[cycleId,courseId])).rows[0];
+          AND CURRENT_DATE<=${deadlineSql} FOR UPDATE OF cc`,[cycleId,courseId])).rows[0];
       if(!cycle)throw createError(409,'El curso seleccionado ya no admite reservas');
       const effectiveBranch=(await client.query(`SELECT COALESCE(reference.id,requested.id) AS id
         FROM branches requested

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v28-mobile-qr';
+const CACHE_NAME = 'sportmancar-offline-v32-practical-hours';
 const APP_SHELL = [
   '/',
   '/index.html',

@@ -14,6 +14,17 @@ import DateHelper from '../../helpers/DateHelper.js';
 import ApiService from '../../core/api/apiService.js';
 
 class DashboardView extends Component {
+  async refreshRealtime() {
+    const root=document.querySelector('.dashboard');
+    if(!root)return;
+    const canViewPayments=authService.can('PAYMENT_VIEW');
+    const [students,result]=await Promise.all([StudentService.getAllStudents(),ApiService.getDocumentStudentSummaries()]);
+    const documents=result.success ? result.data : [];
+    const stats=await DashboardService.getDashboardStats(students,documents,{canViewPayments});
+    if(!root.isConnected)return;
+    const values=[stats.totalStudents,stats.missingDocuments,...(canViewPayments ? [stats.pendingPayments] : []),stats.enrolledToday];
+    root.querySelectorAll(':scope > .stats-grid .stat-number').forEach((element,index)=>{element.textContent=String(values[index]);});
+  }
   constructor(props = {}) {
     super(props);
     this.studentsView = new StudentsView();

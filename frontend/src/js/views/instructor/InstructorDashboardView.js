@@ -8,6 +8,29 @@ import { openCompleteSessionModal } from './CompleteSessionModal.js';
 import PracticalSessionService from '../../services/practicalSessionService.js';
 
 class InstructorDashboardView extends Component {
+  async refreshRealtime() {
+    const root = document.querySelector('.instructor-page.dashboard');
+    if (!root) return;
+    const result = await InstructorDashboardService.getDashboard();
+    if (!root.isConnected || !result.data) return;
+    const dashboard = result.data;
+    const previous = this.dashboardData;
+    this.dashboardData = dashboard;
+    const values = {
+      next:dashboard.summary.nextSession ? formatTime(dashboard.summary.nextSession.scheduledStart) : 'Sin clases',
+      today:dashboard.summary.scheduledToday,completed:dashboard.summary.monthlyCompletedSessions,
+      hours:`${dashboard.summary.monthlyHours} h`,
+      schedule:`${dashboard.scheduleCourses?.length || 0} curso${dashboard.scheduleCourses?.length === 1 ? '' : 's'}`,
+    };
+    Object.entries(values).forEach(([key,value])=>{
+      const number=root.querySelector(`[data-dashboard-stat="${key}"] .stat-number`);
+      if(number) number.textContent=String(value);
+    });
+    if(JSON.stringify(previous?.summary?.nextSession)!==JSON.stringify(dashboard.summary.nextSession)) {
+      root.querySelector('[data-next-session-region]').innerHTML=this.renderNextSession(dashboard.summary.nextSession);
+      this.bindSessionActions();
+    }
+  }
   async render() {
     try {
       const result = await InstructorDashboardService.getDashboard();
@@ -37,7 +60,7 @@ class InstructorDashboardView extends Component {
             ${this.renderStat(`${dashboard.scheduleCourses?.length || 0} curso${dashboard.scheduleCourses?.length === 1 ? '' : 's'}`, 'Mi horario', 'schedule')}
           </div>
 
-          ${this.renderNextSession(dashboard.summary.nextSession)}
+          <div data-next-session-region>${this.renderNextSession(dashboard.summary.nextSession)}</div>
 
           <div class="dashboard-grid">
             <div class="card">
@@ -338,13 +361,21 @@ class InstructorDashboardView extends Component {
       });
     });
 
+    this.bindSessionActions();
+  }
+
+  bindSessionActions() {
     document.querySelectorAll('.js-start-session').forEach(button => {
+      if (button.dataset.sessionActionBound) return;
+      button.dataset.sessionActionBound='true';
       button.addEventListener('click', () => openAttendanceQrModal(
         button.dataset.id,
         () => window.dispatchEvent(new PopStateEvent('popstate')),
       ));
     });
     document.querySelectorAll('.js-complete-session').forEach(button => {
+      if (button.dataset.sessionActionBound) return;
+      button.dataset.sessionActionBound='true';
       button.addEventListener('click', () => openAttendanceQrModal(
         button.dataset.id,
         () => openCompleteSessionModal(
@@ -355,6 +386,8 @@ class InstructorDashboardView extends Component {
       ));
     });
     document.querySelectorAll('.js-reset-qr-test').forEach(button => {
+      if (button.dataset.sessionActionBound) return;
+      button.dataset.sessionActionBound='true';
       button.addEventListener('click', async () => {
         if (!window.confirm('¿Restablecer esta clase de prueba para generar otro QR?')) return;
         button.disabled = true;

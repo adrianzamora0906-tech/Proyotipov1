@@ -5,7 +5,30 @@ import AdminService from '../../services/AdminService.js';
 const titles = { people: 'Personas', finance: 'Financiero', academic: 'Académico', audit: 'Auditoría', settings: 'Configuración' };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
+export function auditDescription(item) {
+  const attendance = {
+    ATTENDANCE_QR_ENTRY_CONFIRMED: 'Entrada confirmada',
+    ATTENDANCE_QR_EXIT_CONFIRMED: 'Salida confirmada',
+  }[item.action];
+  if (!attendance) return item.description || item.entity_type || '';
+  return [attendance, item.attendance_student_name ? `Alumno: ${item.attendance_student_name}` : '',
+    item.attendance_identification ? `Cedula: ${item.attendance_identification}` : '',
+    item.attendance_instructor_name ? `Instructor: ${item.attendance_instructor_name}` : ''].filter(Boolean).join(' · ');
+}
+
 export default class AdminWorkspaceView extends Component {
+  renderAuditRows(rows) {
+    return rows.map(item => `<div class="list-item"><strong>${new Date(item.created_at).toLocaleString('es-EC', { timeZone: 'America/Guayaquil' })}</strong> · ${esc(item.action)} · ${esc(auditDescription(item))}${item.action.startsWith('ATTENDANCE_') ? `<div class="text-sm text-gray-500">Responsable: ${esc([item.first_name,item.last_name].filter(Boolean).join(' ') || item.username || 'Sistema')}${item.branch_name ? ` · ${esc(item.branch_name)}` : ''}</div>` : ''}</div>`).join('') || '<p>Sin registros.</p>';
+  }
+
+  async refreshRealtime() {
+    if (location.pathname !== '/admin-system/audit') return;
+    const target = document.querySelector('.context-workspace > .card');
+    if (!target) return;
+    const branchId = new URLSearchParams(location.search).get('branchId');
+    const response = await AdminService.audit({limit:25,branchId});
+    if (target.isConnected) target.innerHTML = this.renderAuditRows(response.data.data || []);
+  }
   async render() {
     const key = location.pathname.split('/').pop();
     const title = titles[key] || 'Administración';
@@ -16,7 +39,7 @@ export default class AdminWorkspaceView extends Component {
       if (branchId) branch = (await AdminService.branch(branchId)).data;
       if (key === 'audit') {
         const rows = (await AdminService.audit({ limit: 25, branchId })).data.data || [];
-        content = rows.map(item => `<div class="list-item"><strong>${new Date(item.created_at).toLocaleString()}</strong> · ${esc(item.action)} · ${esc(item.description || item.entity_type)}</div>`).join('');
+        content = this.renderAuditRows(rows);
       } else if (key === 'settings') {
         const rows = branchId ? (await AdminService.branchSettings(branchId)).data : (await AdminService.settings()).data;
         content = rows.map(item => `<div class="list-item"><strong>${esc(item.key)}</strong> · ${esc(item.scope_type)}</div>`).join('');

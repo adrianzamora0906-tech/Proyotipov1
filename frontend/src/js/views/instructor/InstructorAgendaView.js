@@ -8,6 +8,30 @@ import { openCompleteSessionModal } from './CompleteSessionModal.js';
 import PracticalSessionService from '../../services/practicalSessionService.js';
 
 class InstructorAgendaView extends Component {
+  async refreshRealtime() {
+    const root=document.querySelector('.instructor-agenda-page');
+    if(!root)return;
+    const params=new URLSearchParams(window.location.search);
+    const now=new Date();
+    const date=params.get('date') || new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
+    const view=params.get('view') || 'day';
+    const range=view==='week' ? this.getWeekRange(date) : view==='upcoming' ? this.getUpcomingRange(date) : {date};
+    const result=await InstructorAgendaService.getAgenda({...range,status:params.get('status') || '',course:params.get('course') || '',student:params.get('student') || ''});
+    if(!root.isConnected)return;
+    const sessions=result.data || [];
+    this.agendaSessions=sessions;
+    root.querySelector('.agenda-list-card__body').innerHTML=sessions.length ? this.renderSessions(sessions) : '<div class="instructor-empty">No hay clases en este periodo.</div>';
+    root.querySelector('.agenda-result-count').textContent=`${sessions.length} ${sessions.length===1 ? 'clase' : 'clases'}`;
+    root.querySelector('.agenda-summary article:first-child strong').textContent=String(sessions.filter(item=>!item.isExamOnly).length);
+    const next=sessions.find(item=>['PROGRAMADA','PROXIMA','EN_CURSO'].includes(item.status) && !item.isExpired);
+    root.querySelector('.agenda-summary article:last-child strong').textContent=next ? formatDateTime(next.scheduledStart) : 'Sin clases';
+    root.querySelector('[data-agenda-next-region]').innerHTML=this.renderNextAgendaSession(next);
+    this.bindAgendaSessionActions();
+  }
+
+  renderNextAgendaSession(session) {
+    return session ? `<section class="agenda-next"><div><span>Próxima clase</span><strong>${escapeHtml(session.studentName)}</strong><small>${escapeHtml(session.course)} · Clase ${escapeHtml(session.sessionNumber || 'N/A')} · ${formatDateTime(session.scheduledStart)}</small></div><a class="btn btn-primary" href="/instructor/agenda?view=day&date=${String(session.scheduledStart).slice(0,10)}">Ver jornada</a></section>` : '';
+  }
   async render() {
     const params = new URLSearchParams(window.location.search);
     const now = new Date();
@@ -90,7 +114,7 @@ class InstructorAgendaView extends Component {
             </div>
           </form></section>
 
-          ${nextSession ? `<section class="agenda-next"><div><span>Próxima clase</span><strong>${escapeHtml(nextSession.studentName)}</strong><small>${escapeHtml(nextSession.course)} · Clase ${escapeHtml(nextSession.sessionNumber || 'N/A')} · ${formatDateTime(nextSession.scheduledStart)}</small></div><a class="btn btn-primary" href="/instructor/agenda?view=day&date=${String(nextSession.scheduledStart).slice(0,10)}">Ver jornada</a></section>` : ''}
+          <div data-agenda-next-region>${this.renderNextAgendaSession(nextSession)}</div>
 
           <section class="agenda-list-card">
             <div class="agenda-list-card__header">
@@ -344,12 +368,18 @@ class InstructorAgendaView extends Component {
     studentFilter?.addEventListener('change', renderFilteredStudents);
     studentModal?.querySelectorAll('a').forEach(link => link.addEventListener('click', () => document.body.classList.remove('modal-open')));
 
+    this.bindAgendaSessionActions();
+  }
+
+  bindAgendaSessionActions() {
     const classModal = document.getElementById('agenda-class-modal');
     const closeClassModal = () => {
       classModal.hidden = true;
       document.body.classList.remove('modal-open');
     };
     document.querySelectorAll('.js-session-detail').forEach(button => {
+      if (button.dataset.sessionActionBound) return;
+      button.dataset.sessionActionBound='true';
       button.addEventListener('click', () => {
         const item = this.agendaSessions.find(session => String(session.id) === String(button.dataset.id));
         if (!item) return;
@@ -395,6 +425,8 @@ class InstructorAgendaView extends Component {
         document.body.classList.add('modal-open');
       });
     });
+    if (classModal && !classModal.dataset.closeBound) {
+    classModal.dataset.closeBound='true';
     classModal?.querySelector('.agenda-class-close')?.addEventListener('click', closeClassModal);
     classModal?.querySelector('#agenda-class-evaluation-toggle')?.addEventListener('click', event => {
       const evaluation = document.getElementById('agenda-class-evaluation');
@@ -404,13 +436,18 @@ class InstructorAgendaView extends Component {
     classModal?.addEventListener('click', event => {
       if (event.target === classModal) closeClassModal();
     });
+    }
     document.querySelectorAll('.js-start-session').forEach(button => {
+      if (button.dataset.sessionActionBound) return;
+      button.dataset.sessionActionBound='true';
       button.addEventListener('click', () => openAttendanceQrModal(
         button.dataset.id,
         () => window.dispatchEvent(new PopStateEvent('popstate')),
       ));
     });
     document.querySelectorAll('.js-complete-session').forEach(button => {
+      if (button.dataset.sessionActionBound) return;
+      button.dataset.sessionActionBound='true';
       button.addEventListener('click', () => openAttendanceQrModal(
         button.dataset.id,
         () => openCompleteSessionModal(
@@ -421,6 +458,8 @@ class InstructorAgendaView extends Component {
       ));
     });
     document.querySelectorAll('.js-reset-qr-test').forEach(button => {
+      if (button.dataset.sessionActionBound) return;
+      button.dataset.sessionActionBound='true';
       button.addEventListener('click', () => {
         if (!window.confirm('¿Restablecer esta clase de prueba para generar otro QR?')) return;
         this.runAction(button, () => PracticalSessionService.resetQrTestSession(button.dataset.id));

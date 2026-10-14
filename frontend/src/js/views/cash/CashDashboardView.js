@@ -5,6 +5,17 @@ import ApiService from '../../core/api/apiService.js';
 import { authService } from '../../core/auth/AuthService.js';
 
 class CashDashboardView extends Component {
+  async refreshRealtime() {
+    const root=document.querySelector('.cash-dashboard');
+    if(!root)return;
+    const [pending,statistics,receiptResponse]=await Promise.all([PaymentService.getPendingPayments(),PaymentService.getStatistics(),ApiService.getReceipts()]);
+    if(!root.isConnected)return;
+    const today=new Date().toLocaleDateString('en-CA');
+    const receipts=receiptResponse.success ? receiptResponse.data : [];
+    const count=receipts.filter(receipt=>String(receipt.payment_detail_status || 'ACTIVE').toUpperCase()!=='VOIDED' && new Date(receipt.created_at || receipt.date).toLocaleDateString('en-CA')===today).length;
+    const values=[pending.length,new Intl.NumberFormat('es-EC',{style:'currency',currency:'USD'}).format(Number(statistics.totalAmount || 0)),count];
+    root.querySelectorAll('.cash-stats-grid .stat-number').forEach((element,index)=>{element.textContent=String(values[index]);});
+  }
   async render() {
     const pending = await PaymentService.getPendingPayments();
     const statistics = await PaymentService.getStatistics();

@@ -10,6 +10,7 @@ const escape = value => String(value ?? '').replace(/[&<>'"]/g, c => ({ '&': '&a
 const readable = code => ({ PAYMENT_CREATED: 'Registró un pago', PAYMENT_VOIDED: 'Anuló un pago', USER_CREATED: 'Creó un usuario', USER_DISABLED: 'Desactivó un usuario', PERMISSION_GRANTED: 'Otorgó un permiso', PERMISSION_REVOKED: 'Revocó un permiso', WORKFLOW_CHANGED: 'Actualizó un flujo de trabajo', SYSTEM_SETTING_CHANGED: 'Actualizó la configuración', STUDENT_CREATED: 'Registró un estudiante', SESSION_REVOKED: 'Revocó una sesión' })[code] || String(code || 'Actividad del sistema').toLowerCase().replaceAll('_', ' ').replace(/^./, c => c.toUpperCase());
 
 export default class AdminDashboardView extends Component {
+  async refreshRealtime() { if (document.getElementById('admin-dashboard')) await this.load({preserveActivityPage:true}); }
   async render() {
     return SidebarLayout.render(`<main class="admin-dashboard" id="admin-dashboard">
       <header class="admin-dashboard__header"><div><h1>Administración del Sistema</h1><p>Control global y configuración de SportmancarERP</p></div><button class="btn btn-secondary" id="dashboard-refresh" type="button">↻ Actualizar</button></header>
@@ -44,10 +45,10 @@ export default class AdminDashboardView extends Component {
 
   filters() { return { branchId: document.getElementById('dashboard-branch')?.value, period: document.getElementById('dashboard-period')?.value, dateFrom: document.getElementById('dashboard-from')?.value, dateTo: document.getElementById('dashboard-to')?.value }; }
   sectionError(key, data) { return data.errors?.[key] ? '<p class="dashboard-empty dashboard-error">No fue posible cargar esta sección. Intenta actualizar.</p>' : null; }
-  async load() {
+  async load({preserveActivityPage=false} = {}) {
     const status = document.getElementById('dashboard-status'); const refresh = document.getElementById('dashboard-refresh');
     status.textContent = 'Actualizando datos…'; refresh.disabled = true;
-    try { const response = await AdminDashboardService.get(this.filters()); const data = response.data || {}; this.activityPage = 1; this.paint(data); status.textContent = `Actualizado ${new Date().toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' })}`; }
+    try { const response = await AdminDashboardService.get(this.filters()); const data = response.data || {}; if (!preserveActivityPage) this.activityPage = 1; this.paint(data); status.textContent = `Actualizado ${new Date().toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' })}`; }
     catch (error) { status.textContent = error.message || 'No se pudo actualizar el dashboard'; status.classList.add('dashboard-error'); }
     finally { refresh.disabled = false; }
   }

@@ -14,6 +14,7 @@ const variation = (current, previous) => {
 };
 
 export default class ManagerDashboardView extends Component {
+  async refreshRealtime() { if (document.querySelector('.manager-dashboard')) await this.load(); }
   async render() {
     return SidebarLayout.render(`<main class="admin-dashboard manager-dashboard">
       <header class="admin-dashboard__header"><div><h1>Resumen ejecutivo</h1><p>Resultados financieros y operativos consolidados</p></div><button class="btn btn-secondary" id="manager-refresh" type="button">↻ Actualizar</button></header>

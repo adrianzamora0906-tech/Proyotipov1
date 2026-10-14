@@ -8,13 +8,14 @@ import BranchIncidentsView from './views/admin/BranchIncidentsView.js';
 import { authService } from "./core/auth/AuthService.js";
 import { storageService } from "./core/storage/StorageService.js";
 import { realtimeClient } from "./core/realtime/RealtimeClient.js";
+import { relevantRealtimeTopics } from "./core/realtime/RealtimeRoutePolicy.js";
 import StudentService from "./services/StudentService.js";
 import "./data/DemoDataGenerator.js";
 
 // Views
 import LoginView from "./views/auth/LoginView.js?v=perfil-profesor-teoria-20260907";
-import DashboardView from "./views/dashboard/DashboardView.js?v=consultas-optimizadas-20260811";
-import StudentsView from "./views/students/StudentsView.js?v=registro-movil-qr-20261013";
+import DashboardView from "./views/dashboard/DashboardView.js?v=actualizacion-parcial-20261014";
+import StudentsView from "./views/students/StudentsView.js?v=galeria-registro-20261014";
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=metodo-pago-perfil-20261013";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=perfil-desde-instructor-20261013";
@@ -23,13 +24,13 @@ import NotificationsView from "./views/notifications/NotificationsView.js";
 import HistoryView from "./views/history/HistoryView.js";
 import ProfileView from "./views/profile/ProfileView.js";
 // Cash module views
-import CashDashboardView from "./views/cash/CashDashboardView.js?v=caja-cobro-directo-20260825";
+import CashDashboardView from "./views/cash/CashDashboardView.js?v=actualizacion-parcial-20261014";
 import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";
 import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=websocket-20261012";
 import CashHistoryView from "./views/cash/CashHistoryView.js";
 import CashOperationsView from "./views/cash/CashOperationsView.js";
-import InstructorDashboardView from "./views/instructor/InstructorDashboardView.js?v=registro-movil-montecristi-20261013";
-import InstructorAgendaView from "./views/instructor/InstructorAgendaView.js?v=agenda-sin-resumen-20260930";
+import InstructorDashboardView from "./views/instructor/InstructorDashboardView.js?v=actualizacion-parcial-20261014";
+import InstructorAgendaView from "./views/instructor/InstructorAgendaView.js?v=actualizacion-parcial-20261014";
 import InstructorTheoryView from "./views/instructor/InstructorTheoryView.js?v=dashboard-profesor-teoria-20260907";
 import InstructorStudentsView from "./views/instructor/InstructorStudentsView.js?v=filtro-etapa-20260812";
 import InstructorReferralsView from "./views/instructor/InstructorReferralsView.js?v=privacidad-telefono-20260903";
@@ -38,10 +39,10 @@ import InstructorIncidentsView from "./views/instructor/InstructorIncidentsView.
 import InstructorProfileView from "./views/instructor/InstructorProfileView.js";
 import MobileDocumentUploadView from "./views/mobile-upload/MobileDocumentUploadView.js?v=agarre-amplio-20261012";
 import SidebarLayout from "./layouts/SidebarLayout.js?v=websocket-20261012";
-import AdminDashboardView from "./views/admin/AdminDashboardView.js";
+import AdminDashboardView from "./views/admin/AdminDashboardView.js?v=actualizacion-parcial-20261014";
 import AdminResourceMonitorView from "./views/admin/AdminResourceMonitorView.js?v=recursos-estudiante-20261012";
 import AdminSecurityView from "./views/admin/AdminSecurityView.js?v=tipo-instructor-20260819";
-import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js";
+import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js?v=actualizacion-parcial-20261014";
 import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=capacidad-fin-semana-20260917";
 import ManagerReportsView from "./views/manager/ManagerReportsView.js?v=registrados-sin-estado-20261012";
 import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=permiso-sin-filtro-pago-20260820";
@@ -49,12 +50,12 @@ import AdminSettingsView from "./views/admin/AdminSettingsView.js";
 import AdminReferralCampaignView from "./views/admin/AdminReferralCampaignView.js";
 import ManagerWorkspaceView from "./views/manager/ManagerWorkspaceView.js";
 import ManagerBranchesView from "./views/manager/ManagerBranchesView.js?v=indicadores-conversion-pago-20260812";
-import ManagerDashboardView from "./views/manager/ManagerDashboardView.js";
+import ManagerDashboardView from "./views/manager/ManagerDashboardView.js?v=actualizacion-parcial-20261014";
 import ManagerFinanceView from "./views/manager/ManagerFinanceView.js";
 import ManagerAcademicView from "./views/manager/ManagerAcademicView.js";
 import ManagerAuditView from "./views/manager/ManagerAuditView.js?v=auditoria-responsables-20260812";
 import ManagerEnrollmentMonitorView from "./views/manager/ManagerEnrollmentMonitorView.js?v=websocket-20261012";
-import StudentPortalView from "./views/student-portal/StudentPortalView.js?v=inicio-teoria-20260910";
+import StudentPortalView from "./views/student-portal/StudentPortalView.js?v=horas-practicas-20261014";
 
 class App {
   constructor() {
@@ -509,7 +510,7 @@ class App {
       if (event.isTrusted && form && !/filter|search/i.test(form.id)) this.dirtyRealtimeForms.add(form);
     });
     window.addEventListener('erp:realtime', event => {
-      (event.detail?.topics || []).forEach(topic => this.realtimeTopics.add(topic));
+      relevantRealtimeTopics(window.location.pathname, event.detail?.topics || []).forEach(topic => this.realtimeTopics.add(topic));
       this.scheduleRealtimeRefresh();
     });
     document.addEventListener('visibilitychange', () => this.scheduleRealtimeRefresh());
@@ -518,18 +519,19 @@ class App {
     this.realtimeObserver.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style','open']});
     window.addEventListener("storage", (event) => {
       if (!event.key || !event.key.startsWith(storageService.prefix)) return;
-      this.refreshCurrentRoute();
+      this.queueLocalRealtimeChange(event.key.slice(storageService.prefix.length));
     });
 
-    window.addEventListener("erp:dataChanged", () => {
-      this.refreshCurrentRoute();
+    window.addEventListener("erp:dataChanged", event => {
+      this.queueLocalRealtimeChange(event.detail?.collection);
     });
   }
 
-  refreshCurrentRoute() {
-    const currentRoute = this.router.getCurrentRoute();
-    if (!currentRoute || currentRoute.name === "login") return;
-    this.router.renderRoute(currentRoute);
+  queueLocalRealtimeChange(collection) {
+    const topic = {students:'students',payments:'payments',documents:'documents',schedules:'schedules',notifications:'notifications'}[collection];
+    if (!topic) return;
+    relevantRealtimeTopics(window.location.pathname,[topic]).forEach(item=>this.realtimeTopics.add(item));
+    this.scheduleRealtimeRefresh();
   }
 
   scheduleRealtimeRefresh() {
@@ -545,37 +547,19 @@ class App {
       this.realtimeTopics.clear(); return;
     }
     const visible = element => element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden';
-    if ([...document.querySelectorAll('.modal-overlay,.branch-modal-backdrop,dialog[open],[role="dialog"]')].some(visible)) return;
+    if ([...document.querySelectorAll('.modal-overlay,.branch-modal-backdrop,.student-modal-backdrop,dialog[open],[role="dialog"]')].some(visible)) return;
     if ([...document.querySelectorAll('form')].some(form => visible(form) && this.dirtyRealtimeForms.has(form))) return;
     if (document.activeElement?.matches('input,select,textarea,[contenteditable="true"]')) return;
-    const topics = [...this.realtimeTopics];
+    const topics = relevantRealtimeTopics(window.location.pathname,[...this.realtimeTopics]);
     this.realtimeTopics.clear();
-    const path = window.location.pathname;
-    if (topics.every(topic => topic === 'resources') && path !== '/admin-system/resources') return;
-    const interested = path.startsWith('/cash') ? ['payments','students','admin']
-      : /students|student-profile/.test(path) ? ['students','schedules','payments','documents','admin']
-      : /schedule|instructor/.test(path) ? ['schedules','students','payments','documents','admin']
-      : /documents/.test(path) ? ['documents','students','admin']
-      : /notifications/.test(path) ? ['notifications','schedules','payments','admin']
-      : /history/.test(path) ? ['activity','students','payments','schedules','documents','admin']
-      : /manager|admin|dashboard/.test(path) || path === '/student' ? null : ['admin','referrals'];
-    if (!topics.includes('resync') && !topics.includes('authorization') && interested && !topics.some(topic => interested.includes(topic))) return;
+    if (!topics.length) return;
     this.realtimeRefreshing = true;
     try {
       if (topics.includes('authorization')) { authService.authorizationCheckedAt = 0; await authService.refreshAuthorization(); }
       const component = this.router.currentComponent;
       if (component?.refreshRealtime) await component.refreshRealtime(topics);
-      else {
-        const filters = [...document.querySelectorAll('form[id*="filter"] input,form[id*="filter"] select')]
-          .filter(field => field.id).map(field => ({id:field.id,value:field.value}));
-        const scroll = window.scrollY;
-        await this.router.renderRoute(route);
-        filters.forEach(({id,value}) => {
-          const field = document.getElementById(id);
-          if (field && field.value !== value) { field.value = value; field.dispatchEvent(new Event('change',{bubbles:true})); }
-        });
-        window.scrollTo(0,scroll);
-      }
+      // Views must explicitly update their data regions; never remount a route
+      // as a fallback for a background notification.
     } catch (error) {
       console.warn('No se pudo actualizar la pantalla por WebSocket:',error.message);
     } finally {

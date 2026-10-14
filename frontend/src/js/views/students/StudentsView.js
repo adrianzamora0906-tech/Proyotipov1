@@ -16,6 +16,7 @@ import DateHelper from '../../helpers/DateHelper.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
 import ApiService from '../../core/api/apiService.js';
+import { createDocumentImageSheet } from '../../services/DocumentImageSheet.js';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -812,7 +813,7 @@ class StudentsView extends Component {
                     <span class="form-label">Cédula y carnet de la Cruz Roja en una sola hoja <small>(opcional)</small></span>
                     <span class="registration-dropzone-content">
                       <span class="registration-dropzone-icon" aria-hidden="true">⇧</span>
-                      <strong>Arrastra y suelta el PDF aquí</strong>
+                      <strong>${window.matchMedia('(max-width: 768px)').matches ? 'Seleccionar PDF' : 'Arrastra y suelta el PDF aquí'}</strong>
                       <small>o haz clic para seleccionar el archivo</small>
                       <span class="registration-dropzone-file" data-file-name>Ningún archivo seleccionado</span>
                     </span>
@@ -820,7 +821,7 @@ class StudentsView extends Component {
                   </label>
                   <span class="registration-document-divider">o</span>
                   <button type="button" class="btn btn-primary" id="mobile-registration-package-capture">
-                    Capturar documentos desde telefono
+                    ${window.matchMedia('(max-width: 768px)').matches ? 'Seleccionar fotos de galeria' : 'Capturar documentos desde telefono'}
                   </button>
                   <input type="hidden" name="registrationDocumentsMobileFileUrl">
                   <input type="hidden" name="registrationDocumentsMobileIncludesBloodCard">
@@ -2102,7 +2103,59 @@ class StudentsView extends Component {
     `;
   }
 
+  async openRegistrationGallery() {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay active mobile-registration-capture-overlay';
+    const fields = [
+      ['front','Cedula: frente',true], ['back','Cedula: reverso',true],
+      ['blood','Carnet Cruz Roja',false], ['bloodBack','Carnet: reverso',false],
+    ];
+    overlay.innerHTML = `<div class="modal mobile-capture-modal"><div class="modal-header"><h3 class="modal-title">Fotos del estudiante</h3><button type="button" class="modal-close" data-gallery-close aria-label="Cerrar">&times;</button></div>
+      <div class="modal-body registration-gallery">${fields.map(([key,label,required])=>`<label class="registration-gallery-field"><strong>${label}${required ? '' : ' (opcional)'}</strong><input type="file" accept="image/jpeg,image/png,image/webp" data-gallery-file="${key}"><img alt="${label}" data-gallery-preview="${key}" hidden></label>`).join('')}<div class="form-error" data-gallery-error role="alert"></div></div>
+      <div class="modal-footer"><button type="button" class="btn btn-secondary" data-gallery-close>Cancelar</button><button type="button" class="btn btn-primary" data-gallery-save>Usar documentos</button></div></div>`;
+    document.body.appendChild(overlay);
+    const urls = new Map();
+    const close = () => { urls.forEach(url=>URL.revokeObjectURL(url)); overlay.remove(); };
+    overlay.querySelectorAll('[data-gallery-close]').forEach(button=>button.addEventListener('click',close));
+    overlay.querySelectorAll('[data-gallery-file]').forEach(input=>input.addEventListener('change',()=>{
+      const key=input.dataset.galleryFile;
+      if(urls.has(key)) URL.revokeObjectURL(urls.get(key));
+      urls.delete(key);
+      const image=overlay.querySelector(`[data-gallery-preview="${key}"]`);
+      const file=input.files[0];
+      image.hidden=!file;
+      if(file) { const url=URL.createObjectURL(file);urls.set(key,url);image.src=url; }
+    }));
+    overlay.querySelector('[data-gallery-save]').addEventListener('click',async event=>{
+      const button=event.currentTarget,error=overlay.querySelector('[data-gallery-error]');
+      const files=Object.fromEntries(fields.map(([key])=>[key,overlay.querySelector(`[data-gallery-file="${key}"]`).files[0]]));
+      error.textContent='';
+      if(!files.front || !files.back) { error.textContent='Selecciona el frente y reverso de la cedula.';return; }
+      if(files.bloodBack && !files.blood) { error.textContent='Selecciona primero el frente del carnet.';return; }
+      button.disabled=true;button.textContent='Preparando documentos...';
+      try {
+        const images=[];
+        for(const file of [files.front,files.back,files.blood,files.bloodBack].filter(Boolean)) images.push(await this.prepareImageForPdf(file));
+        const pdf=createDocumentImageSheet(images);
+        if(pdf.size>9*1024*1024) throw new Error('El PDF supera 9 MB. Selecciona fotos de menor tamano.');
+        const dataUrl=await this.readFileAsDataUrl(pdf);
+        const form=document.getElementById('student-modal-form');
+        if(!form || !overlay.isConnected) return;
+        form.querySelector('[name="registrationDocumentsMobileFileUrl"]').value=dataUrl;
+        form.querySelector('[name="registrationDocumentsMobileIncludesBloodCard"]').value=files.blood ? 'true' : 'false';
+        form.querySelector('[name="registrationDocumentsPdfFile"]').value='';
+        document.getElementById('registration-documents-status').textContent=`PDF preparado: cedula${files.blood ? ' y carnet' : ''}.`;
+        document.getElementById('mobile-registration-package-capture').textContent='Reemplazar fotos de galeria';
+        close();
+      } catch(failure) { error.textContent=failure.message || 'No se pudieron preparar las fotos.'; }
+      finally {button.disabled=false;button.textContent='Usar documentos';}
+    });
+  }
+
   async openRegistrationMobileCapturePackage(options = {}) {
+    if (!options.additionalPractice && window.matchMedia('(max-width: 768px)').matches) {
+      return this.openRegistrationGallery();
+    }
     const isAdditionalPractice = Boolean(options.additionalPractice);
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay active mobile-registration-capture-overlay';

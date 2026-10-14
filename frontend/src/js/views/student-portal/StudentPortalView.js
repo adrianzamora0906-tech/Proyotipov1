@@ -8,6 +8,16 @@ const date=value=>value?new Intl.DateTimeFormat('es-EC',{day:'2-digit',month:'sh
 const dateTime=value=>value?new Intl.DateTimeFormat('es-EC',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(value)):'—';
 const money=value=>new Intl.NumberFormat('es-EC',{style:'currency',currency:'USD'}).format(Number(value||0));
 const time=value=>String(value||'').slice(0,5)||'Por asignar';
+export function practicalClassTime(value){
+  if(!value)return 'Por asignar';
+  const parsed=new Date(value);
+  if(Number.isNaN(parsed.getTime()))return 'Por asignar';
+  return new Intl.DateTimeFormat('es-EC',{timeZone:'America/Guayaquil',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(parsed);
+}
+export function practicalClassRange(item){
+  const start=practicalClassTime(item.scheduled_start),end=practicalClassTime(item.scheduled_end);
+  return start==='Por asignar' && end==='Por asignar' ? 'Por asignar' : `${start} - ${end}`;
+}
 
 export default class StudentPortalView extends Component{
   ensureStyles(){
@@ -27,6 +37,22 @@ export default class StudentPortalView extends Component{
   async render(){
     this.ensureStyles();
     try{this.data=(await StudentPortalService.summary()).data;}catch(error){return `<main class="student-portal student-portal--error"><h1>No pudimos abrir tu portal</h1><p>${esc(error.message)}</p></main>`;}
+    return this.renderPortal();
+  }
+  async refreshRealtime(){
+    const root=document.querySelector('.student-portal');
+    if(!root)return;
+    const response=await StudentPortalService.summary();
+    if(!root.isConnected)return;
+    this.data=response.data;
+    const template=document.createElement('template');
+    template.innerHTML=this.renderPortal();
+    for(const selector of ['.student-metrics','.student-next-class','.student-class-list','.student-document-list','[data-student-panel="summary"] .student-portal__grid']){
+      const current=root.querySelector(selector),updated=template.content.querySelector(selector);
+      if(current&&updated)current.replaceChildren(...updated.childNodes);
+    }
+  }
+  renderPortal(){
     const {student,enrollment,payment,documents,classes,metrics}=this.data,user=authService.getCurrentUser();
     const progress=metrics.totalClasses?Math.round((metrics.attended/metrics.totalClasses)*100):0;
     const pendingTransfer=Number(payment?.pending_transfer_amount||0);
@@ -34,6 +60,7 @@ export default class StudentPortalView extends Component{
       ? `<div class="student-payment confirming" style="display:grid;gap:3px;background:#eaf2ff;color:#1759a8"><strong>Pago por confirmar</strong><span style="font-size:.78rem;font-weight:500;color:#41698f">Transferencia registrada: ${money(pendingTransfer)}. Se reflejará como pagada cuando sea confirmada.</span></div>`
       : `<div class="student-payment ${Number(payment?.balance)>0?'pending':'paid'}">${Number(payment?.balance)>0?'Tienes un saldo pendiente':'Curso pagado completamente'}</div>`;
     const now=Date.now();
+    const practicalTimes=[...new Set(classes.filter(item=>item.status!=='CANCELADA').map(practicalClassRange))];
     const nextClass=classes.find(item=>{
       const scheduled=new Date(item.scheduled_start).getTime();
       return Number.isFinite(scheduled)&&scheduled>=now&&!['CANCELADA','COMPLETADA'].includes(String(item.status||'').toUpperCase());
@@ -54,14 +81,14 @@ export default class StudentPortalView extends Component{
         <section data-student-panel="summary">
           <div class="student-welcome"><div><span>${esc(student.branch)}</span><h1>Hola, ${esc(student.name.split(' ')[0])}</h1><p>${enrollment?`Estás cursando ${esc(enrollment.course_name)}.`:'Aún no tienes una matrícula activa.'}</p></div><button class="student-scan" data-open-scanner>▣ Registrar asistencia</button></div>
           <article class="student-next-class">
-            <div><small>Próxima clase</small><strong>${nextClass?dateTime(nextClass.scheduled_start):'Sin clases próximas'}</strong>${nextClass?`<span>${esc(nextClass.instructor_name||'Instructor por asignar')}</span>`:''}</div>
+            <div><small>Próxima clase</small><strong>${nextClass?date(nextClass.scheduled_start):'Sin clases próximas'}</strong>${nextClass?`<span class="student-practical-time">${practicalClassRange(nextClass)}</span><span>${esc(nextClass.instructor_name||'Instructor por asignar')}</span>`:''}</div>
             ${hasVirtualTheory&&moodleUrl?`<a class="student-virtual-classroom" href="${esc(moodleUrl)}" target="_blank" rel="noopener noreferrer">Ir al aula virtual</a>`:''}
           </article>
           <div class="student-metrics"><article><span>✓</span><strong>${metrics.attended}</strong><small>Clases asistidas</small></article><article><span>◷</span><strong>${metrics.pending}</strong><small>Clases pendientes</small></article><article><span>↗</span><strong>${metrics.performance??'—'}${metrics.performance!==null?'%':''}</strong><small>Rendimiento</small></article><article><span>▤</span><strong>${metrics.documentsComplete}/${metrics.documentsTotal}</strong><small>Documentos</small></article></div>
-          <div class="student-portal__grid"><article class="student-card"><div class="student-card__title"><h2>Mi curso</h2><span class="student-status">${esc(enrollment?.cycle_status||student.status)}</span></div><h3>${esc(enrollment?.course_name||'Sin curso asignado')}</h3><dl><div><dt>Instructor práctico</dt><dd>${esc(enrollment?.instructor_name||'Por asignar')}</dd></div><div><dt>Inicio de prácticas</dt><dd>${date(enrollment?.start_date)}</dd></div><div><dt>Finalización</dt><dd>${date(enrollment?.end_date)}</dd></div><div><dt>Modalidad teórica</dt><dd>${esc((enrollment?.theory_modality||'por_confirmar').replaceAll('_',' '))}</dd></div><div><dt>Inicio de clases teóricas</dt><dd>${esc(theoryStart)}</dd></div><div><dt>Horario teórico</dt><dd>${esc(theorySchedule)}</dd></div>${!hasVirtualTheory?`<div><dt>Profesor de teoría</dt><dd>${esc(enrollment?.theory_instructor_name||'Por asignar')}</dd></div>`:''}</dl><div class="student-progress"><span style="width:${progress}%"></span></div><small>${progress}% de clases registradas como asistidas</small></article>
+          <div class="student-portal__grid"><article class="student-card"><div class="student-card__title"><h2>Mi curso</h2><span class="student-status">${esc(enrollment?.cycle_status||student.status)}</span></div><h3>${esc(enrollment?.course_name||'Sin curso asignado')}</h3><dl><div><dt>Instructor práctico</dt><dd>${esc(enrollment?.instructor_name||'Por asignar')}</dd></div><div><dt>Horario de prácticas</dt><dd>${practicalTimes.length===1 ? practicalTimes[0] : practicalTimes.length ? 'Horario rotativo: '+practicalTimes.join(' / ') : 'Por asignar'}</dd></div><div><dt>Inicio de prácticas</dt><dd>${date(enrollment?.start_date)}</dd></div><div><dt>Finalización</dt><dd>${date(enrollment?.end_date)}</dd></div><div><dt>Modalidad teórica</dt><dd>${esc((enrollment?.theory_modality||'por_confirmar').replaceAll('_',' '))}</dd></div><div><dt>Inicio de clases teóricas</dt><dd>${esc(theoryStart)}</dd></div><div><dt>Horario teórico</dt><dd>${esc(theorySchedule)}</dd></div>${!hasVirtualTheory?`<div><dt>Profesor de teoría</dt><dd>${esc(enrollment?.theory_instructor_name||'Por asignar')}</dd></div>`:''}</dl><div class="student-progress"><span style="width:${progress}%"></span></div><small>${progress}% de clases registradas como asistidas</small></article>
           <article class="student-card"><div class="student-card__title"><h2>Estado de pago</h2><strong>${pendingTransfer>0?'Por confirmar':`${money(payment?.balance)} pendiente`}</strong></div><dl><div><dt>Valor del curso</dt><dd>${money(payment?.final_amount)}</dd></div><div><dt>Pagado y confirmado</dt><dd>${money(payment?.paid)}</dd></div>${pendingTransfer>0?`<div><dt>Transferencia por confirmar</dt><dd>${money(pendingTransfer)}</dd></div>`:''}</dl>${paymentMessage}</article></div>
         </section>
-        <section data-student-panel="classes" hidden><div class="student-section-head"><div><h1>Mis clases</h1><p>Consulta tu asistencia, horario y rendimiento.</p></div><button class="student-scan" data-open-scanner>▣ Escanear QR</button></div><div class="student-class-list">${classes.map((item,index)=>`<article><div class="student-class-number">${item.session_number||index+1}</div><div><strong>${dateTime(item.scheduled_start)}</strong><span>${esc(item.instructor_name||'Instructor por asignar')}</span>${item.topics?.length?`<small>Temas: ${item.topics.map(topic=>esc(topic.name)).join(' · ')}</small>`:''}${item.observations?`<small>Observación: ${esc(item.observations)}</small>`:''}</div><div><b>${esc(item.attendance_status||item.status||'Programada')}</b><small>${esc(String(item.performance_level||'Sin evaluación').replaceAll('_',' '))}</small></div></article>`).join('')||'<div class="student-empty">Aún no hay clases programadas.</div>'}</div></section>
+        <section data-student-panel="classes" hidden><div class="student-section-head"><div><h1>Mis clases</h1><p>Consulta tu asistencia, horario y rendimiento.</p></div><button class="student-scan" data-open-scanner>▣ Escanear QR</button></div><div class="student-class-list">${classes.map((item,index)=>`<article><div class="student-class-number">${item.session_number||index+1}</div><div><strong>${date(item.scheduled_start)}</strong><span class="student-practical-time">${practicalClassRange(item)}</span><span>${esc(item.instructor_name||'Instructor por asignar')}</span>${item.topics?.length?`<small>Temas: ${item.topics.map(topic=>esc(topic.name)).join(' · ')}</small>`:''}${item.observations?`<small>Observación: ${esc(item.observations)}</small>`:''}</div><div><b>${esc(item.attendance_status||item.status||'Programada')}</b><small>${esc(String(item.performance_level||'Sin evaluación').replaceAll('_',' '))}</small></div></article>`).join('')||'<div class="student-empty">Aún no hay clases programadas.</div>'}</div></section>
         <section data-student-panel="documents" hidden><div class="student-section-head"><div><h1>Mi documentación</h1><p>Revisa qué documentos ya entregaste y cuáles faltan.</p></div></div><div class="student-document-list">${documents.map(doc=>`<article class="${doc.uploaded?'complete':'missing'}"><span>${doc.uploaded?'✓':'!'}</span><div><strong>${esc(doc.name)}</strong><small>${doc.uploaded?`Entregado ${date(doc.uploaded_at)}`:'Documento pendiente'}</small></div><b>${doc.uploaded?'Completo':'Falta entregar'}</b></article>`).join('')}</div></section>
         <section data-student-panel="account" hidden><div class="student-section-head"><div><h1>Mi cuenta</h1><p>Datos personales y seguridad del acceso.</p></div></div><div class="student-portal__grid"><article class="student-card"><h2>Datos del estudiante</h2><dl><div><dt>Cédula</dt><dd>${esc(student.identification)}</dd></div><div><dt>Usuario</dt><dd>${esc(user.username)}</dd></div><div><dt>Correo</dt><dd>${esc(student.email)}</dd></div><div><dt>Teléfono</dt><dd>${esc(student.phone)}</dd></div><div><dt>Sucursal</dt><dd>${esc(student.branch)}</dd></div></dl></article><article class="student-card"><h2>Seguridad</h2><p>Usa una contraseña que solo tú conozcas.</p><button class="student-primary" id="student-change-password">Cambiar contraseña</button></article></div></section>
       </main><div id="student-portal-modal"></div>

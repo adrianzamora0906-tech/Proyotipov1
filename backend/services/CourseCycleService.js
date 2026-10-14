@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const WeekendDistributionCleanup = require('./WeekendDistributionCleanupService');
 const { deadlineSql } = require('./EnrollmentWindow');
 const { createError } = require('../middleware/errorHandler');
 const CycleInstructorAssignmentService = require('./CycleInstructorAssignmentService');
@@ -235,6 +236,7 @@ class CourseCycleService {
         await client.query('COMMIT');
         return null;
       }
+      await WeekendDistributionCleanup.reconcile(client,{programId:program.id,branchId,courseId:program.course_id,vehicleType,actor:user});
 
       const pool = (await client.query(`
         SELECT ip.id,TRIM(CONCAT(u.first_name,' ',u.last_name)) name
@@ -364,6 +366,8 @@ class CourseCycleService {
             AND rotation.start_date=$3::date AND rotation.active=TRUE
           ORDER BY rotation.position_order
         `, [branchId, vehicleType, startDate])).rows;
+        const distributionRemoved=!weekendOverride && (await client.query(`SELECT 1 FROM branch_course_weekend_overrides
+          WHERE program_id=$1 AND start_date=$2::date AND active=FALSE`,[program.id,startDate])).rows.length>0;
 
         const ensureAssignment = async (positionOrder) => {
           const forcedInstructorId = weekendOverride?.instructors?.find(item => Number(item.position_order) === positionOrder)?.instructor_id;
@@ -392,7 +396,7 @@ class CourseCycleService {
         };
 
         const targetInstructorCount = weekendOverride ? Number(weekendOverride.instructor_count) : 1;
-        if (weekendOverride) assignments = assignments.filter(item => Number(item.position_order) <= targetInstructorCount);
+        if (weekendOverride || distributionRemoved) assignments = assignments.filter(item => Number(item.position_order) <= targetInstructorCount);
         for (let position = 1; position <= targetInstructorCount; position += 1) {
           const expectedInstructorId = weekendOverride?.instructors?.find(item => Number(item.position_order) === position)?.instructor_id;
           const current = assignments.find(item => Number(item.position_order) === position);
@@ -452,12 +456,12 @@ class CourseCycleService {
             usableCycleIds.push(cycleId);
             if (weekendOverride && index < assignments.length - 1) continue;
             await client.query('COMMIT');
-            return { cycleIds: usableCycleIds, startDate };
+            return { cycleIds: usableCycleIds, startDate, programId:program.id };
           }
           previousInstructorId = assignment.instructor_id;
         }
 
-        if (!weekendOverride && assignments.length < 2) {
+        if (!weekendOverride && !distributionRemoved && assignments.length < 2) {
           assignments.push(await ensureAssignment(2));
           continue;
         }
@@ -793,7 +797,7 @@ class CourseCycleService {
     const requestedReservationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
       .test(String(filters.reservation_id || '')) ? String(filters.reservation_id) : null;
     const activationReservation = requestedReservationId && filters.instructor_id
-      ? (await db.query(`SELECT id FROM course_cycle_seat_reservations
+      ? (await db.query(`SELECT id,cycle_id FROM course_cycle_seat_reservations
           WHERE id=$1 AND branch_id=$2 AND instructor_id=$3 AND status='activo'
             AND (expires_at IS NULL OR expires_at>NOW())`,
         [requestedReservationId, operationalBranchId, filters.instructor_id])).rows[0]
@@ -813,15 +817,20 @@ class CourseCycleService {
         SELECT DISTINCT rotation.cycle_id,cc.start_date,rotation.position_order
         FROM intensive_instructor_rotation_assignments rotation
         JOIN course_cycles cc ON cc.id=rotation.cycle_id
+        LEFT JOIN branch_course_weekend_overrides distribution ON distribution.program_id=$3
+          AND distribution.start_date=rotation.start_date
         WHERE rotation.branch_id=$1 AND rotation.vehicle_type=$2
           AND rotation.active=TRUE AND rotation.cycle_id IS NOT NULL
           AND cc.active=TRUE AND cc.deleted_at IS NULL
           AND cc.status IN ('activo','proximo') AND CURRENT_DATE<=${deadlineSql}
+          AND (distribution.id IS NULL OR rotation.position_order<=CASE WHEN distribution.active THEN distribution.instructor_count ELSE 1 END
+            OR rotation.cycle_id=$4::uuid)
         ORDER BY cc.start_date,rotation.position_order
-      `, [branchId, filters.vehicle_type]);
+      `, [branchId, filters.vehicle_type,intensiveRotation.programId,activationReservation?.cycle_id || null]);
       intensiveRotation.cycleIds = [...new Set([
         ...(intensiveRotation.cycleIds || []),
         ...publishedRotation.rows.map(row => row.cycle_id),
+        ...(activationReservation?.cycle_id ? [activationReservation.cycle_id] : []),
       ])];
       filters = { ...filters, instructor_id: null };
     }

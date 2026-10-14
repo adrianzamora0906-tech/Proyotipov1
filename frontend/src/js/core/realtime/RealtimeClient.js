@@ -42,7 +42,8 @@ class RealtimeClient {
         clearTimeout(this.connectionTimeout);
         this.connected = true;
         this.attempts = 0;
-        window.dispatchEvent(new CustomEvent('erp:realtime', { detail:{ topics:['resync'] } }));
+        if (this.hasConnected) window.dispatchEvent(new CustomEvent('erp:realtime', { detail:{ topics:['resync'] } }));
+        this.hasConnected = true;
       } else if (message.type === 'changed' && Array.isArray(message.topics)) {
         window.dispatchEvent(new CustomEvent('erp:realtime', { detail:{ topics:message.topics } }));
       }

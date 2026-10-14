@@ -49,6 +49,12 @@ async function test() {
         await page.screenshot({path:'.tmp/montecristi-error.png'});throw error;
       });
       await page.waitForTimeout(500);
+      await page.evaluate(()=>{window.instructorRoot=document.querySelector('.instructor-page.dashboard');window.instructorHeader=document.querySelector('.topbar');});
+      const refreshResponse=page.waitForResponse(response=>response.url().includes('/instructor/dashboard')&&response.status()===200,{timeout:5000});
+      await page.evaluate(()=>window.dispatchEvent(new CustomEvent('erp:realtime',{detail:{topics:['schedules']}})));
+      await refreshResponse;
+      assert.equal(await page.evaluate(()=>document.querySelector('.instructor-page.dashboard')===window.instructorRoot),true);
+      assert.equal(await page.evaluate(()=>document.querySelector('.topbar')===window.instructorHeader),true);
       assert.equal(await page.locator('.sidebar-nav a').count(),6); // five actions plus profile
       if(width===390) {
         const bounds=await page.locator('.sidebar-nav').boundingBox();assert.ok(bounds.width<=390);
@@ -88,15 +94,33 @@ async function test() {
         await page.screenshot({path:'.tmp/montecristi-calendar-mobile.png'});
         const paymentTab=await page.locator('.student-modal-step-tab[data-step="4"]').boundingBox();
         assert.ok(paymentTab.x+paymentTab.width<=390,'Los cuatro pasos deben caber en el telefono');
-        await context.route('**/api/documents/mobile-upload-token', route => route.fulfill({json:{success:true,data:{token:'mobile-ui-test',documentName:'Cedula y carnet'}}}));
-        await context.route('**/api/documents/mobile-upload-token/mobile-ui-test/result', route => route.fulfill({json:{success:true,data:{completed:false}}}));
+        let captureTokenRequests=0;
+        await context.route('**/api/documents/mobile-upload-token',route=>{captureTokenRequests++;return route.abort();});
+        const pagesBefore=context.pages().length;
+        const scheduleBefore=await page.locator('[name="schedulePlan"]').inputValue();
         await page.locator('#mobile-registration-package-capture').evaluate(button => button.click());
         const capture = page.locator('.mobile-registration-capture-overlay');
-        await capture.getByRole('link',{name:'Tomar fotos',exact:true}).waitFor();
-        assert.equal(await capture.locator('.mobile-capture-qr').isVisible(),false);
+        await capture.locator('[data-gallery-file="front"]').waitFor();
+        assert.equal(await capture.locator('[capture]').count(),0);
+        assert.equal(await capture.locator('.mobile-capture-qr').count(),0);
         assert.ok(!(await capture.innerText()).includes('Escanea'));
+        await capture.locator('[data-gallery-save]').click();
+        assert.ok((await capture.locator('[data-gallery-error]').innerText()).includes('frente y reverso'));
+        const photo=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=600;canvas.height=380;const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,600,380);ctx.fillStyle='black';ctx.fillText('DOCUMENTO DE PRUEBA',50,50);return canvas.toDataURL('image/png').split(',')[1];});
+        for(const key of ['front','back','blood']) await capture.locator(`[data-gallery-file="${key}"]`).setInputFiles({name:`${key}.png`,mimeType:'image/png',buffer:Buffer.from(photo,'base64')});
         await page.screenshot({path:'.tmp/montecristi-documents-mobile.png'});
-        await capture.locator('[data-close-capture]').first().click();
+        await capture.locator('[data-gallery-save]').click();
+        await capture.waitFor({state:'detached'});
+        const dataUrl=await page.locator('[name="registrationDocumentsMobileFileUrl"]').inputValue();
+        assert.ok(dataUrl.startsWith('data:application/pdf;base64,'));
+        const {PDFDocument}=require('../backend/node_modules/pdf-lib');
+        const pdf=await PDFDocument.load(Buffer.from(dataUrl.split(',')[1],'base64'));
+        assert.equal(pdf.getPageCount(),1);
+        assert.equal(pdf.getPage(0).getWidth(),595);
+        assert.equal(await page.locator('[name="registrationDocumentsMobileIncludesBloodCard"]').inputValue(),'true');
+        assert.equal(await page.locator('[name="schedulePlan"]').inputValue(),scheduleBefore);
+        assert.equal(context.pages().length,pagesBefore);
+        assert.equal(captureTokenRequests,0,'La galeria no depende de un token ni receptor QR');
       }
       await page.goto('http://localhost:8080/cash');
       await page.locator('.cash-open-charge').first().waitFor();

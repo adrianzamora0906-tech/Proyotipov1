@@ -49,7 +49,7 @@ class PaymentController {
       if (req.user.role === 'instructor' && !req.authorization?.global) {
         await StudentService.getById(req.params.studentId, { branch_id:effectiveCollectionBranchId(req) });
       }
-      const balance = await PaymentService.getStudentBalance(req.params.studentId);
+      const balance = await PaymentService.getStudentBalance(req.params.studentId,req.query.enrollmentId || null);
 
       return res.json({
         success: true,
@@ -79,7 +79,7 @@ class PaymentController {
   static async registerPayment(req, res, next) {
     try {
       await PaymentController.checkInstructorStudent(req, req.body);
-      const { cedula, amount, method, reference, cardBatch, serviceTransactionId } = req.body;
+      const { cedula, amount, method, reference, cardBatch, serviceTransactionId,enrollmentId } = req.body;
 
       if (!cedula || !amount || !method) {
         return res.status(422).json({
@@ -89,7 +89,7 @@ class PaymentController {
       }
 
       if (String(method).trim().toLowerCase() === 'transferencia') {
-        const transfer = await CashOperationsService.createTransfer({ cedula, serviceTransactionId, amount, reference, transferDate: req.body.transferDate || new Date().toISOString().slice(0,10), bank: req.body.bank, proofUrl:req.body.proofUrl }, req.user, req.authorization, req.requestContext);
+        const transfer = await CashOperationsService.createTransfer({ cedula, enrollmentId,serviceTransactionId, amount, reference, transferDate: req.body.transferDate || new Date().toISOString().slice(0,10), bank: req.body.bank, proofUrl:req.body.proofUrl }, req.user, req.authorization, req.requestContext);
         return res.status(202).json({ success:true, data:{ pendingTransfer:true, transfer } });
       }
       const result = await PaymentService.registerPayment({
@@ -99,6 +99,7 @@ class PaymentController {
         reference,
         cardBatch,
         serviceTransactionId,
+        enrollmentId,
         cashier: req.user.name,
         cashierUserId: req.user.id,
         cashierRole: req.user.role,

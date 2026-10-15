@@ -190,8 +190,8 @@ class ApiService {
     return apiClient.get('/payments/pending');
   }
 
-  static async getStudentBalance(studentId) {
-    return apiClient.get(`/students/${studentId}/balance`);
+  static async getStudentBalance(studentId,enrollmentId=null) {
+    return apiClient.get(`/students/${studentId}/balance${enrollmentId ? `?enrollmentId=${encodeURIComponent(enrollmentId)}` : ''}`);
   }
 
   static async getStudentPayments(studentId) {

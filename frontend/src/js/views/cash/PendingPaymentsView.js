@@ -164,7 +164,7 @@ class PendingPaymentsView extends Component {
         </style>
         <header class="cash-payments-header"><div><h1>Gestión de pagos</h1><p>Consulta saldos, registra cobros y abre comprobantes.</p></div><button class="btn btn-secondary cash-refresh" id="payments-refresh">↻ Actualizar</button></header>
         <section class="cash-kpis" aria-label="Resumen de pagos">
-          <article class="cash-kpi pending"><strong>${this.pendingAll.length}</strong><span>Estudiantes con saldo pendiente</span></article>
+          <article class="cash-kpi pending"><strong>${new Set(this.pendingAll.map(row=>row.studentId || row.student?.id)).size}</strong><span>Estudiantes con saldo pendiente</span></article>
           <article class="cash-kpi balance"><strong>${this.money(pendingBalance)}</strong><span>Saldo total por cobrar</span></article>
           <article class="cash-kpi collected"><strong>Cargando...</strong><span>Pagos registrados</span></article>
         </section>
@@ -191,15 +191,16 @@ class PendingPaymentsView extends Component {
   }
 
   async mount() {
-    const openModal = async (studentId, branchIdFromRow = '', serviceTransactionId = '') => {
+    const openModal = async (studentId, branchIdFromRow = '', serviceTransactionId = '',enrollmentId=null) => {
       const student = await StudentService.getStudent(studentId);
       if (!student) return;
 
       const pendingRow = (this.pendingAll || []).find(item => serviceTransactionId
         ? String(item.serviceTransactionId || '') === String(serviceTransactionId)
-        : !item.serviceTransactionId && String(item.student?.id || item.studentId) === String(studentId));
+        : !item.serviceTransactionId && String(item.student?.id || item.studentId) === String(studentId)
+          && (!enrollmentId || String(item.enrollmentId)===String(enrollmentId)));
       const isServicePayment = Boolean(serviceTransactionId);
-      const accountingBalance = isServicePayment ? Number(pendingRow?.balance || 0) : (await PaymentService.getStudentBalance(student.id)).balance;
+      const accountingBalance = isServicePayment ? Number(pendingRow?.balance || 0) : (await PaymentService.getStudentBalance(student.id,enrollmentId)).balance;
       const pendingVerification = Number(pendingRow?.pendingVerification || 0);
       const balance = Math.max(Number(pendingRow?.availableToCollect ?? accountingBalance), 0);
       const concept = pendingRow?.student?.course || pendingRow?.course || student.course || 'Curso';
@@ -285,6 +286,7 @@ class PendingPaymentsView extends Component {
 
         const result = await PaymentService.registerPayment({
           studentId: student.id,
+          enrollmentId,
           serviceTransactionId: serviceTransactionId || null,
           cedula: student.cedula,
           amount,
@@ -322,7 +324,9 @@ class PendingPaymentsView extends Component {
         return;
       }
       const btn = event.target.closest('.charge-btn');
-      if (btn) openModal(btn.getAttribute('data-student-id'), btn.getAttribute('data-branch-id'), btn.getAttribute('data-service-transaction-id'));
+      if (btn) {
+        openModal(btn.getAttribute('data-student-id'), btn.getAttribute('data-branch-id'), btn.getAttribute('data-service-transaction-id'),btn.dataset.enrollmentId || null);
+      }
     });
 
     document.getElementById('receipts-body')?.addEventListener('click', (event) => {
@@ -453,7 +457,10 @@ class PendingPaymentsView extends Component {
       })
       .join('') || '<tr><td colspan="6" class="dashboard-empty">No hay pagos pendientes.</td></tr>';
     const body = document.getElementById('pending-payments-body');
-    if (body) body.innerHTML = html;
+    if (body) {
+      body.innerHTML = html;
+      body.querySelectorAll('.charge-btn').forEach((button,index)=>{button.dataset.enrollmentId=visible[index]?.enrollmentId || '';});
+    }
     const resultCount = document.getElementById('pending-result-count');
     if (resultCount) resultCount.textContent = `${total} ${total === 1 ? 'resultado' : 'resultados'}`;
     // pagination
@@ -504,7 +511,7 @@ class PendingPaymentsView extends Component {
     this.renderPendingTable();
     this.renderReceiptsTable();
     const setText = (selector,value) => { const target = document.querySelector(selector); if (target) target.textContent = value; };
-    setText('.cash-kpi.pending strong',this.pendingAll.length);
+    setText('.cash-kpi.pending strong',new Set(this.pendingAll.map(row=>row.studentId || row.student?.id)).size);
     setText('.cash-kpi.balance strong',this.money(this.pendingAll.reduce((sum,row) => sum+Number(row.balance || 0),0)));
     setText('[data-payment-tab="pending"] b',this.pendingAll.length);
     setText('[data-payment-tab="receipts"] b',this.receiptsAll.length);

@@ -164,6 +164,7 @@ class PaymentService {
     const result = await db.query(`
       SELECT
         s.id AS "studentId",
+        e.id AS "enrollmentId",
         e.branch_id AS "branchId",
         s.first_name || ' ' || s.last_name AS "studentName",
         s.identification AS cedula,
@@ -176,9 +177,9 @@ class PaymentService {
         p.final_amount AS "finalAmount",
         p.created_at AS "createdAt",
         COALESCE((SELECT SUM(tv.amount) FROM transfer_payment_verifications tv
-          WHERE tv.student_id=s.id AND tv.service_transaction_id IS NULL AND tv.status IN ('PENDING','AWAITING_APPROVAL')),0) AS "pendingVerification",
+          WHERE tv.enrollment_id=e.id AND tv.service_transaction_id IS NULL AND tv.status IN ('PENDING','AWAITING_APPROVAL')),0) AS "pendingVerification",
         (SELECT tv.reference FROM transfer_payment_verifications tv
-          WHERE tv.student_id=s.id AND tv.service_transaction_id IS NULL AND tv.status IN ('PENDING','AWAITING_APPROVAL')
+          WHERE tv.enrollment_id=e.id AND tv.service_transaction_id IS NULL AND tv.status IN ('PENDING','AWAITING_APPROVAL')
           ORDER BY tv.created_at DESC LIMIT 1) AS "pendingTransferReference",
         COALESCE((
           SELECT SUM(pd.amount) FROM payment_details pd
@@ -254,38 +255,48 @@ class PaymentService {
   /**
    * Obtener balance de un estudiante vía su enrollment activo
    */
-  static async getStudentBalance(studentId) {
+  static async getStudentBalance(studentId,enrollmentId=null) {
     const enrollment = await db.query(
-      "SELECT id FROM enrollments WHERE student_id = $1 AND status = 'activo' LIMIT 1",
-      [studentId]
+      `SELECT e.id,c.name course FROM enrollments e JOIN courses c ON c.id=e.course_id
+       WHERE e.student_id=$1 AND e.status='activo' AND ($2::uuid IS NULL OR e.id=$2) ORDER BY e.created_at,e.id`,
+      [studentId,enrollmentId]
     );
     if (enrollment.rows.length === 0) {
       throw createError(404, 'El estudiante no tiene una matrícula activa');
     }
 
     const payment = await db.query(
-      "SELECT total, discount, final_amount, balance FROM payments WHERE enrollment_id = $1 AND status != 'anulado' ORDER BY created_at DESC LIMIT 1",
-      [enrollment.rows[0].id]
+      `SELECT DISTINCT ON (enrollment_id) enrollment_id,total,discount,final_amount,balance
+       FROM payments WHERE enrollment_id=ANY($1::uuid[]) AND status<>'anulado' ORDER BY enrollment_id,created_at DESC`,
+      [enrollment.rows.map(row=>row.id)]
     );
 
     if (payment.rows.length === 0) {
       return { total: 0, paid: 0, balance: 0 };
     }
 
-    const p = payment.rows[0];
-    const finalAmount = Number(p.final_amount ?? p.total ?? 0);
-    const transfers = (await db.query(`SELECT id,amount,status,reference,created_at
+    const transfers = (await db.query(`SELECT id,enrollment_id,amount,status,reference,created_at
       FROM transfer_payment_verifications WHERE student_id=$1 AND service_transaction_id IS NULL
-        AND status IN ('PENDING','AWAITING_APPROVAL') ORDER BY created_at DESC`,[studentId])).rows;
+        AND ($2::uuid IS NULL OR enrollment_id=$2)
+        AND status IN ('PENDING','AWAITING_APPROVAL') ORDER BY created_at DESC`,[studentId,enrollmentId])).rows;
     const pendingVerification = transfers.reduce((sum,transfer)=>sum+Number(transfer.amount || 0),0);
+    const enrollments=enrollment.rows.map(row=>{
+      const p=payment.rows.find(item=>item.enrollment_id===row.id);
+      const total=Number(p?.final_amount ?? p?.total ?? 0),balance=Number(p?.balance || 0);
+      return {id:row.id,course:row.course,total,balance,paid:total-balance,
+        pendingVerification:transfers.filter(t=>t.enrollment_id===row.id).reduce((sum,t)=>sum+Number(t.amount),0)};
+    });
+    const finalAmount=enrollments.reduce((sum,row)=>sum+row.total,0);
+    const balance=enrollments.reduce((sum,row)=>sum+row.balance,0);
     return {
       total: finalAmount,
-      originalTotal: Number(p.total || 0),
-      discount: Number(p.discount || 0),
-      paid: finalAmount - Number(p.balance || 0),
-      balance: Number(p.balance || 0),
+      originalTotal: payment.rows.reduce((sum,p)=>sum+Number(p.total || 0),0),
+      discount: payment.rows.reduce((sum,p)=>sum+Number(p.discount || 0),0),
+      paid: finalAmount-balance,
+      balance,
+      enrollments,
       pendingVerification,
-      balanceAfterApproval: Math.max(0,Number(p.balance || 0)-pendingVerification),
+      balanceAfterApproval: Math.max(0,balance-pendingVerification),
       pendingTransfers: transfers.map(transfer=>({...transfer,amount:Number(transfer.amount)})),
     };
   }
@@ -295,11 +306,12 @@ class PaymentService {
    */
   static async getStudentPayments(studentId) {
     const result = await db.query(`
-      SELECT pd.*, p.total, p.final_amount, p.status as payment_status,
+      SELECT pd.*, p.total, p.final_amount, p.status as payment_status,e.id AS enrollment_id,c.name AS course_name,
         EXISTS(SELECT 1 FROM payment_void_requests vr WHERE vr.payment_detail_id=pd.id AND vr.status='PENDING') void_pending
       FROM payment_details pd
       JOIN payments p ON pd.payment_id = p.id
       JOIN enrollments e ON p.enrollment_id = e.id
+      JOIN courses c ON c.id=e.course_id
       WHERE e.student_id = $1 AND p.status != 'anulado'
       ORDER BY pd.created_at DESC
     `, [studentId]);
@@ -330,12 +342,14 @@ class PaymentService {
         LEFT JOIN branches collector ON collector.id = $2::uuid
         LEFT JOIN cities collector_city ON collector_city.id = collector.city_id
         WHERE s.identification = $1
+          AND ($3::uuid IS NULL OR e.id=$3)
         ORDER BY e.created_at DESC
-        LIMIT 1
-      `, [data.cedula, data.collectionBranchId]);
+        LIMIT 2
+      `, [data.cedula, data.collectionBranchId,data.enrollmentId || null]);
       if (studentResult.rows.length === 0) {
         throw createError(404, 'Estudiante no encontrado');
       }
+      if(studentResult.rows.length>1)throw createError(422,'Selecciona la matricula del curso que deseas cobrar');
       const student = studentResult.rows[0];
       const canCollect = data.globalAccess
         || String(student.enrollment_branch_id) === String(data.collectionBranchId)
@@ -371,7 +385,7 @@ class PaymentService {
 
       // Buscar o crear payment record
       let paymentResult = await client.query(
-        "SELECT * FROM payments WHERE enrollment_id = $1 AND status != 'anulado' LIMIT 1",
+        "SELECT * FROM payments WHERE enrollment_id = $1 AND status != 'anulado' LIMIT 1 FOR UPDATE",
         [enrollmentId]
       );
 

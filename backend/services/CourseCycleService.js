@@ -200,6 +200,25 @@ function intensiveEndDate(startDate, vehicleType) {
 }
 
 class CourseCycleService {
+  static async enrollmentBranchForCycle(branchId,modality,client=db) {
+    const branch=await resolveEnrollmentBranchId(branchId,client);
+    return modality==='intensivo' ? resolveIntensiveBranchId(branch,client) : branch;
+  }
+
+  static async validateStudentCourseOverlap(client,studentId,enrollmentId,selections,examOnly=false) {
+    for(const selection of selections) {
+      const {startTime,endTime}=parseTimeRange(selection.time);
+      const conflicts=(await client.query(`SELECT 1 FROM course_cycle_schedule_assignments a
+        WHERE a.student_id=$1 AND a.enrollment_id<>$2 AND a.status='activo' AND a.schedule_date=$3::date
+          AND a.start_time<(CASE WHEN $6::boolean THEN ($4::time+INTERVAL '20 minutes')::time ELSE $5::time END) AND a.end_time>$4::time
+        UNION ALL SELECT 1 FROM practical_sessions ps JOIN enrollments e ON e.id=ps.enrollment_id
+        WHERE e.student_id=$1 AND ps.enrollment_id<>$2 AND ps.deleted_at IS NULL AND ps.status NOT IN ('CANCELADA','REPROGRAMADA')
+          AND ps.scheduled_start<($3::date+(CASE WHEN $6::boolean THEN ($4::time+INTERVAL '20 minutes')::time ELSE $5::time END))
+          AND ps.scheduled_end>($3::date+$4::time) LIMIT 1`,[studentId,enrollmentId,selection.date,startTime,endTime,examOnly])).rows;
+      if(conflicts.length)throw createError(409,'El estudiante ya tiene clases de otro curso en ese horario');
+    }
+  }
+
   static intensiveRotationInstructor(rotation, anchorDate, startDate, position = 1) {
     if (!rotation.length || !anchorDate) return null;
     const anchor = toDateString(anchorDate), start = toDateString(startDate);
@@ -1981,7 +2000,7 @@ class CourseCycleService {
     const client = transactionClient || await db.getClient();
     try {
       if (!transactionClient) await client.query('BEGIN');
-
+      await client.query('SELECT id FROM students WHERE id=$1 FOR UPDATE',[studentId]);
       const cycleResult = await client.query(`
         SELECT cc.*
         FROM course_cycles cc
@@ -2115,9 +2134,10 @@ class CourseCycleService {
             AND deleted_at IS NULL AND status NOT IN ('CANCELADA','REPROGRAMADA')`,[instructor.id,selection.date,startTime])).rows[0].total);
         if (slotCount >= 2) throw createError(409, 'Este instructor ya tiene los dos exámenes permitidos para ese horario en esa fecha');
         const enrollment = (await client.query(`SELECT e.id FROM enrollments e
-          WHERE e.student_id=$1 AND e.status='activo' AND e.course_id=$2
-          ORDER BY e.created_at DESC LIMIT 1 FOR UPDATE OF e`,[studentId,cycle.course_id])).rows[0];
+          WHERE e.student_id=$1 AND e.status='activo' AND e.course_id=$2 AND ($3::uuid IS NULL OR e.id=$3)
+          ORDER BY e.created_at DESC LIMIT 1 FOR UPDATE OF e`,[studentId,cycle.course_id,data.enrollmentId || null])).rows[0];
         if (!enrollment) throw createError(404, 'Matrícula activa no encontrada para este curso');
+        await this.validateStudentCourseOverlap(client,studentId,enrollment.id,selections,true);
         await client.query(`UPDATE enrollments SET theory_modality=$2,theory_start_time=$3::time,theory_end_time=$4::time,
           practical_start_date=$5::date,practical_end_date=$5::date,updated_at=NOW() WHERE id=$1`,
         [enrollment.id,theorySchedule,theoryOption?.startTime||null,theoryOption?.endTime||null,selection.date]);
@@ -2188,6 +2208,7 @@ class CourseCycleService {
         JOIN courses c ON c.id = e.course_id
         WHERE e.student_id = $1
           AND e.status = 'activo'
+          AND ($4::uuid IS NULL OR e.id=$4)
           AND (
             e.course_id = $2
             OR LOWER(c.name) LIKE ANY($3::text[])
@@ -2195,10 +2216,11 @@ class CourseCycleService {
         ORDER BY e.created_at DESC
         LIMIT 1
         FOR UPDATE OF e
-      `, [studentId, cycle.course_id, courseNameFilter]);
+      `, [studentId, cycle.course_id, courseNameFilter,data.enrollmentId || null]);
 
       if (enrollmentResult.rows.length === 0) throw createError(404, 'Matricula activa no encontrada para este curso');
       const enrollmentId = enrollmentResult.rows[0].id;
+      await this.validateStudentCourseOverlap(client,studentId,enrollmentId,selections);
       if (enrollmentResult.rows[0].requires_disability_certificate) {
         const certificate = await client.query(`SELECT 1 FROM student_documents document
           JOIN document_types type ON type.id=document.document_type_id
@@ -2308,8 +2330,8 @@ class CourseCycleService {
       await client.query(`
         UPDATE course_cycle_schedule_assignments
         SET status = 'cancelado', updated_at = NOW()
-        WHERE student_id = $1 AND status = 'activo'
-      `, [studentId]);
+        WHERE enrollment_id = $1 AND status = 'activo'
+      `, [enrollmentId]);
       await client.query(`
         UPDATE referred_instructor_schedule_blocks
         SET status = 'cancelado', updated_at = NOW()
@@ -2341,10 +2363,15 @@ class CourseCycleService {
         const selectionCapacity = Math.max(capacity - blockedCount, 0);
         if (selectionCapacity < 1) throw createError(409, `Este cupo acaba de ser reservado para ${selection.date} ${selection.time}`);
 
+        // Una sobreocupacion de otro instructor no consume los cupos libres
+        // del resto. Los cruces del instructor elegido se validan por separado.
         const occupiedResult = await client.query(`
-          SELECT COUNT(DISTINCT enrollment_id)::int AS occupied
+          SELECT COALESCE(SUM(CASE WHEN instructor_id IS NULL THEN occupied
+            ELSE LEAST(occupied, $5::int) END), 0)::int AS occupied
           FROM (
-            SELECT enrollment_id FROM course_cycle_schedule_assignments
+            SELECT instructor_id, COUNT(DISTINCT enrollment_id)::int AS occupied
+            FROM (
+            SELECT enrollment_id, instructor_id FROM course_cycle_schedule_assignments
             WHERE cycle_id = $1
               AND schedule_date=$4::date
               AND start_time = $2::time AND end_time = $3::time AND status = 'activo'
@@ -2363,7 +2390,7 @@ class CourseCycleService {
                 )
               )
             UNION
-            SELECT enrollment_id FROM referred_instructor_schedule_blocks
+            SELECT enrollment_id, instructor_id FROM referred_instructor_schedule_blocks
             WHERE cycle_id = $1
               AND schedule_date=$4::date
               AND start_time = $2::time AND end_time = $3::time AND status = 'activo'
@@ -2381,8 +2408,11 @@ class CourseCycleService {
                     AND igm.active=TRUE AND igm.ended_at IS NULL
                 )
               )
-          ) occupied_slots
-        `, [cycleId, startTime, endTime, selection.date]);
+            ) occupied_slots
+            GROUP BY instructor_id
+          ) instructor_occupancy
+        `, [cycleId, startTime, endTime, selection.date,
+          Math.max(Number(cycle.capacity_per_instructor) || 1, 1)]);
         const occupied = Number(occupiedResult.rows[0]?.occupied || 0);
         if (occupied >= selectionCapacity) {
           throw createError(409, `No hay cupos disponibles para ${selection.date} ${selection.time}`);

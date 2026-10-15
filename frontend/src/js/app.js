@@ -13,12 +13,12 @@ import StudentService from "./services/StudentService.js";
 import "./data/DemoDataGenerator.js";
 
 // Views
-import LoginView from "./views/auth/LoginView.js?v=manos-password-20261014";
+import LoginView from "./views/auth/LoginView.js?v=manos-restauradas-20261014";
 import DashboardView from "./views/dashboard/DashboardView.js?v=actualizacion-parcial-20261014";
-import StudentsView from "./views/students/StudentsView.js?v=habilitar-horario-20261014";
-import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=perfil-transferencias-20261014";
+import StudentsView from "./views/students/StudentsView.js?v=carga-progresiva-20261015";
+import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=historial-bajo-demanda-20261015";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
-import ScheduleView from "./views/schedule/ScheduleView.js?v=horarios-sin-barra-20261014";
+import ScheduleView from "./views/schedule/ScheduleView.js?v=estudiantes-orden-hora-20261015";
 import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";
 import NotificationsView from "./views/notifications/NotificationsView.js";
 import HistoryView from "./views/history/HistoryView.js";
@@ -26,7 +26,7 @@ import ProfileView from "./views/profile/ProfileView.js";
 // Cash module views
 import CashDashboardView from "./views/cash/CashDashboardView.js?v=actualizacion-parcial-20261014";
 import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";
-import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=pagos-carga-rapida-20261014";
+import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=segunda-matricula-20261015";
 import CashHistoryView from "./views/cash/CashHistoryView.js";
 import CashOperationsView from "./views/cash/CashOperationsView.js";
 import InstructorDashboardView from "./views/instructor/InstructorDashboardView.js?v=actualizacion-parcial-20261014";
@@ -55,7 +55,7 @@ import ManagerFinanceView from "./views/manager/ManagerFinanceView.js";
 import ManagerAcademicView from "./views/manager/ManagerAcademicView.js";
 import ManagerAuditView from "./views/manager/ManagerAuditView.js?v=auditoria-responsables-20260812";
 import ManagerEnrollmentMonitorView from "./views/manager/ManagerEnrollmentMonitorView.js?v=websocket-20261012";
-import StudentPortalView from "./views/student-portal/StudentPortalView.js?v=horas-practicas-20261014";
+import StudentPortalView from "./views/student-portal/StudentPortalView.js?v=segunda-matricula-20261015";
 
 class App {
   constructor() {

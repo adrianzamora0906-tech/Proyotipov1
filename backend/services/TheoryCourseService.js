@@ -45,8 +45,8 @@ async function resolveEnrollmentBranchId(branchId,queryable=db){
   if(!branchId)return null;
   const result=await queryable.query(`SELECT COALESCE(reference.id,current.id) branch_id
     FROM branches current LEFT JOIN branches reference
-      ON current.code IN ('SP_IC','SP_IC2') AND reference.code='SP_IC1'
-      AND reference.city_id=current.city_id AND reference.active=TRUE
+      ON current.code IN ('SP_IC','SP_IC2','SP_MC') AND reference.code='SP_IC1'
+      AND (current.code='SP_MC' OR reference.city_id=current.city_id) AND reference.active=TRUE
     WHERE current.id=$1 LIMIT 1`,[branchId]);
   return result.rows[0]?.branch_id||branchId;
 }
@@ -138,7 +138,7 @@ class TheoryCourseService {
 
   static async options(user,filters={}){
     const requestedBranchId=filters.branch_id||user.branch_id;if(!requestedBranchId)throw createError(422,'Sucursal requerida');
-    // Manta 2000 y Shopping comparten grupos y cupos con Flavio Reyes.
+    // Manta 2000, Shopping y Montecristi comparten los grupos de Flavio Reyes.
     const branchId=await resolveEnrollmentBranchId(requestedBranchId);
     const client=await db.getClient();try{
       const rows=[];

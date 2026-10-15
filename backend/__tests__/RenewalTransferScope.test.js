@@ -1,10 +1,14 @@
-jest.mock('../config/database', () => ({ query: jest.fn() }));
+jest.mock('../config/database', () => ({ query: jest.fn(),getClient:jest.fn() }));
 jest.mock('../services/AuditService', () => ({ log: jest.fn() }));
 const db = require('../config/database');
 const Cash = require('../services/CashOperationsService');
 
 describe('renewal transfers collected from another branch', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    db.getClient.mockResolvedValue({query:(sql,...args)=>['BEGIN','COMMIT','ROLLBACK'].includes(sql)
+      ? Promise.resolve({rows:[]}) : db.query(sql,...args),release:jest.fn()});
+  });
   const data = () => ({ serviceTransactionId: 'service', cedula: '1312529561', amount: 16, reference: 'reference', transferDate: '2026-10-08' });
   test('uses service identity and original branch after checking collection scope', async () => {
     db.query.mockResolvedValueOnce({ rows: [{ amount: '16.00', student_id: 'student', branch_id: 'destination' }] })

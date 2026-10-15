@@ -48,12 +48,13 @@ class StudentProfileView extends Component {
     const isBranchAdmin = (authService.getCurrentUser()?.roles || []).includes('BRANCH_ADMIN');
     this.documentsLoaded = false;
     this.documentsLoadPromise = null;
-    const [attendanceResult, paymentsResult, balanceResult, scheduleResult, historyResult] = await Promise.allSettled([
+    this.historyLoaded = false;
+    this.historyLoadPromise = null;
+    const [attendanceResult, paymentsResult, balanceResult, scheduleResult] = await Promise.allSettled([
       isBranchAdmin ? ApiService.getBranchAdminAttendance(studentId) : Promise.resolve(null),
       PaymentService.getStudentPayments(studentId),
       PaymentService.getStudentBalance(studentId),
       ApiService.getStudentSchedule(studentId),
-      StudentService.getStudentHistory(studentId),
     ]);
     const branchAdminAttendance = attendanceResult.status === 'fulfilled' && attendanceResult.value?.success
       ? attendanceResult.value.data : null;
@@ -64,11 +65,12 @@ class StudentProfileView extends Component {
     const schedule = scheduleResult.status === 'fulfilled' && scheduleResult.value?.success
       ? scheduleResult.value.data : ScheduleService.getStudentSchedule(studentId);
     this.studentSchedule = schedule;
-    const history = historyResult.status === 'fulfilled' ? historyResult.value : [];
+    const history = [];
     const pendingBalance = Math.max(0, Number(balanceInfo?.balance || 0));
     const pendingVerification = Math.max(0,Number(balanceInfo?.pendingVerification || 0));
     const pendingTransfers = balanceInfo?.pendingTransfers || [];
     const paidAmount = Number(balanceInfo?.paid ?? totalPaid);
+    this.paymentEnrollments=balanceInfo?.enrollments || [];
     const canProcessPayments = authService.can('PAYMENT_CREATE');
     const canVoidPayments = authService.can('PAYMENT_VOID');
     const activeEnrollment = (student.enrollments || []).find(enrollment => enrollment.status === 'activo') || (student.enrollments || [])[0] || null;
@@ -95,7 +97,7 @@ class StudentProfileView extends Component {
       ? DateHelper.format(`${String(classEndDate).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY')
       : 'Sin fecha asignada';
     const isExamOnly = schedule?.type === 'exam_only' || schedule?.appointmentType === 'EXAM_ONLY';
-    const isAdditionalPracticeOnly = student.registrationType === 'ADDITIONAL_PRACTICE'
+    const isAdditionalPracticeOnly = (student.registrationType === 'ADDITIONAL_PRACTICE' && !(student.enrollments || []).length)
       || ((student.additionalPractices || []).length > 0 && !(student.enrollments || []).length);
     const accessAccount = student.accessAccount;
     const canResetStudentAccess = authService.can('STUDENT_UPDATE');
@@ -335,6 +337,7 @@ class StudentProfileView extends Component {
                   <div class="financial-item"><span>Saldo si se aprueban</span><strong class="financial-value">$${Math.max(0,pendingBalance-pendingVerification).toFixed(2)}</strong></div>
                 </div><div class="mt-4">${pendingTransfers.map(transfer=>`<p><strong>$${Number(transfer.amount).toFixed(2)}</strong> &middot; ${transfer.status==='AWAITING_APPROVAL'?'Pendiente de aprobaci&oacute;n':'Pendiente de verificaci&oacute;n'}${transfer.reference ? ` &middot; Referencia: ${escapeHtml(transfer.reference)}` : ''}</p>`).join('')}</div>` : ''}
 
+                ${this.paymentEnrollments.length>1 ? `<div class="cash-table-wrap mt-4"><table class="table"><thead><tr><th>Curso</th><th>Pagado</th><th>Saldo</th></tr></thead><tbody>${this.paymentEnrollments.map(enrollment=>`<tr><td>${escapeHtml(enrollment.course)}</td><td>$${Number(enrollment.paid).toFixed(2)}</td><td>$${Number(enrollment.balance).toFixed(2)}</td></tr>`).join('')}</tbody></table></div>` : ''}
                 ${pendingBalance > 0 && canProcessPayments ? `
                   <button class="btn btn-primary mt-4" id="record-payment-btn"
                     data-cedula="${student.cedula}" data-balance="${pendingBalance}">
@@ -353,6 +356,7 @@ class StudentProfileView extends Component {
                       <div class="payment-item">
                         <div>
                           <div class="payment-concept">${escapeHtml(payment.concept || 'Pago registrado')}</div>
+                          ${payment.course_name ? `<div class="payment-date">${escapeHtml(payment.course_name)}</div>` : ''}
                           ${this.renderPaymentMethod(payment)}
                           <div class="payment-date">${DateHelper.format(payment.created_at || payment.date, 'DD/MM/YYYY HH:MM')}</div>
                         </div>
@@ -527,6 +531,7 @@ class StudentProfileView extends Component {
         btn.classList.add('active');
         document.querySelector(`.tab-pane[data-tab="${tabName}"]`)?.classList.add('active');
         if (tabName === 'documents') this.loadDocumentsTab();
+        if (tabName === 'history') this.loadHistoryTab();
       });
     });
 
@@ -574,6 +579,11 @@ class StudentProfileView extends Component {
     });
 
     document.getElementById('record-payment-btn')?.addEventListener('click', event => {
+      if (this.paymentEnrollments?.length>1) {
+        window.history.pushState(null,null,`/cash/pending?search=${encodeURIComponent(this.student.cedula)}`);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+        return;
+      }
       this.openPaymentModal({
         studentId,
         cedula: event.currentTarget.dataset.cedula,
@@ -652,6 +662,33 @@ class StudentProfileView extends Component {
             </div>
           </div>
     `;
+  }
+
+  async loadHistoryTab() {
+    if (this.historyLoaded || this.historyLoadPromise) return this.historyLoadPromise;
+    const pane = document.querySelector('.tab-pane[data-tab="history"] .card-body');
+    if (!pane) return;
+    pane.setAttribute('aria-busy','true');
+    pane.textContent = 'Cargando historial...';
+    this.historyLoadPromise = (async () => {
+      try {
+        const history = await StudentService.getStudentHistory(this.props.studentId);
+        if (!pane.isConnected) return;
+        pane.innerHTML = history.length ? `<div class="timeline">${history.map(item =>
+          `<div class="timeline-item"><div class="timeline-time">${DateHelper.format(item.timestamp,'HH:MM')}</div><div class="timeline-content">${escapeHtml(item.action)}</div><div class="timeline-date">${DateHelper.format(item.timestamp,'DD/MM/YYYY')}</div></div>`).join('')}</div>` : '<p>Sin historial</p>';
+        this.historyLoaded = true;
+      } catch (error) {
+        if (!pane.isConnected) return;
+        pane.textContent = 'No se pudo cargar el historial. ';
+        const retry = document.createElement('button');
+        retry.className = 'btn btn-secondary'; retry.textContent = 'Reintentar';
+        retry.onclick = () => this.loadHistoryTab(); pane.appendChild(retry);
+      } finally {
+        this.historyLoadPromise = null;
+        if (pane.isConnected) pane.removeAttribute('aria-busy');
+      }
+    })();
+    return this.historyLoadPromise;
   }
 
   async loadDocumentsTab() {

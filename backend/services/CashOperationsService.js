@@ -75,6 +75,12 @@ class CashOperationsService {
   }
 
   static async createTransfer(data, actor, authorization, requestContext, client = db) {
+    if(client===db) {
+      const transaction=await db.getClient();
+      try {await transaction.query('BEGIN');const result=await this.createTransfer({...data},actor,authorization,requestContext,transaction);
+        await transaction.query('COMMIT');return result;
+      } catch(error){await transaction.query('ROLLBACK');throw error;}finally{transaction.release();}
+    }
     let branchId = authorization?.operationalCoverage?.operational_branch_id || this.branch(actor, authorization);
     let service = null;
     if (data.serviceTransactionId) {
@@ -92,11 +98,24 @@ class CashOperationsService {
       if (!service) throw createError(404, 'Servicio pendiente no encontrado o fuera del alcance de cobro');
       data.studentId = service.student_id;
       branchId = service.branch_id;
-    } else if (!data.studentId && data.cedula) {
-      const student = (await client.query(`SELECT s.id FROM students s JOIN enrollments e ON e.student_id=s.id AND e.status='activo'
-          WHERE s.identification=$1 AND ($2::boolean=TRUE OR e.branch_id=$3) ORDER BY e.created_at DESC LIMIT 1`,[data.cedula,Boolean(authorization?.global),branchId])).rows[0];
-      data.studentId=student?.id;
+    } else {
+      const enrollments=(await client.query(`SELECT e.id,e.student_id,e.branch_id FROM enrollments e
+        JOIN students s ON s.id=e.student_id AND s.status<>'inhabilitado'
+        JOIN branches destination ON destination.id=e.branch_id LEFT JOIN cities dc ON dc.id=destination.city_id
+        LEFT JOIN users registrar ON registrar.id=COALESCE(e.created_by,s.created_by)
+        LEFT JOIN branches collector ON collector.id=$4::uuid LEFT JOIN cities cc ON cc.id=collector.city_id
+        WHERE e.status='activo' AND (($1::uuid IS NOT NULL AND s.id=$1) OR ($1::uuid IS NULL AND s.identification=$2))
+          AND ($3::uuid IS NULL OR e.id=$3) AND ($5::boolean OR e.branch_id=$4 OR registrar.branch_id=$4
+            OR NULLIF(LOWER(TRIM(COALESCE(NULLIF(destination.province,''),dc.province,''))),'')
+              =NULLIF(LOWER(TRIM(COALESCE(NULLIF(collector.province,''),cc.province,''))),''))
+        ORDER BY e.created_at DESC LIMIT 2 FOR UPDATE OF e`,[data.studentId || null,data.cedula || null,data.enrollmentId || null,branchId,!!authorization?.global])).rows;
+      if(!enrollments.length)throw createError(404,'Matricula no encontrada o fuera del alcance de cobro');
+      if(enrollments.length>1)throw createError(422,'Selecciona la matricula del curso para registrar la transferencia');
+      data.studentId=enrollments[0].student_id;
+      data.enrollmentId=enrollments[0].id;
+      branchId=branchId || enrollments[0].branch_id;
     }
+    if(!Number.isFinite(Number(data.amount)) || Number(data.amount)<=0)throw createError(422,'Monto de transferencia invalido');
     if (!data.studentId || !data.amount || !data.reference || !data.transferDate) throw createError(422, 'Complete estudiante, monto, número de transferencia y fecha');
     if (data.serviceTransactionId) {
       if(!service||Number(data.amount)!==Number(service.amount)) throw createError(422,'El valor no coincide con el servicio pendiente');
@@ -104,15 +123,15 @@ class CashOperationsService {
       if(Number(pending.total)>0) throw createError(409,'Este servicio ya tiene una transferencia por confirmar');
     } else {
       const payment=(await client.query(`SELECT p.balance FROM payments p JOIN enrollments e ON e.id=p.enrollment_id
-        WHERE e.student_id=$1 AND e.status='activo' AND p.status<>'anulado' ORDER BY p.created_at DESC LIMIT 1`,[data.studentId])).rows[0];
-      const pending=(await client.query("SELECT COALESCE(SUM(amount),0)::numeric total FROM transfer_payment_verifications WHERE student_id=$1 AND service_transaction_id IS NULL AND status IN ('PENDING','AWAITING_APPROVAL')",[data.studentId])).rows[0];
+        WHERE e.id=$1 AND e.status='activo' AND p.status<>'anulado' ORDER BY p.created_at DESC LIMIT 1 FOR UPDATE OF p`,[data.enrollmentId])).rows[0];
+      const pending=(await client.query("SELECT COALESCE(SUM(amount),0)::numeric total FROM transfer_payment_verifications WHERE enrollment_id=$1 AND service_transaction_id IS NULL AND status IN ('PENDING','AWAITING_APPROVAL')",[data.enrollmentId])).rows[0];
       if(!payment||Number(data.amount)+Number(pending.total)>Number(payment.balance)) throw createError(422,'El monto supera el saldo disponible después de las transferencias por confirmar');
     }
     try {
       const result = await client.query(`INSERT INTO transfer_payment_verifications
-        (branch_id,student_id,service_transaction_id,amount,bank,reference,transfer_date,proof_url,created_by)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-        [branchId,data.studentId,data.serviceTransactionId||null,Number(data.amount),String(data.bank||'No especificado').trim(),String(data.reference).trim(),data.transferDate,data.proofUrl||null,actor.id]);
+        (branch_id,student_id,service_transaction_id,amount,bank,reference,transfer_date,proof_url,created_by,enrollment_id)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+        [branchId,data.studentId,data.serviceTransactionId||null,Number(data.amount),String(data.bank||'No especificado').trim(),String(data.reference).trim(),data.transferDate,data.proofUrl||null,actor.id,data.serviceTransactionId ? null : data.enrollmentId]);
       await AuditService.log({userId:actor.id,branchId,role:actor.role,action:'TRANSFER_VERIFICATION_CREATED',module:'FINANCIERO',entityType:'TRANSFER_PAYMENT_VERIFICATION',entityId:result.rows[0].id,description:'Transferencia registrada para verificación',newValues:{amount:Number(data.amount),bank:data.bank,reference:data.reference},requestContext},client);
       return result.rows[0];
     } catch (error) {
@@ -180,7 +199,7 @@ class CashOperationsService {
       if (alreadyApplied && !confirmed) throw createError(409, 'Este pago ya fue aplicado. Para rechazarlo debes solicitar su anulacion');
       const status = confirmed ? (approval ? 'CONFIRMED' : 'AWAITING_APPROVAL') : 'REJECTED';
       let paymentResult=null;
-      if(confirmed && approval && !alreadyApplied) paymentResult=await PaymentService.registerPayment({cedula:row.identification,serviceTransactionId:row.service_transaction_id,amount:Number(row.amount),method:'transferencia',reference:row.reference,cashierUserId:actor.id,cashierRole:actor.role,collectionBranchId:row.branch_id,globalAccess:branchId===null||Boolean(authorization?.global),requestContext},client);
+      if(confirmed && approval && !alreadyApplied) paymentResult=await PaymentService.registerPayment({cedula:row.identification,enrollmentId:row.enrollment_id,serviceTransactionId:row.service_transaction_id,amount:Number(row.amount),method:'transferencia',reference:row.reference,cashierUserId:actor.id,cashierRole:actor.role,collectionBranchId:row.branch_id,globalAccess:branchId===null||Boolean(authorization?.global),requestContext},client);
       const reviewColumns = approval ? 'approved_by=$3,approval_note=$4,approved_at=NOW()' : 'reviewed_by=$3,review_note=$4,reviewed_at=NOW()';
       const updated=(await client.query(`UPDATE transfer_payment_verifications SET status=$2,${reviewColumns} WHERE id=$1 AND status=$5 AND approved_at IS NULL RETURNING *`,[id,status,actor.id,note||null,row.status || expectedStatus])).rows[0];
       if(!updated) throw createError(409,'La transferencia ya fue procesada');

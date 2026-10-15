@@ -46,6 +46,8 @@ class RealtimeClient {
         this.hasConnected = true;
       } else if (message.type === 'changed' && Array.isArray(message.topics)) {
         window.dispatchEvent(new CustomEvent('erp:realtime', { detail:{ topics:message.topics } }));
+      } else if (message.type === 'schedule-holds' || message.type === 'schedule-hold-result') {
+        window.dispatchEvent(new CustomEvent('erp:schedule-holds', { detail:message }));
       }
     };
     socket.onerror = () => socket.close();
@@ -72,6 +74,12 @@ class RealtimeClient {
     this.socket = null;
     this.connected = false;
     socket?.close();
+  }
+
+  sendSelectionHold(slots) {
+    if (!this.connected || this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({ type:'schedule-hold', slots }));
+    return true;
   }
 }
 

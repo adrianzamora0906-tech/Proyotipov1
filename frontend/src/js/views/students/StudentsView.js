@@ -5,6 +5,7 @@
 
 import Component from '../../components/Component.js';
 import { subscribeRealtime } from '../../core/realtime/RealtimeClient.js';
+import { holdScheduleSelection } from '../../core/realtime/ScheduleSelectionHolds.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
 import StudentService from '../../services/StudentService.js?v=registro-sin-fallback-20260820';
 import ScheduleService from '../../services/ScheduleService.js';
@@ -68,17 +69,17 @@ class StudentsView extends Component {
     const summaryParams = { ...listParams };
     delete summaryParams.status;
     delete summaryParams.registration_type;
-    const summaryStudentsPromise = StudentService.getAllStudents(summaryParams);
-    const studentsPromise = listParams.status
+    const summaryStudentsPromise = isRegistrationPage ? Promise.resolve([]) : StudentService.getAllStudents(summaryParams);
+    const studentsPromise = !isRegistrationPage && listParams.status
       ? StudentService.getAllStudents(listParams)
       : summaryStudentsPromise.then(items => items.filter(student => student.registrationType === selectedRegistrationType));
     const [students, branches, reservations, summaryStudents, summaryReservations, disabledStudents] = await Promise.all([
       studentsPromise,
       StudentService.getBranches(),
-      StudentService.getActiveReservations(listParams),
+      isRegistrationPage ? Promise.resolve([]) : StudentService.getActiveReservations(listParams),
       summaryStudentsPromise,
-      selectedStatus ? StudentService.getActiveReservations(summaryParams) : Promise.resolve(null),
-      this.getDisabledStudents(summaryParams).catch(() => null),
+      !isRegistrationPage && selectedStatus ? StudentService.getActiveReservations(summaryParams) : Promise.resolve(null),
+      isRegistrationPage ? Promise.resolve([]) : this.getDisabledStudents(summaryParams).catch(() => null),
     ]);
     this.disabledStudentCount = disabledStudents?.length ?? null;
     const allSummaryStudents = summaryStudents || students;
@@ -657,6 +658,17 @@ class StudentsView extends Component {
 
                 <div id="additional-practice-cedula-slot" class="form-row additional-practice-only" hidden></div>
 
+                <div class="form-row" id="student-data-cedula-row">
+                  <div class="form-group" id="student-cedula-group">
+                    <label class="form-label required">C&eacute;dula</label>
+                    <input type="text" class="form-input" name="cedula" inputmode="numeric" maxlength="10" placeholder="1234567890" required>
+                    <div class="form-error"></div>
+                    <small id="registration-identity-status" role="status" aria-live="polite"></small>
+                    <small id="additional-practice-person-status" class="additional-practice-only" hidden></small>
+                    <label class="additional-practice-only" hidden><input type="checkbox" name="additionalPracticeFormerStudent"> Fue estudiante de la escuela</label>
+                  </div>
+                </div>
+
                 <div class="form-row" id="student-name-row">
                   <div class="form-group">
                     <label class="form-label required">Nombre</label>
@@ -671,13 +683,6 @@ class StudentsView extends Component {
                 </div>
 
                 <div class="form-row" id="student-identity-row">
-                  <div class="form-group" id="student-cedula-group">
-                    <label class="form-label required">Cédula</label>
-                    <input type="text" class="form-input" name="cedula" placeholder="1234567890" required>
-                    <div class="form-error"></div>
-                    <small id="additional-practice-person-status" class="additional-practice-only" hidden></small>
-                    <label class="additional-practice-only" hidden><input type="checkbox" name="additionalPracticeFormerStudent"> Fue estudiante de la escuela</label>
-                  </div>
                   <div class="form-group">
                     <label class="form-label required">Fecha de Nacimiento</label>
                     <input type="date" class="form-input" name="birthDate" required>
@@ -1230,6 +1235,7 @@ class StudentsView extends Component {
     });
     form?.querySelector('[name="cedula"]')?.addEventListener('input', event => {
       if (form.querySelector('[name="additionalPractice"]')?.checked) this.scheduleAdditionalPracticeResolution(event.target.value);
+      else this.scheduleRegistrationIdentityLookup(event.target.value);
     });
     form?.querySelector('[name="additionalPracticeDays"]')?.addEventListener('change', () => this.updateAdditionalPracticePrice());
     form?.querySelector('[name="additionalPracticeFormerStudent"]')?.addEventListener('change', () => this.updateAdditionalPracticePrice());
@@ -1529,7 +1535,7 @@ class StudentsView extends Component {
     document.querySelectorAll('.additional-practice-only').forEach(element => { element.hidden = !enabled; });
     const cedulaGroup = document.getElementById('student-cedula-group');
     const cedulaSlot = document.getElementById('additional-practice-cedula-slot');
-    const identityRow = document.getElementById('student-identity-row');
+    const identityRow = document.getElementById('student-data-cedula-row');
     if (cedulaGroup) {
       if (enabled && cedulaSlot) cedulaSlot.appendChild(cedulaGroup);
       if (!enabled && identityRow) identityRow.insertBefore(cedulaGroup, identityRow.firstChild);
@@ -1575,6 +1581,77 @@ class StudentsView extends Component {
     if (title) title.textContent = isRenewal ? 'Registrar renovación de licencia' : (isAdditionalPractice ? 'Registrar prácticas adicionales' : 'Nuevo Estudiante');
     document.querySelector('.student-modal-steps')?.classList.toggle('renewal-mode', isRenewal);
     this.goToModalStep(isRenewal ? 2 : 1);
+  }
+
+  validateExistingStudentCourse() {
+    const form=document.getElementById('student-modal-form');
+    if (this.recordEditContext || this.activatingReservation
+      || form?.querySelector('[name="registrationMode"]:checked')?.value!=='regular') return true;
+    const student=this.registrationIdentityStudent;
+    if (String(student?.identification || student?.cedula)!==String(form?.elements.cedula?.value)
+      || !(student?.active_course_ids || []).includes(form?.elements.course_id?.value)) return true;
+    this.showModalAlert('error','Este estudiante ya tiene una matricula vigente en el mismo curso.');
+    this.goToModalStep(1);
+    return false;
+  }
+
+  scheduleRegistrationIdentityLookup(value) {
+    if (this.recordEditContext || this.activatingReservation) return;
+    clearTimeout(this.registrationIdentityTimer);
+    this.registrationIdentityRequest=(this.registrationIdentityRequest || 0)+1;
+    const request=this.registrationIdentityRequest;
+    const identification=String(value || '').trim();
+    const form=document.getElementById('student-modal-form');
+    const status=document.getElementById('registration-identity-status');
+    if (this.registrationIdentityFound && this.registrationIdentityFound!==identification) {
+      for (const name of this.registrationIdentityFields || []) {
+        const input=form?.elements[name];
+        if (input) input.value='';
+      }
+      this.registrationIdentityFound=null;
+      this.registrationIdentityStudent=null;
+      this.registrationIdentityFields=[];
+    }
+    if (status) status.textContent='';
+    if (!/^\d{10}$/.test(identification)) return;
+    if (this.registrationIdentityFound===identification) return;
+    if (status) status.textContent='Buscando estudiante...';
+    this.registrationIdentityTimer=setTimeout(()=>this.resolveRegistrationIdentity(identification,request),300);
+  }
+
+  async resolveRegistrationIdentity(identification,request) {
+    const form=document.getElementById('student-modal-form');
+    const status=document.getElementById('registration-identity-status');
+    const names=['firstName','lastName','birthDate','email','phone','address','bloodType'];
+    const before=Object.fromEntries(names.map(name=>[name,form?.elements[name]?.value]));
+    try {
+      const result=await ApiService.searchStudents(identification);
+      if (request!==this.registrationIdentityRequest || !form?.isConnected
+        || form.elements.cedula.value.trim()!==identification || this.recordEditContext || this.activatingReservation
+        || form.querySelector('[name="registrationMode"]:checked')?.value!=='regular') return;
+      if (!result.success) throw new Error('No se pudo consultar el estudiante.');
+      const found=(result.data || []).find(student=>String(student.identification || student.cedula)===identification);
+      if (!found) {
+        if (status) status.textContent='No se encontro un estudiante en tu alcance. Completa sus datos.';
+        return;
+      }
+      const student=StudentService.normalizeStudent(found);
+      this.registrationIdentityStudent=student;
+      const values={firstName:student.firstName,lastName:student.lastName,birthDate:String(student.birthDate || '').slice(0,10),
+        email:student.email,phone:student.phone,address:student.address,bloodType:student.bloodType};
+      this.registrationIdentityFields=[];
+      for (const [name,value] of Object.entries(values)) {
+        const input=form.elements[name];
+        if (input && input.value===before[name]) {
+          input.value=value || '';
+          this.registrationIdentityFields.push(name);
+        }
+      }
+      this.registrationIdentityFound=identification;
+      if (status) status.textContent='Estudiante encontrado. Datos personales precargados.';
+    } catch(error) {
+      if (request===this.registrationIdentityRequest && status?.isConnected) status.textContent='No se pudo consultar la cedula. Vuelve a ingresarla para reintentar.';
+    }
   }
 
   scheduleAdditionalPracticeResolution(value) {
@@ -1897,7 +1974,7 @@ class StudentsView extends Component {
         <button type="button" class="enrollment-modality-button active" data-modality="normal" aria-pressed="true">
           <strong>Horario normal</strong>
         </button>
-        <button type="button" class="enrollment-modality-button" data-modality="intensivo" aria-pressed="false">
+        <button type="button" class="enrollment-modality-button" data-modality="intensivo" aria-pressed="false" ${this.modalNormalOnly ? 'hidden disabled' : ''}>
           <strong>Horario intensivo</strong>
         </button>
       </div>
@@ -2352,6 +2429,8 @@ class StudentsView extends Component {
 
   async getSchedulesForModal(branchId = null, instructorId = null, practicalStartDate = null, practicalCycleId = null) {
     try {
+      this.modalNormalOnly = this.modalLocationCatalog?.branches?.some(branch =>
+        String(branch.id) === String(branchId) && branch.code === 'SP_MC') || false;
       const branchFilter = {
         include_occupied: 'true',
         ...(branchId ? { branch_id: branchId } : {}),
@@ -2362,10 +2441,9 @@ class StudentsView extends Component {
       };
       const results = await Promise.allSettled([
         ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'carro', modality: 'normal' }),
-        ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'carro', modality: 'intensivo' }),
-        ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'moto', modality: 'normal' }),
-        ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'moto', modality: 'intensivo' }),
-        ApiService.getTheoryEnrollmentOptions({ ...(branchId ? { branch_id: branchId } : {}) }),
+        this.modalNormalOnly ? Promise.resolve({success:true,data:[]}) : ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'carro', modality: 'intensivo' }),
+        this.modalNormalOnly ? Promise.resolve({success:true,data:[]}) : ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'moto', modality: 'normal' }),
+        this.modalNormalOnly ? Promise.resolve({success:true,data:[]}) : ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'moto', modality: 'intensivo' }),
       ]);
       const responses = results.map((result, index) => {
         if (result.status === 'fulfilled' && result.value?.success) return result.value;
@@ -2375,7 +2453,6 @@ class StudentsView extends Component {
       });
       const cycles=responses.slice(0,4).flatMap(result => result?.data || []);
       this.modalTheoryOptions=cycles[0]?.theoryOptions||{regular:true,saturday:true,virtual:true};
-      this.modalTheoryGroups=responses[4]?.data||[];
       if (cycles.length) return this.flattenEnrollmentOptions(cycles);
     } catch (error) {
       console.warn('No se pudieron cargar opciones de cursos desde API:', error.message);
@@ -2387,6 +2464,7 @@ class StudentsView extends Component {
   async reloadModalSchedules(branchId, instructorId = null, practicalStartDate = null, options = {}) {
     const host = document.getElementById('student-schedule-calendar');
     if (!host || !branchId) return;
+    this.loadModalTheoryGroups(branchId);
     const requestId = (this.modalScheduleRequestId || 0) + 1;
     this.modalScheduleRequestId = requestId;
     const activeCycleIds = new Map([...host.querySelectorAll('.enrollment-cycle-set')].map(set => {
@@ -2704,6 +2782,40 @@ class StudentsView extends Component {
     }));
   }
 
+  async loadModalTheoryGroups(branchId) {
+    if (this.modalTheoryBranch === branchId && (this.modalTheoryLoading || this.modalTheoryExpires > Date.now())) return;
+    this.modalTheoryBranch = branchId;
+    this.modalTheoryLoading = true;
+    this.modalTheoryGroups = [];
+    const request = this.modalTheoryRequest = (this.modalTheoryRequest || 0) + 1;
+    const pane = document.querySelector('.theory-schedule-selector');
+    pane?.setAttribute('aria-busy', 'true');
+    pane?.querySelectorAll('[name="theorySchedule"]').forEach(input => {
+      if (input.value.startsWith('presencial_')) input.disabled = true;
+    });
+    try {
+      const response = await ApiService.getTheoryEnrollmentOptions({branch_id:branchId});
+      if (request !== this.modalTheoryRequest || !pane?.isConnected) return;
+      if (!response.success) throw new Error('No se pudieron cargar las teorias');
+      this.modalTheoryGroups = response.data || [];
+      this.modalTheoryExpires = Date.now() + 30000;
+    } catch (error) {
+      if (request !== this.modalTheoryRequest || !pane?.isConnected) return;
+      this.modalTheoryGroups = ['presencial_regular','presencial_intensivo_08','presencial_intensivo_13']
+        .map(value => ({value,unavailable:true,message:'No se pudo consultar. Vuelve a seleccionar la sucursal para reintentar.'}));
+    } finally {
+      if (request === this.modalTheoryRequest) this.modalTheoryLoading = false;
+    }
+    if (request !== this.modalTheoryRequest || !pane?.isConnected) return;
+    const selected = pane.querySelector('[name="theorySchedule"]:checked')?.value;
+    pane.innerHTML = this.renderTheoryScheduleOptions();
+    const current = [...pane.querySelectorAll('[name="theorySchedule"]')].find(input => input.value === selected);
+    if (current) current.checked = true;
+    pane.querySelectorAll('label').forEach(label => label.classList.toggle('active', Boolean(label.querySelector('input:checked'))));
+    pane.removeAttribute('aria-busy');
+    this.bindTheoryScheduleOptions();
+  }
+
   renderTheoryScheduleOptions(){
     const options=this.modalTheoryOptions||{regular:true,saturday:true,virtual:true},items=[
       `<label class="enrollment-modality-button active">
@@ -2764,14 +2876,14 @@ class StudentsView extends Component {
         }
       }
 
-      const renderCities = async () => {
+      const renderCities = async (loadBranches = true) => {
         const selectedProvince = provinceSelect.value;
         const availableCities = cities.filter(city => !selectedProvince || city.province === selectedProvince);
         citySelect.innerHTML = '<option value="">Seleccionar cantón...</option>' + availableCities
           .map(city => `<option value="${city.id}">${city.name}</option>`)
           .join('');
         citySelect.disabled = !selectedProvince;
-        await renderBranches();
+        if (loadBranches) await renderBranches();
       };
 
       const renderBranches = async () => {
@@ -2784,6 +2896,7 @@ class StudentsView extends Component {
           branchSelect.innerHTML = `<option value="${branch.name}" data-branch-id="${branch.id}" selected>${branch.name}</option>`;
           branchSelect.disabled = false;
           if (branchField) branchField.hidden = true;
+          if (this.preparingRecordEdit) return;
           await this.loadModalBranchCourses(branchSelect);
           await this.loadModalReferredInstructors(branch.id);
           await this.reloadModalSchedules(branch.id);
@@ -2795,6 +2908,7 @@ class StudentsView extends Component {
           .join('');
         branchSelect.disabled = !selectedCityId || available.length === 0;
         if (branchField) branchField.hidden = !selectedCityId || available.length < 2;
+        if (this.preparingRecordEdit) return;
         await this.loadModalBranchCourses(branchSelect);
         await this.loadModalReferredInstructors(null);
         const scheduleHost = document.getElementById('student-schedule-calendar');
@@ -2833,7 +2947,7 @@ class StudentsView extends Component {
         : null;
       if (sessionBranch && sessionCity && provinces.includes(sessionCity.province)) {
         provinceSelect.value = sessionCity.province;
-        await renderCities();
+        await renderCities(false);
         citySelect.value = String(sessionCity.id);
         await renderBranches();
 
@@ -2885,6 +2999,22 @@ class StudentsView extends Component {
     if (!courseSelect) return;
     const branchId = branchSelect?.selectedOptions?.[0]?.dataset?.branchId;
     const branch = this.modalLocationCatalog?.branches?.find(item => String(item.id) === String(branchId));
+    this.modalNormalOnly = branch?.code === 'SP_MC';
+    if (this.modalNormalOnly) {
+      const modality = document.getElementById('selected-enrollment-modality');
+      if (modality) modality.value = 'normal';
+    }
+    const renewalOption = document.querySelector('#student-modal-form [name="registrationMode"][value="license-renewal"]');
+    const renewalAllowed = branch?.code !== 'SP_MC';
+    if (renewalOption) {
+      renewalOption.disabled = !renewalAllowed;
+      renewalOption.closest('label').hidden = !renewalAllowed;
+      if (!renewalAllowed && renewalOption.checked) {
+        const regular = document.querySelector('#student-modal-form [name="registrationMode"][value="regular"]');
+        if (regular) regular.checked = true;
+        await this.setRegistrationMode('regular');
+      }
+    }
     const branchSummaryName = document.getElementById('registration-session-branch-name');
     if (branch && branchSummaryName) branchSummaryName.textContent = branch.name;
     this.modalPickupEnabled = branch?.pickup_enabled !== false;
@@ -2899,16 +3029,19 @@ class StudentsView extends Component {
     if (!branchId) { courseSelect.innerHTML='<option value="">Seleccione primero una sucursal...</option>'; courseSelect.disabled=true; return; }
     try {
       const response = await ApiService.getBranchCourses(branchId);
-      const courses = response.data || [];
+      const montecristi = branch?.code === 'SP_MC';
+      const courses = (response.data || []).filter(course =>
+        !montecristi || this.getCourseCatalogType(course) === 'carro');
       const courseOptions = courses.map(course => {
         const courseType = this.getCourseCatalogType(course);
         const isTypeF = courseType === 'tipo-f';
         return `<option value="${escapeHtml(course.id)}" data-price="${Number(course.price || 0)}" data-course-type="${isTypeF ? 'carro' : courseType}" data-catalog-type="${courseType}" data-course-name="${escapeHtml(course.name)}">${escapeHtml(course.name)}</option>`;
       }).join('');
-      const typeFOption = courses.some(course => /tipo f/i.test(course.name))
+      const typeFOption = montecristi || courses.some(course => /tipo f/i.test(course.name))
         ? ''
         : '<option value="tipo-f" data-price="0" data-course-type="tipo-f" disabled>Tipo F</option>';
       courseSelect.innerHTML = '<option value="">Seleccionar curso...</option>' + courseOptions + typeFOption;
+      if (montecristi && courses.length) courseSelect.value = courses[0].id;
       courseSelect.disabled = false;
       this.updateRegistrationPaymentSummary();
       this.updateDisabilityCertificateRequirement();
@@ -3129,12 +3262,14 @@ class StudentsView extends Component {
         input.value = student.notes || '';
       });
       const city = context.cities.find(item => String(item.id) === String(student.city_id));
+      this.preparingRecordEdit = true;
       if (city) {
         form.elements.province.value = city.province;
-        await this.renderModalCities?.();
+        await this.renderModalCities?.(false);
         form.elements.city_id.value = city.id;
         await this.renderModalBranches?.();
       }
+      this.preparingRecordEdit = false;
       const branch = form.elements.branch;
       const branchOption = [...branch.options].find(option => option.dataset.branchId === student.branch_id);
       if (branchOption) branchOption.selected = true;
@@ -3222,6 +3357,7 @@ class StudentsView extends Component {
       if (!context.canSchedule && form.elements.course_id) form.elements.course_id.disabled = true;
       form.querySelector('[name="firstName"]')?.focus();
     } catch (error) {
+      this.preparingRecordEdit = false;
       if (!document.getElementById('student-modal-overlay')?.classList.contains('active')) this.openStudentModal();
       document.getElementById('student-modal-submit').disabled = true;
       this.showModalAlert('error', error.message || 'No se pudo cargar el expediente');
@@ -3412,6 +3548,11 @@ class StudentsView extends Component {
   }
 
   closeStudentModal() {
+    clearTimeout(this.registrationIdentityTimer);
+    this.registrationIdentityRequest=(this.registrationIdentityRequest || 0)+1;
+    this.registrationIdentityFound=null;
+    this.registrationIdentityStudent=null;
+    this.registrationIdentityFields=[];
     const modal = document.getElementById('student-modal-overlay');
     const form = document.getElementById('student-modal-form');
     const alert = document.getElementById('student-modal-alert');
@@ -3622,6 +3763,7 @@ class StudentsView extends Component {
     const currentStep = this.getCurrentModalStep();
     if (currentStep === 1 && !this.validateScheduleFirstStep()) return;
     if (currentStep === 2 && !this.validateStudentFields()) return;
+    if (currentStep === 2 && !this.validateExistingStudentCourse()) return;
     const registrationMode = document.querySelector('#student-modal-form [name="registrationMode"]:checked')?.value;
     const theorySchedule = document.querySelector('#student-modal-form [name="theorySchedule"]:checked')?.value;
     const theoryAccepted = document.querySelector('#student-modal-form')?.dataset.theoryConfirmationAccepted === 'true';
@@ -4326,6 +4468,8 @@ class StudentsView extends Component {
     this.updateReferredInstructorBlockPreview(calendar);
     this.updateInstructorAssignmentPreview(calendar, plan);
     this.updateScheduleSelectionSummary(plan);
+    holdScheduleSelection(plan, this.getCalendarInstructorButton(calendar)?.dataset.courseInstructorId
+      || this.scheduleInstructorFilterId || document.getElementById('preferred-instructor-select')?.value);
   }
 
   updateScheduleSelectionSummary(plan = []) {
@@ -4640,6 +4784,7 @@ class StudentsView extends Component {
     }
 
     const topTransferCheck = document.getElementById('student-transfer-payment');
+    if (!this.validateExistingStudentCourse()) return;
     const topTransferReferenceInput = document.getElementById('student-transfer-reference-input');
     const topTransferAmountInput = document.getElementById('student-transfer-amount-input');
     if (!authService.can('PAYMENT_CREATE') && topTransferCheck?.checked && !String(topTransferReferenceInput?.value || '').trim()) {
@@ -4916,6 +5061,7 @@ class StudentsView extends Component {
       bloodType: formData.get('bloodType'),
       pickupBranchId: formData.get('pickupBranchId'),
       course_id: formData.get('course_id'),
+      schedulePlan,
       disabilityPercentage: selectedCatalogType === 'tipo-f' ? disabilityPercentage : null,
       city_id: this.modalLocationCatalog?.branches?.find(branch => String(branch.id) === String(selectedBranchId))?.city_id || formData.get('city_id'),
       branch_id: selectedBranchId || authService.getEffectiveBranchId() || null,
@@ -4968,7 +5114,8 @@ class StudentsView extends Component {
         await this.uploadModalDocument(student.id, 'certificado_discapacidad', disabilityCertificate, 'Certificado de discapacidad');
       }
       if (submitBtn) submitBtn.textContent = 'Reservando horario...';
-      const scheduleReservation = await this.selectStudentSchedule(student.id, scheduleId, schedulePlan);
+      const scheduleReservation = student.scheduleReserved ? {instructor:student.assignedInstructor}
+        : await this.selectStudentSchedule(student.id, scheduleId, {...schedulePlan,enrollmentId:student.enrollment_id});
       student.assignedInstructor = scheduleReservation?.instructor || null;
       // ================================================================
       // REGLA PROTEGIDA: CIERRE OBLIGATORIO DEL MODAL DE NUEVO ESTUDIANTE
@@ -4995,8 +5142,10 @@ class StudentsView extends Component {
       if (submitBtn) submitBtn.textContent = 'Registrando pago...';
       const paymentResult = await PaymentService.registerPayment({
         studentId: student.id,
+        enrollmentId: student.enrollment_id,
         cedula: student.cedula || student.identification || formData.get('cedula'),
         amount: formData.get('paymentAmount'),
+        cardBatch: formData.get('paymentCardBatch') || formData.get('cardBatch'),
         method: formData.get('paymentMethod'),
         reference: document.getElementById('student-transfer-payment')?.checked
           ? document.getElementById('student-transfer-reference-input')?.value
@@ -5446,7 +5595,7 @@ class StudentsView extends Component {
     const hasCycleSelection = Array.isArray(schedulePlan?.selections)
       && schedulePlan.selections.some(selection => Boolean(selection?.cycleId));
     if (String(scheduleId).startsWith('cycle:') || hasCycleSelection) {
-      const response = await ApiService.reserveCourseCycleSchedule({ studentId, schedulePlan });
+      const response = await ApiService.reserveCourseCycleSchedule({ studentId, enrollmentId:schedulePlan?.enrollmentId || null,schedulePlan });
       if (!response.success) throw new Error(response.error || 'No se pudo reservar el cupo del curso');
       try { NotificationService.notifyScheduleSelected(studentId); }
       catch (error) { console.warn('El horario se guardó, pero no se pudo crear la notificación local:', error); }
@@ -5758,20 +5907,22 @@ class StudentsView extends Component {
   renderStudentRows(students) {
     let previousBranch = null;
     return students.map(student => {
+      const registrationBranch = student.registeredByBranchName || 'Sucursal no registrada';
+      const registrationCity = student.registeredByCityName || 'Ciudad no registrada';
       const groupTitle = this.groupBy === 'instructor'
         ? (student.instructorName || 'Sin instructor') !== previousBranch
           ? `<div class="student-branch-group">Instructor: ${student.instructorName || 'Sin instructor'}</div>`
           : ''
-        : student.branch !== previousBranch
-          ? `<div class="student-branch-group">${student.city || 'Ciudad no registrada'} · ${student.branch || 'Sucursal no registrada'}</div>`
+        : registrationBranch !== previousBranch
+          ? `<div class="student-branch-group">${escapeHtml(registrationCity)} · ${escapeHtml(registrationBranch)}</div>`
           : '';
-      previousBranch = this.groupBy === 'instructor' ? (student.instructorName || 'Sin instructor') : student.branch;
+      previousBranch = this.groupBy === 'instructor' ? (student.instructorName || 'Sin instructor') : registrationBranch;
       return `${groupTitle}
         <div class="table-row clickable-row" data-student-id="${student.id}" style="cursor:pointer;">
           <div class="table-cell"><div class="student-name"><div class="avatar" style="width: 32px; height: 32px; font-size: 0.75rem;">${this.getInitials(student.firstName + ' ' + student.lastName)}</div><div><div class="font-weight-600">${student.firstName} ${student.lastName}</div><div class="text-sm text-gray-500">${student.email || 'N/A'}</div></div></div></div>
           <div class="table-cell">${StringHelper.normalizeCedula(student.cedula)}</div>
           <div class="table-cell">${student.createdByName || 'No registrado'}</div>
-          <div class="table-cell">${student.branch || 'N/A'}</div>
+          <div class="table-cell">${escapeHtml(registrationBranch)}</div>
           <div class="table-cell">${student.instructorName || 'Sin instructor'}</div>
           <div class="table-cell">${DateHelper.format(student.createdAt, 'DD/MM/YYYY')}</div>
           <div class="table-cell"><span class="badge ${this.getStatusBadgeClass(student.status)}">${this.getStatusLabel(student.status)}</span></div>

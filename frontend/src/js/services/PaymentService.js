@@ -39,10 +39,10 @@ class PaymentService {
     });
   }
 
-  static async getStudentBalance(studentId) {
+  static async getStudentBalance(studentId,enrollmentId=null) {
     if (this.useApi) {
       try {
-        const result = await ApiService.getStudentBalance(studentId);
+        const result = await ApiService.getStudentBalance(studentId,enrollmentId);
         if (result.success) return result.data;
         // Si result.success es false (403/401), cae al fallback sin advertencia
       } catch (e) {
@@ -78,7 +78,7 @@ class PaymentService {
       .sort((a, b) => new Date(b.date) - new Date(a.date));
   }
 
-  static async registerPayment({ studentId, serviceTransactionId, amount, method, reference, cardBatch, cedula, cashier, notify = true }) {
+  static async registerPayment({ studentId, enrollmentId,serviceTransactionId, amount, method, reference, cardBatch, cedula, cashier, notify = true }) {
     if (this.useApi) {
       try {
         const result = await ApiService.registerPayment({
@@ -89,6 +89,7 @@ class PaymentService {
           cardBatch: cardBatch || null,
           cashier: cashier || 'Cajero',
           serviceTransactionId: serviceTransactionId || null,
+          enrollmentId: enrollmentId || null,
         });
         if (result.success) {
           if (result.data.pendingTransfer) {

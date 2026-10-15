@@ -1072,7 +1072,15 @@ class ScheduleView extends Component {
   }
 
   renderInstructorStudentsModal(calendar) {
-    const students = calendar.students || [];
+    const startMinutes = student => {
+      const match = String(student.start_time || '').match(/^(\d{1,2}):(\d{2})/);
+      return match ? Number(match[1]) * 60 + Number(match[2]) : Infinity;
+    };
+    const students = [...(calendar.students || [])].sort((a, b) => {
+      const first = startMinutes(a);
+      const second = startMinutes(b);
+      return first === second ? 0 : first < second ? -1 : 1;
+    });
     const matriculated = students.filter(student => student.status === 'matriculado').length;
     const reserved = students.filter(student => student.status === 'reservado').length;
     const transport = students.filter(student => student.status === 'transporte').length;

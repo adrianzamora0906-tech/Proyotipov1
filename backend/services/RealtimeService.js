@@ -2,14 +2,19 @@ const { WebSocketServer, WebSocket } = require('ws');
 const { Client } = require('pg');
 const db = require('../config/database');
 const { authMiddleware } = require('../middleware/auth');
+const ScheduleSelectionHolds = require('./ScheduleSelectionHolds');
+const AuthorizationService = require('./AuthorizationService');
 
 const TOPICS = new Set(['students','payments','schedules','documents','notifications','admin','referrals','activity','authorization','resources']);
 
 class RealtimeService {
-  constructor({ authenticate = authMiddleware, createClient = () => new Client(db.pool.options) } = {}) {
+  constructor({ authenticate = authMiddleware, createClient = () => new Client(db.pool.options),
+    getPermissions = user => AuthorizationService.getEffectivePermissions(user.id, user.branch_id) } = {}) {
     this.authenticate = authenticate;
     this.createClient = createClient;
+    this.getPermissions = getPermissions;
     this.pending = new Set();
+    this.selectionHolds = new ScheduleSelectionHolds();
     this.ready = false;
     this.stopped = false;
   }
@@ -26,6 +31,8 @@ class RealtimeService {
     server.on('upgrade', this.upgrade);
     this.server = server;
     this.heartbeat = setInterval(() => {
+      this.selectionHolds.prune();
+      this.broadcastSelectionHolds();
       for (const ws of this.wss.clients) {
         if (ws.alive === false || ws.bufferedAmount > 65536) { ws.terminate(); continue; }
         ws.alive = false;
@@ -50,7 +57,11 @@ class RealtimeService {
     ws.on('pong', () => { ws.alive = true; });
     ws.on('error', () => ws.terminate());
     const timeout = setTimeout(() => ws.close(4001,'Authentication required'),5000);
-    ws.on('close', () => { clearTimeout(timeout); clearTimeout(ws.expiry); });
+    ws.on('close', () => {
+      clearTimeout(timeout); clearTimeout(ws.expiry);
+      this.selectionHolds.owners.delete(ws);
+      this.broadcastSelectionHolds();
+    });
     ws.once('message', async (raw, binary) => {
       try {
         const message = binary ? null : JSON.parse(raw.toString());
@@ -63,11 +74,33 @@ class RealtimeService {
         const lifetime = (Number(user.exp) * 1000) - Date.now();
         if (!Number.isFinite(lifetime) || lifetime <= 0) throw new Error('Unauthorized');
         ws.expiry = setTimeout(() => ws.close(4001,'Authentication expired'),Math.min(lifetime,2147483647));
+        const permissions = await this.getPermissions(user);
+        ws.canHoldSchedule = permissions.some(permission => ['SCHEDULE_ASSIGN','SCHEDULE_CHANGE'].includes(permission));
         ws.send(JSON.stringify({ type:'ready' }));
-        // Clients can authenticate but cannot publish changes or execute writes.
-        ws.on('message', () => ws.close(1008,'Unexpected message'));
+        this.broadcastSelectionHolds();
+        ws.on('message', raw => {
+          try {
+            const message = JSON.parse(raw.toString());
+            if (message.type !== 'schedule-hold' || !ws.canHoldSchedule) throw new Error('Unexpected message');
+            const second = Math.floor(Date.now() / 1000);
+            ws.holdMessageCount = ws.holdMessageSecond === second ? (ws.holdMessageCount || 0) + 1 : 1;
+            ws.holdMessageSecond = second;
+            if (ws.holdMessageCount > 30) throw new Error('Too many selection messages');
+            const accepted = this.selectionHolds.replace(ws, message.slots);
+            ws.send(JSON.stringify({ type:'schedule-hold-result', accepted }));
+            this.broadcastSelectionHolds();
+          } catch (_) { ws.close(1008,'Invalid selection message'); }
+        });
       } catch (_) { ws.close(4001,'Unauthorized'); }
     });
+  }
+
+  broadcastSelectionHolds() {
+    for (const ws of this.wss?.clients || []) {
+      if (ws.user && ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 65536) {
+        ws.send(JSON.stringify({ type:'schedule-holds', holds:this.selectionHolds.snapshot(ws) }));
+      }
+    }
   }
 
   async connectDatabase() {
@@ -111,8 +144,14 @@ class RealtimeService {
       this.flushTimer = null;
       if (topics.includes('authorization')) {
         await Promise.all([...this.wss.clients].filter(ws => ws.user).map(async ws => {
-          try { ws.user = await this.verify(ws.token); } catch (_) { ws.close(4001,'Session revoked'); }
+          try {
+            ws.user = await this.verify(ws.token);
+            const permissions = await this.getPermissions(ws.user);
+            ws.canHoldSchedule = permissions.some(permission => ['SCHEDULE_ASSIGN','SCHEDULE_CHANGE'].includes(permission));
+            if (!ws.canHoldSchedule) this.selectionHolds.owners.delete(ws);
+          } catch (_) { ws.close(4001,'Session revoked'); }
         }));
+        this.broadcastSelectionHolds();
       }
       const payload = JSON.stringify({ type:'changed', topics });
       for (const ws of this.wss.clients) {

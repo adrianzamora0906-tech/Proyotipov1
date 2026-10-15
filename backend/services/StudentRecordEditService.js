@@ -49,21 +49,28 @@ class StudentRecordEditService {
           WHERE sp.student_id=e.student_id AND saved->>'id'=e.id::text AND saved->>'status'='activo')))
       ORDER BY e.id
       ${lock ? 'FOR UPDATE OF e' : ''}`, [id, student.status==='inhabilitado'])).rows;
-    const assignments = (await client.query(`SELECT a.*,cc.code,cc.modality FROM course_cycle_schedule_assignments a
+    const readAssignments = () => client.query(`SELECT a.*,cc.code,cc.modality FROM course_cycle_schedule_assignments a
       JOIN course_cycles cc ON cc.id=a.cycle_id WHERE a.student_id=$1 AND a.status='activo'
-      ORDER BY a.schedule_date,a.start_time,a.id ${lock ? 'FOR UPDATE OF a' : ''}`, [id])).rows;
-    const appointments = (await client.query(`SELECT ps.* FROM practical_sessions ps JOIN enrollments e ON e.id=ps.enrollment_id
+      ORDER BY a.schedule_date,a.start_time,a.id ${lock ? 'FOR UPDATE OF a' : ''}`, [id]);
+    const readAppointments = () => client.query(`SELECT ps.* FROM practical_sessions ps JOIN enrollments e ON e.id=ps.enrollment_id
       WHERE e.student_id=$1 AND ps.deleted_at IS NULL AND ps.status NOT IN ('CANCELADA','REPROGRAMADA')
-      ORDER BY ps.scheduled_start,ps.id ${lock ? 'FOR UPDATE OF ps' : ''}`, [id])).rows;
-    const payments = (await client.query(`SELECT p.* FROM payments p JOIN enrollments e ON e.id=p.enrollment_id
-      WHERE e.student_id=$1 AND e.id=ANY($2::uuid[]) AND p.status<>'anulado' ORDER BY p.id ${lock ? 'FOR UPDATE OF p' : ''}`, [id,enrollments.map(e=>e.id)])).rows;
-    const documents = (await client.query(`SELECT d.id,t.code type,t.name,d.file_path,d.observations,d.uploaded_at
+      ORDER BY ps.scheduled_start,ps.id ${lock ? 'FOR UPDATE OF ps' : ''}`, [id]);
+    const readPayments = () => client.query(`SELECT p.* FROM payments p JOIN enrollments e ON e.id=p.enrollment_id
+      WHERE e.student_id=$1 AND e.id=ANY($2::uuid[]) AND p.status<>'anulado' ORDER BY p.id ${lock ? 'FOR UPDATE OF p' : ''}`, [id,enrollments.map(e=>e.id)]);
+    const readDocuments = () => client.query(`SELECT d.id,t.code type,t.name,d.file_path,d.observations,d.uploaded_at
       FROM student_documents d JOIN document_types t ON t.id=d.document_type_id
-      WHERE d.student_id=$1 ORDER BY t.code ${lock ? 'FOR UPDATE OF d' : ''}`, [id])).rows;
-    const account = (await client.query(`SELECT id,username,email,first_name,last_name,branch_id,must_change_password
-      FROM users WHERE student_id=$1 ${lock ? 'FOR UPDATE' : ''}`, [id])).rows[0] || null;
-    const transfers = (await client.query(`SELECT id,amount,status FROM transfer_payment_verifications
-      WHERE student_id=$1 AND service_transaction_id IS NULL AND status IN ('PENDING','AWAITING_APPROVAL') ORDER BY id`,[id])).rows;
+      WHERE d.student_id=$1 ORDER BY t.code ${lock ? 'FOR UPDATE OF d' : ''}`, [id]);
+    const readAccount = () => client.query(`SELECT id,username,email,first_name,last_name,branch_id,must_change_password
+      FROM users WHERE student_id=$1 ${lock ? 'FOR UPDATE' : ''}`, [id]);
+    const readTransfers = () => client.query(`SELECT id,amount,status FROM transfer_payment_verifications
+      WHERE student_id=$1 AND service_transaction_id IS NULL AND status IN ('PENDING','AWAITING_APPROVAL') ORDER BY id`,[id]);
+    const reads = [readAssignments,readAppointments,readPayments,readDocuments,readAccount,readTransfers];
+    const results = [];
+    // El guardado conserva el orden de candados; solo la lectura inicial usa el pool en paralelo.
+    if (lock) { for (const read of reads) results.push(await read()); }
+    else results.push(...await Promise.all(reads.map(read => read())));
+    const [assignments,appointments,payments,documents,accounts,transfers] = results.map(result => result.rows);
+    const account = accounts[0] || null;
     const value = { student, enrollments, assignments, appointments, payments, documents, account, transfers };
     value.revision = hash(value);
     return value;

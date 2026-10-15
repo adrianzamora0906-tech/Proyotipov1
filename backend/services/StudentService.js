@@ -295,6 +295,9 @@ class StudentService {
     let sql = `
       SELECT s.*, b.name as branch_name, pickup.name as pickup_branch_name, c.name as city_name, c.province as city_province,
         TRIM(CONCAT(creator.first_name, ' ', creator.last_name)) AS created_by_name,
+        creator_branch.id AS registered_by_branch_id,
+        creator_branch.name AS registered_by_branch_name,
+        creator_city.name AS registered_by_city_name,
         TRIM(CONCAT(referrer.first_name, ' ', referrer.last_name)) AS referred_by_name,
         referrer_branch.name AS referred_by_branch_name,
         instructor.instructor_id, instructor.instructor_name,
@@ -311,6 +314,18 @@ class StudentService {
       LEFT JOIN branches pickup ON pickup.id = s.pickup_branch_id
       LEFT JOIN cities c ON s.city_id = c.id
       LEFT JOIN users creator ON creator.id = s.created_by
+      LEFT JOIN LATERAL (
+        SELECT coverage.target_branch_id
+        FROM branch_staff_coverages coverage
+        WHERE coverage.user_id=creator.id AND coverage.status='active'
+          AND (NOW() AT TIME ZONE 'America/Guayaquil')::date
+            BETWEEN coverage.start_date AND COALESCE(coverage.end_date,DATE '9999-12-31')
+          AND (NOW() AT TIME ZONE 'America/Guayaquil')::time>=coverage.start_time
+          AND (NOW() AT TIME ZONE 'America/Guayaquil')::time<coverage.end_time
+        ORDER BY coverage.created_at DESC LIMIT 1
+      ) creator_coverage ON TRUE
+      LEFT JOIN branches creator_branch ON creator_branch.id = COALESCE(creator_coverage.target_branch_id,creator.branch_id)
+      LEFT JOIN cities creator_city ON creator_city.id = creator_branch.city_id
       LEFT JOIN users referrer ON referrer.id = s.referred_by_user_id
       LEFT JOIN branches referrer_branch ON referrer_branch.id = referrer.branch_id
       LEFT JOIN LATERAL (
@@ -531,7 +546,9 @@ class StudentService {
     const updatedBy = scope.updated_by || createdBy;
     const searchTerm = `%${query}%`;
     const result = await db.query(`
-      SELECT s.*, b.name as branch_name, pickup.name as pickup_branch_name
+      SELECT s.*, b.name as branch_name, pickup.name as pickup_branch_name,
+        COALESCE((SELECT json_agg(e.course_id) FROM enrollments e WHERE e.student_id=s.id
+          AND e.status IN ('activo','inhabilitado')),'[]'::json) AS active_course_ids
       FROM students s
       LEFT JOIN branches b ON s.branch_id = b.id
       LEFT JOIN branches pickup ON pickup.id = s.pickup_branch_id
@@ -556,7 +573,7 @@ class StudentService {
   /**
    * Crear nuevo estudiante
    */
-  static async create(data, userId, { allowDiscount = false, requestContext = {} } = {}) {
+  static async create(data, userId, { allowDiscount = false, requestContext = {}, actor = null, access: authorization = {} } = {}) {
     await db.query('SELECT expire_course_cycle_seat_reservations()');
     let seatReservation = null;
     const referralAttribution = await ReferralCampaignService.findPendingAttribution(data.identification);
@@ -595,7 +612,7 @@ class StudentService {
       [data.identification]
     );
     if (existing.rows.length > 0) {
-      throw createError(409, 'Ya existe un estudiante con esta identificación');
+      return require('./AdditionalEnrollmentService').create(existing.rows[0].id,{...data,requestContext},actor,authorization);
     }
 
     let branchId = data.branch_id || null;
@@ -779,9 +796,9 @@ class StudentService {
       `, [enrollmentId, courseId, discount]);
       if (registrationTransfer) {
         const transfer = (await db.query(`INSERT INTO transfer_payment_verifications
-          (branch_id,student_id,amount,bank,reference,transfer_date,created_by)
-          VALUES($1,$2,$3,'No especificado',$4,(NOW() AT TIME ZONE 'America/Guayaquil')::date,$5)
-          RETURNING id,status`, [branchId, student.id, registrationTransfer.amount, registrationTransfer.reference, userId])).rows[0];
+          (branch_id,student_id,amount,bank,reference,transfer_date,created_by,enrollment_id)
+          VALUES($1,$2,$3,'No especificado',$4,(NOW() AT TIME ZONE 'America/Guayaquil')::date,$5,$6)
+          RETURNING id,status`, [branchId, student.id, registrationTransfer.amount, registrationTransfer.reference, userId,enrollmentId])).rows[0];
         await AuditService.log({
           userId,
           branchId,
@@ -1006,7 +1023,7 @@ class StudentService {
    */
   static async getBranches() {
     const result = await db.query(`
-      SELECT b.id, b.name, b.province, b.city, COALESCE(b.city_id, c.id) city_id, b.phone, b.pickup_enabled
+      SELECT b.id, b.code, b.name, b.province, b.city, COALESCE(b.city_id, c.id) city_id, b.phone, b.pickup_enabled
       FROM branches b
       LEFT JOIN cities c ON LOWER(c.name) = LOWER(b.city) AND LOWER(c.province) = LOWER(b.province)
       WHERE b.active = true

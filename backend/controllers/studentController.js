@@ -207,6 +207,8 @@ class StudentController {
       const student = await StudentService.create(studentData, req.user.id, {
         allowDiscount: req.authorization?.permissions?.includes('PAYMENT_CREATE') || false,
         requestContext: req.requestContext,
+        actor: req.user,
+        access: req.authorization,
       });
       return res.status(201).json({ success: true, data: student });
     } catch (error) { next(error); }

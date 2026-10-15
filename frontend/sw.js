@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v42-password-hands';
+const CACHE_NAME = 'sportmancar-offline-v56-progressive-student-loading';
 const APP_SHELL = [
   '/',
   '/index.html',

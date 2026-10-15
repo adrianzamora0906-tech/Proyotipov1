@@ -22,7 +22,7 @@ export function practicalClassRange(item){
 export default class StudentPortalView extends Component{
   ensureStyles(){
     const styles=[
-      ['student-portal-styles','/src/assets/css/pages/student-portal.css?v=proxima-clase-moodle-20260820'],
+      ['student-portal-styles','/src/assets/css/pages/student-portal.css?v=matriculas-20261015'],
       ['student-portal-brand-styles','/src/assets/css/pages/student-portal-brand.css?v=azul-institucional-20260819'],
     ];
     styles.forEach(([id,href])=>{
@@ -42,12 +42,14 @@ export default class StudentPortalView extends Component{
   async refreshRealtime(){
     const root=document.querySelector('.student-portal');
     if(!root)return;
-    const response=await StudentPortalService.summary();
-    if(!root.isConnected)return;
+    const request=(this.portalRefreshRequest || 0)+1;
+    this.portalRefreshRequest=request;
+    const response=await StudentPortalService.summary(this.selectedEnrollmentId || null);
+    if(!root.isConnected || request!==this.portalRefreshRequest)return;
     this.data=response.data;
     const template=document.createElement('template');
     template.innerHTML=this.renderPortal();
-    for(const selector of ['.student-metrics','.student-next-class','.student-class-list','.student-document-list','[data-student-panel="summary"] .student-portal__grid']){
+    for(const selector of ['.student-course-selector','.student-welcome p','.student-metrics','.student-next-class','.student-class-list','.student-document-list','[data-student-panel="summary"] .student-portal__grid']){
       const current=root.querySelector(selector),updated=template.content.querySelector(selector);
       if(current&&updated)current.replaceChildren(...updated.childNodes);
     }
@@ -78,6 +80,7 @@ export default class StudentPortalView extends Component{
       <header class="student-portal__header"><img src="/src/assets/branding/sportmancar-logo.png" alt="Sportmancar"><div><small>Portal del estudiante</small><strong>${esc(student.name)}</strong></div><button id="student-logout" aria-label="Cerrar sesión">Salir</button></header>
       <nav class="student-portal__nav"><button class="active" data-student-tab="summary">Inicio</button><button data-student-tab="classes">Mis clases</button><button data-student-tab="documents">Documentos</button><button data-student-tab="account">Mi cuenta</button></nav>
       <main class="student-portal__main">
+        <div class="student-course-selector">${(this.data.enrollments || []).length>1 ? `<label for="student-enrollment-select">Curso</label><select class="form-select" id="student-enrollment-select" style="width:100%;max-width:100%;margin-bottom:16px">${this.data.enrollments.map(item=>`<option value="${esc(item.id)}" ${item.id===enrollment?.id?'selected':''}>${esc(item.course_name)} · ${date(item.created_at)}</option>`).join('')}</select>` : ''}</div>
         <section data-student-panel="summary">
           <div class="student-welcome"><div><span>${esc(student.branch)}</span><h1>Hola, ${esc(student.name.split(' ')[0])}</h1><p>${enrollment?`Estás cursando ${esc(enrollment.course_name)}.`:'Aún no tienes una matrícula activa.'}</p></div><button class="student-scan" data-open-scanner>▣ Registrar asistencia</button></div>
           <article class="student-next-class">
@@ -96,6 +99,14 @@ export default class StudentPortalView extends Component{
     </div>`;
   }
   async mount(){
+    document.querySelector('.student-portal')?.addEventListener('change',async event=>{
+      if(event.target.id!=='student-enrollment-select')return;
+      const select=event.target,previous=this.selectedEnrollmentId;
+      this.selectedEnrollmentId=select.value;select.disabled=true;
+      try {await this.refreshRealtime();}
+      catch(error){this.selectedEnrollmentId=previous;select.value=this.data.enrollment?.id || '';window.alert(error.message);}
+      finally{select.disabled=false;}
+    });
     document.querySelectorAll('[data-student-tab]').forEach(button=>button.onclick=()=>this.selectTab(button.dataset.studentTab));
     document.querySelectorAll('[data-open-scanner]').forEach(button=>button.onclick=()=>this.openScanner());
     document.getElementById('student-change-password')?.addEventListener('click',()=>this.openPassword());

@@ -46,7 +46,7 @@ function start() {
   started = true;
   window.addEventListener('erp:schedule-holds', event => {
     if (event.detail.type === 'schedule-holds') holds = event.detail.holds || [];
-    if (event.detail.type === 'schedule-hold-result' && !event.detail.accepted) {
+    if (event.detail.type === 'schedule-hold-result' && !event.detail.requestId && !event.detail.accepted) {
       desired = []; signature = '';
       realtimeClient.sendSelectionHold([]);
       document.querySelectorAll('.schedule-option.selected').forEach(cell => cell.classList.remove('selected'));
@@ -65,15 +65,51 @@ function start() {
   observer.observe(document.body, { childList:true, subtree:true, attributes:true, attributeFilter:['aria-hidden'] });
   setInterval(() => {
     paint();
-    if (desired.length && isOpen()) realtimeClient.sendSelectionHold(desired);
+    if (!checking && desired.length && isOpen()) realtimeClient.sendSelectionHold(desired);
   }, 25000);
 }
-export function holdScheduleSelection(plan, instructorId) {
-  start();
-  const slots = instructorId ? plan.map(slot => {
+function selectionSlots(plan, instructorId) {
+  return instructorId ? plan.map(slot => {
     const times = String(slot.time || '').match(/(\d{2}:\d{2})\s*[-–]\s*(\d{2}:\d{2})/);
     return times ? { instructorId, cycleId:slot.cycleId, date:slot.date, start:times[1], end:times[2] } : null;
   }).filter(slot => slot?.cycleId) : [];
+}
+let checking = false, requestNumber = 0;
+export async function confirmScheduleSelection(plan, instructorId) {
+  if (checking) throw new Error('Ya se esta comprobando un cupo.');
+  const slots = selectionSlots(plan, instructorId);
+  if (plan.length && slots.length !== plan.length) throw new Error('Selecciona un instructor para comprobar el cupo.');
+  checking = true;
+  const requestId = `selection-${Date.now()}-${++requestNumber}`;
+  try {
+    await new Promise((resolve, reject) => {
+      const cleanup = () => { clearTimeout(timeout); window.removeEventListener('erp:schedule-holds', listener); };
+      const listener = event => {
+        if (event.detail.type !== 'schedule-hold-result' || event.detail.requestId !== requestId) return;
+        cleanup();
+        if (event.detail.accepted) resolve();
+        else reject(new Error('Otro usuario esta seleccionando ese cupo. Elige otro horario.'));
+      };
+      const timeout = setTimeout(() => {
+        cleanup(); reject(new Error('No se pudo confirmar el cupo en un segundo. Intenta nuevamente.'));
+      }, 1000);
+      window.addEventListener('erp:schedule-holds', listener);
+      if (!realtimeClient.sendSelectionHold(slots, requestId)) {
+        cleanup(); reject(new Error('Sin conexion en tiempo real. Espera la reconexion y vuelve a intentar.'));
+      }
+    });
+    if (!isOpen()) throw new Error('El formulario se cerro antes de confirmar.');
+    desired = slots; signature = JSON.stringify(slots);
+  } catch (error) {
+    // Restaura la retencion anterior incluso si el servidor responde despues del timeout.
+    realtimeClient.sendSelectionHold(isOpen() ? desired : []);
+    throw error;
+  } finally { checking = false; }
+}
+export function holdScheduleSelection(plan, instructorId) {
+  start();
+  if (checking) return;
+  const slots = selectionSlots(plan, instructorId);
   const next = JSON.stringify(slots);
   desired = slots;
   if (next !== signature) {

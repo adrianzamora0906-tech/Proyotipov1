@@ -26,8 +26,9 @@ test('15 dispositivos por WebSocket compiten sin consultar base de datos', async
     }
     const slots=[{ instructorId:'3502fb7e-eb33-4338-9375-bc5701009367',cycleId:'646b0818-29bb-496c-a7f9-06fd85b6c9ee',date:'2026-10-19',start:'08:00',end:'09:40' }];
     const results = await Promise.all(clients.map(ws => new Promise(resolve => {
-      const listener = raw => { const message=JSON.parse(raw);if(message.type==='schedule-hold-result'){ws.off('message',listener);resolve(message.accepted);} };
-      ws.on('message',listener);ws.send(JSON.stringify({type:'schedule-hold',slots}));
+      const requestId=`test-${clients.indexOf(ws)}`;
+      const listener = raw => { const message=JSON.parse(raw);if(message.type==='schedule-hold-result'){assert.equal(message.requestId,requestId);ws.off('message',listener);resolve(message.accepted);} };
+      ws.on('message',listener);ws.send(JSON.stringify({type:'schedule-hold',slots,requestId}));
     })));
     assert.equal(results.filter(Boolean).length,1);
     const winner=results.findIndex(Boolean);

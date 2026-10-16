@@ -76,9 +76,9 @@ class RealtimeClient {
     socket?.close();
   }
 
-  sendSelectionHold(slots) {
+  sendSelectionHold(slots, requestId) {
     if (!this.connected || this.socket?.readyState !== WebSocket.OPEN) return false;
-    this.socket.send(JSON.stringify({ type:'schedule-hold', slots }));
+    this.socket.send(JSON.stringify({ type:'schedule-hold', slots, requestId }));
     return true;
   }
 }

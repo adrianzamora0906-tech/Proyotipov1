@@ -5,7 +5,7 @@
 
 import Component from '../../components/Component.js';
 import { subscribeRealtime } from '../../core/realtime/RealtimeClient.js';
-import { holdScheduleSelection } from '../../core/realtime/ScheduleSelectionHolds.js';
+import { holdScheduleSelection, confirmScheduleSelection } from '../../core/realtime/ScheduleSelectionHolds.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
 import StudentService from '../../services/StudentService.js?v=registro-sin-fallback-20260820';
 import ScheduleService from '../../services/ScheduleService.js';
@@ -3759,6 +3759,7 @@ class StudentsView extends Component {
   }
 
   goToNextModalStep() {
+    if (this.scheduleSelectionChecking) return;
     if (document.getElementById('student-modal-form')?.dataset.initializing === 'true') return;
     const currentStep = this.getCurrentModalStep();
     if (currentStep === 1 && !this.validateScheduleFirstStep()) return;
@@ -3871,6 +3872,7 @@ class StudentsView extends Component {
   }
 
   goToModalStep(step) {
+    if (this.scheduleSelectionChecking) return;
     const lastStep = this.getStudentModalLastStep();
     const targetStep = Math.max(1, Math.min(lastStep, step || 1));
     document.querySelectorAll('.student-modal-step').forEach(section => {
@@ -4271,8 +4273,10 @@ class StudentsView extends Component {
   }
 
   async handleScheduleCellClick(option) {
+    if (this.scheduleSelectionChecking || option?.dataset.selectionHeld) return;
+    const previousSelection = [...(option?.closest('.enrollment-calendar')?.querySelectorAll('.schedule-option.selected') || [])];
     const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';
-    if (!option || (!examOnly && option.classList.contains('disabled'))) return;
+    if (!option || (!examOnly && (option.disabled || option.classList.contains('disabled')))) return;
     const calendar = option.closest('.enrollment-calendar');
     const rotationEnabled = this.isRotationEnabled(calendar);
     const error = document.getElementById('schedule-error');
@@ -4281,7 +4285,7 @@ class StudentsView extends Component {
     if (examOnly) {
       document.querySelectorAll('.schedule-option.selected').forEach(cell => cell.classList.remove('selected'));
       option.classList.add('selected');
-      this.storeSchedulePlan(calendar);
+      await this.confirmCalendarSelection(calendar, previousSelection, option);
       return;
     }
 
@@ -4290,7 +4294,7 @@ class StudentsView extends Component {
         cell.classList.toggle('selected', cell.dataset.time === option.dataset.time
           && cell.dataset.date >= option.dataset.date);
       });
-      this.storeSchedulePlan(calendar);
+      if (!await this.confirmCalendarSelection(calendar, previousSelection, option)) return;
       await this.extendFixedScheduleCalendar(calendar);
       return;
     }
@@ -4298,7 +4302,7 @@ class StudentsView extends Component {
     const selectedForDay = [...calendar.querySelectorAll(`.schedule-option.selected[data-date="${option.dataset.date}"]`)];
     if (option.classList.contains('selected')) {
       option.classList.remove('selected');
-      this.storeSchedulePlan(calendar);
+      await this.confirmCalendarSelection(calendar, previousSelection, option);
       return;
     }
     if (selectedForDay.length >= 2) {
@@ -4323,7 +4327,47 @@ class StudentsView extends Component {
       if (error) error.textContent = 'En horario rotativo solo puedes escoger maximo dos horas distintas.';
       return;
     }
-    this.storeSchedulePlan(calendar);
+    await this.confirmCalendarSelection(calendar, previousSelection, option);
+  }
+
+  async confirmCalendarSelection(calendar, previousSelection, option) {
+    const proposed = [...calendar.querySelectorAll('.schedule-option.selected')];
+    const plan = this.storeSchedulePlan(calendar, true);
+    calendar.querySelectorAll('.schedule-option').forEach(cell => cell.classList.toggle('selected', previousSelection.includes(cell)));
+    const instructorId = this.getCalendarInstructorButton(calendar)?.dataset.courseInstructorId
+      || this.scheduleInstructorFilterId || document.getElementById('preferred-instructor-select')?.value;
+    const label = option.querySelector('.schedule-option-status');
+    const oldLabel = label?.textContent;
+    const next = document.getElementById('student-modal-next');
+    const nextDisabled = next?.disabled;
+    const wasInert = calendar.inert;
+    this.scheduleSelectionChecking = true;
+    calendar.setAttribute('aria-busy','true');
+    calendar.inert = true;
+    if (label) label.textContent = 'Comprobando cupo...';
+    if (next) next.disabled = true;
+    try {
+      await confirmScheduleSelection(plan, instructorId);
+      const currentInstructorId = this.getCalendarInstructorButton(calendar)?.dataset.courseInstructorId
+        || this.scheduleInstructorFilterId || document.getElementById('preferred-instructor-select')?.value;
+      if (!calendar.isConnected || currentInstructorId !== instructorId) {
+        holdScheduleSelection([], null);
+        return false;
+      }
+      calendar.querySelectorAll('.schedule-option').forEach(cell => cell.classList.toggle('selected', proposed.includes(cell)));
+      this.storeSchedulePlan(calendar);
+      return true;
+    } catch (error) {
+      const message = document.getElementById('schedule-error');
+      if (message) message.textContent = error.message;
+      return false;
+    } finally {
+      this.scheduleSelectionChecking = false;
+      calendar.removeAttribute('aria-busy');
+      calendar.inert = wasInert;
+      if (label) label.textContent = oldLabel;
+      if (next) next.disabled = nextDisabled;
+    }
   }
 
   async extendFixedScheduleCalendar(calendar) {
@@ -4406,7 +4450,7 @@ class StudentsView extends Component {
     });
   }
 
-  storeSchedulePlan(calendar) {
+  storeSchedulePlan(calendar, previewOnly = false) {
     const selected = calendar
       ? [...calendar.querySelectorAll('.schedule-option.selected')]
       : [];
@@ -4449,6 +4493,7 @@ class StudentsView extends Component {
         practicalStartDate: dates[0],
       }));
     }
+    if (previewOnly) return plan;
     const scheduleIdInput = document.getElementById('selected-schedule-id');
     const schedulePlanInput = document.getElementById('selected-schedule-plan');
     if (scheduleIdInput) scheduleIdInput.value = plan[0]?.id || '';
@@ -4753,6 +4798,7 @@ class StudentsView extends Component {
   }
 
   async handleStudentSubmit(event) {
+    if (this.scheduleSelectionChecking) { event.preventDefault(); return; }
     if (document.getElementById('student-modal-form')?.dataset.initializing === 'true') {
       event.preventDefault();
       return;

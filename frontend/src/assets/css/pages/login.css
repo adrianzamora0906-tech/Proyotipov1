@@ -4,7 +4,7 @@
 .login-password-field .form-input { width: 100%; box-sizing: border-box; padding-right: 60px; }
 .login-password-field .form-input::-ms-reveal,
 .login-password-field .form-input::-ms-clear { display: none; }
-.login-form .login-password-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 48px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; border: 0; background: transparent; color: #526077; cursor: pointer; border-radius: 4px; }
+.login-password-field .login-password-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 48px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; border: 0; background: transparent; color: #526077; cursor: pointer; border-radius: 4px; }
 .password-face { position: relative; display: block; width: 28px; height: 28px; border: 1.5px solid #d99a15; border-radius: 50%; background: #ffd75a; box-shadow: 0 0 0 2px #fff, 0 2px 4px #24304726; }
 .password-face-eyes { position: absolute; top: 8px; left: 6px; right: 6px; display: flex; justify-content: space-between; }
 .password-face-eyes span { width: 3px; height: 4px; border-radius: 50%; background: #453423; }

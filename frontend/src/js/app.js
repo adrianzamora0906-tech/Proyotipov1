@@ -15,14 +15,14 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=manos-restauradas-20261014";
 import DashboardView from "./views/dashboard/DashboardView.js?v=actualizacion-parcial-20261014";
-import StudentsView from "./views/students/StudentsView.js?v=carga-progresiva-20261015";
+import StudentsView from "./views/students/StudentsView.js?v=seleccion-confirmada-20261016";
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=historial-bajo-demanda-20261015";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=estudiantes-orden-hora-20261015";
 import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";
 import NotificationsView from "./views/notifications/NotificationsView.js";
 import HistoryView from "./views/history/HistoryView.js";
-import ProfileView from "./views/profile/ProfileView.js";
+import ProfileView from "./views/profile/ProfileView.js?v=carita-clave-20261016";
 // Cash module views
 import CashDashboardView from "./views/cash/CashDashboardView.js?v=actualizacion-parcial-20261014";
 import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";

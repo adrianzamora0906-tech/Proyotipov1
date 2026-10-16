@@ -2,6 +2,8 @@
 
 ## 1. Propósito del sistema
 
+Actualizacion 16/10/2026: la seleccion manual de horarios espera confirmacion de la retencion en memoria por WebSocket antes de marcar las celdas o actualizar el plan. Muestra "Comprobando cupo..." y bloquea avance/doble clic durante la solicitud. Cada respuesta se vincula a un requestId. Si no confirma en 1 segundo o falta conexion, no selecciona y permite reintentar; una respuesta tardia no cambia la pantalla y se restaura la retencion anterior. No agrega consultas de base de datos. Requiere reinicio manual del backend y recarga/publicacion del frontend. Pruebas: scripts/test-confirmed-schedule-selection.cjs y backend/tests/schedule-selection-websocket.test.cjs.
+
 SportmancarERP es un sistema de gestión para una escuela de conducción con varias sucursales. Su objetivo principal es centralizar la operación diaria, la administración, el control académico, el seguimiento financiero, la generación de reportes y la documentación oficial enviada a entidades externas como la ATM.
 
 El sistema está pensado para que cada usuario vea únicamente lo que necesita según su responsabilidad. No todos administran, no todos cobran y no todos consultan información global.

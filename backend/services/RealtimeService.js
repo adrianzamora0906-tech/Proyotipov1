@@ -82,12 +82,13 @@ class RealtimeService {
           try {
             const message = JSON.parse(raw.toString());
             if (message.type !== 'schedule-hold' || !ws.canHoldSchedule) throw new Error('Unexpected message');
+            if (message.requestId !== undefined && (typeof message.requestId !== 'string' || message.requestId.length > 80)) throw new Error('Invalid request');
             const second = Math.floor(Date.now() / 1000);
             ws.holdMessageCount = ws.holdMessageSecond === second ? (ws.holdMessageCount || 0) + 1 : 1;
             ws.holdMessageSecond = second;
             if (ws.holdMessageCount > 30) throw new Error('Too many selection messages');
             const accepted = this.selectionHolds.replace(ws, message.slots);
-            ws.send(JSON.stringify({ type:'schedule-hold-result', accepted }));
+            ws.send(JSON.stringify({ type:'schedule-hold-result', accepted, requestId:message.requestId }));
             this.broadcastSelectionHolds();
           } catch (_) { ws.close(1008,'Invalid selection message'); }
         });

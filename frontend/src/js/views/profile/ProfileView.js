@@ -79,18 +79,40 @@ class ProfileView extends Component {
   openPasswordModal(forced = false) {
     const layer = document.getElementById('password-change-layer');
     if (!layer) return;
+    const passwordFields = [
+      ['currentPassword', 'Contrase\u00f1a actual', 'current-password'],
+      ['newPassword', 'Nueva contrase\u00f1a', 'new-password'],
+      ['confirmPassword', 'Confirmar nueva contrase\u00f1a', 'new-password'],
+    ].map(([name, label, autocomplete]) => `<div class="form-group">
+      <label class="form-label" for="profile-${name}">${label}</label>
+      <div class="login-password-field">
+        <input class="form-input" id="profile-${name}" type="password" name="${name}" autocomplete="${autocomplete}" ${name === 'currentPassword' ? '' : 'minlength="8"'} required>
+        <button type="button" class="login-password-toggle" data-password-toggle aria-label="Mostrar ${label.toLowerCase()}" title="Mostrar ${label.toLowerCase()}" aria-controls="profile-${name}" aria-pressed="false" data-password-label="${label.toLowerCase()}">
+          <span class="password-face" aria-hidden="true"><span class="password-face-eyes"><span></span><span></span></span><span class="password-face-smile"></span><span class="password-hand password-hand-left"><i data-lucide="hand"></i></span><span class="password-hand password-hand-right"><i data-lucide="hand"></i></span></span>
+        </button>
+      </div>
+    </div>`).join('');
     layer.innerHTML = `<div class="branch-modal-backdrop"><section class="branch-modal" role="dialog" aria-modal="true" aria-labelledby="password-change-title">
       <h2 id="password-change-title">${forced ? 'Actualiza tu contraseña' : 'Cambiar contraseña'}</h2>
       <p>${forced ? 'Por seguridad debes definir una nueva contraseña antes de continuar usando el sistema.' : 'Confirma tu contraseña actual y escribe una nueva.'}</p>
       <form id="profile-password-form" class="form" style="display:grid;gap:.8rem;">
-        <label class="form-group"><span class="form-label">Contraseña actual</span><input class="form-input" type="password" name="currentPassword" autocomplete="current-password" required></label>
-        <label class="form-group"><span class="form-label">Nueva contraseña</span><input class="form-input" type="password" name="newPassword" autocomplete="new-password" minlength="8" required></label>
-        <label class="form-group"><span class="form-label">Confirmar nueva contraseña</span><input class="form-input" type="password" name="confirmPassword" autocomplete="new-password" minlength="8" required></label>
+        ${passwordFields}
         <div id="profile-password-status" class="form-error" aria-live="polite"></div>
         <div class="branch-modal-actions">${forced ? '' : '<button type="button" class="btn btn-secondary" id="cancel-password-change">Cancelar</button>'}<button type="submit" class="btn btn-primary">Actualizar contraseña</button></div>
       </form>
     </section></div>`;
     document.body.style.overflow = 'hidden';
+    window.lucide?.createIcons();
+    layer.querySelectorAll('[data-password-toggle]').forEach(button => button.addEventListener('click', () => {
+      const input = document.getElementById(button.getAttribute('aria-controls'));
+      const visible = input.type === 'password';
+      input.type = visible ? 'text' : 'password';
+      const label = `${visible ? 'Ocultar' : 'Mostrar'} ${button.dataset.passwordLabel}`;
+      button.setAttribute('aria-label', label);
+      button.title = label;
+      button.setAttribute('aria-pressed', String(visible));
+      button.classList.toggle('is-password-visible', visible);
+    }));
     layer.querySelector('#cancel-password-change')?.addEventListener('click', () => { layer.innerHTML='';document.body.style.overflow=''; });
     layer.querySelector('#profile-password-form')?.addEventListener('submit', async event => {
       event.preventDefault();

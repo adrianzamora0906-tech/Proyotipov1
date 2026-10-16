@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v56-progressive-student-loading';
+const CACHE_NAME = 'sportmancar-offline-v58-profile-password-sticker';
 const APP_SHELL = [
   '/',
   '/index.html',

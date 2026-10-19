@@ -733,3 +733,93 @@
     grid-template-columns: 1fr;
   }
 }
+.profile-edit-choice-name {
+  margin: .35rem 0 0;
+  color: var(--gray-500);
+  font-size: .8rem;
+  overflow-wrap: anywhere;
+}
+
+.profile-current-practices { margin-bottom: 20px; }
+.profile-current-practices h3 { font-size: 1rem; margin-bottom: 12px; }
+.profile-pending-calendar { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.profile-pending-calendar article { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--gray-200); border-radius: 6px; }
+.profile-pending-calendar article strong { color: var(--primary); }
+.profile-pending-calendar article small { color: var(--gray-600); overflow-wrap: anywhere; }
+
+#profile-action-modal .profile-edit-choice-modal {
+  width: min(540px, calc(100vw - 24px));
+  max-width: min(540px, calc(100vw - 24px));
+  height: auto;
+  max-height: 90dvh;
+  border-radius: 8px;
+  overflow: auto;
+  align-self: center;
+}
+
+.profile-edit-choices {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-edit-choice {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 84px;
+  padding: 16px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--gray-900);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.profile-edit-choice:hover {
+  border-color: var(--primary);
+  background: #f8f9ff;
+}
+
+.profile-edit-choice:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.profile-edit-choice-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  background: #eeecff;
+  color: #5143c5;
+}
+
+.profile-edit-choice--schedule .profile-edit-choice-icon {
+  background: #e0f4ed;
+  color: #08745b;
+}
+
+.profile-edit-choice-label {
+  min-width: 0;
+  font-size: .9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.profile-edit-choice-label small {
+  display: block;
+  margin-top: 4px;
+  color: var(--gray-500);
+  font-size: .78rem;
+  font-weight: 400;
+}
+
+.profile-edit-choice > svg {
+  width: 20px;
+  color: var(--gray-500);
+}

@@ -15,8 +15,8 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=manos-restauradas-20261014";
 import DashboardView from "./views/dashboard/DashboardView.js?v=actualizacion-parcial-20261014";
-import StudentsView from "./views/students/StudentsView.js?v=seleccion-confirmada-20261016";
-import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=historial-bajo-demanda-20261015";
+import StudentsView from "./views/students/StudentsView.js?v=editar-clases-pendientes-20261019";
+import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=horario-actual-destino-20261019";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=estudiantes-orden-hora-20261015";
 import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";
@@ -28,8 +28,8 @@ import CashDashboardView from "./views/cash/CashDashboardView.js?v=actualizacion
 import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";
 import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=segunda-matricula-20261015";
 import CashHistoryView from "./views/cash/CashHistoryView.js";
-import CashOperationsView from "./views/cash/CashOperationsView.js";
-import InstructorDashboardView from "./views/instructor/InstructorDashboardView.js?v=actualizacion-parcial-20261014";
+import CashOperationsView from "./views/cash/CashOperationsView.js?v=constancia-transferencia-20261016";
+import InstructorDashboardView from "./views/instructor/InstructorDashboardView.js?v=horas-practicas-cursos-20261019";
 import InstructorAgendaView from "./views/instructor/InstructorAgendaView.js?v=actualizacion-parcial-20261014";
 import InstructorTheoryView from "./views/instructor/InstructorTheoryView.js?v=dashboard-profesor-teoria-20260907";
 import InstructorStudentsView from "./views/instructor/InstructorStudentsView.js?v=filtro-etapa-20260812";

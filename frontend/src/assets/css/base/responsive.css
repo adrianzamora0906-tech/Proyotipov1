@@ -67,6 +67,115 @@ iframe {
   min-width: 0;
 }
 
+/* Wrap by available space, including desktop layouts with a sidebar. */
+.page-header {
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.modal-header {
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.modal-header > :not(.modal-close) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.modal-close {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.modal-footer {
+  flex-wrap: wrap;
+}
+
+.schedule-page > .page-header > :first-child {
+  flex: 1 1 300px;
+}
+
+.schedule-header-actions {
+  flex: 1 1 580px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+
+.schedule-header-actions > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.schedule-header-actions .btn {
+  white-space: normal;
+}
+
+.instructor-card-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+}
+
+.instructor-card-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.instructor-card-avatar {
+  flex-shrink: 0;
+}
+
+#instructor-calendar-modal > .modal {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+  max-height: calc(100dvh - 2rem);
+}
+
+#instructor-calendar-modal > .modal > .modal-header,
+#instructor-calendar-modal > .modal > .modal-footer {
+  flex-shrink: 0;
+}
+
+#instructor-calendar-modal > .modal > .modal-body {
+  min-height: 0;
+  overflow: auto;
+}
+
+.calendar-header-controls,
+.calendar-cycle-navigation,
+.cycle-availability-navigation {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.instructor-calendar-modal .modal-header > :first-child {
+  flex: 1 1 280px;
+}
+
+.instructor-calendar-modal .modal-body > .flex {
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.calendar-summary-actions,
+.calendar-course-actions {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.cycle-availability-head {
+  flex-wrap: wrap;
+}
+
+.cycle-availability-head > * {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .page-header h1,
 .dashboard-header h1,
 .admin-branches__header h1,

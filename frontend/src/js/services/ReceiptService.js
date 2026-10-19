@@ -53,6 +53,7 @@ class ReceiptService {
         <div class="ticket-row"><span>Monto</span><span>${receipt.amount}</span></div>
         <div class="ticket-row"><span>Método</span><span>${receipt.method}</span></div>
         <div class="ticket-line"></div>
+        <div class="ticket-footer">Este documento no tiene validez tributaria.</div>
         <div class="ticket-footer">Gracias por su pago</div>
       </div>
     `;

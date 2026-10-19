@@ -1,0 +1,20 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('frontend/src/js/views/students/StudentsView.js','utf8');
+const title={textContent:''},content={appendChild(button){this.button=button;}},layer={querySelector(selector){return selector==='#student-result-title'?title:content;},remove(){this.removed=true;}};
+const events=[],calls=[];let scheduleResult={success:true,data:null};
+const sandbox={Component:class{},ApiService:{getStudentSchedule:async()=>{calls.push('check');if(scheduleResult instanceof Error)throw scheduleResult;return scheduleResult;}},document:{getElementById:id=>id==='student-registration-result-modal'?layer:null,createElement:()=>({addEventListener(event,callback){this.click=callback;}}),body:{style:{}}},window:{dispatchEvent:event=>events.push(event),history:{pushState(...args){calls.push(args[2]);}}},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}},PopStateEvent:class{}};
+vm.runInNewContext(source.replace(/^import .*;\r?\n/gm,'').replace('export default StudentsView;','globalThis.View=StudentsView;'),sandbox);
+(async()=>{
+const view=new sandbox.View();view.closeStudentModal=()=>calls.push('close');view.showModalAlert=(type,message)=>calls.push({type,message});
+await view.showRegisteredWithoutInstructor('student-id');assert.equal(calls[0],'close');assert.equal(calls[1],'check');assert.equal(calls[2].type,'warning');assert.equal(calls[2].message,'El estudiante se registr\u00f3, pero no se le asign\u00f3 un instructor.');assert.equal(title.textContent,'Estudiante registrado');content.button.click();assert(calls.includes('/student-profile/student-id'));
+calls.length=0;scheduleResult={success:true,data:{assignment_id:'saved'}};await view.showRegisteredWithoutInstructor('student-id');assert(calls[2].message.includes('horario guardado'));assert(!calls[2].message.includes('no se le asign'));
+calls.length=0;scheduleResult=new Error('Sin red');await view.showRegisteredWithoutInstructor('student-id');assert(calls[2].message.includes('no se pudo confirmar'));
+const a=source.indexOf('    const student = result.data;',source.indexOf('async handleStudentSubmit(event)'));const b=source.indexOf('    if (student.registration_transfer_id)',a);const block=source.slice(a,b);
+const run=vm.runInNewContext('(async function(result,submitBtn,registrationDocumentsUrl,hasRegistrationPdf,registrationDocumentsPdf,formData,selectedCatalogType,disabilityCertificate,schedulePlan,scheduleId){'+block+'})',sandbox);
+const args=[{success:true,data:{id:'saved'}},{},'pdf',true,null,{get:()=>false},'normal',null,{},'cycle:1'];let partial=0,closed=0,restored=0,errors=0;
+const controller={uploadRegistrationDocumentPackage:async()=>{},uploadModalDocument:async()=>{},selectStudentSchedule:async()=>{throw Error('Cupo ocupado');},showRegisteredWithoutInstructor:async id=>{assert.equal(id,'saved');partial++;},closeStudentModal:()=>closed++,restoreSubmitButton:()=>restored++,showModalAlert:()=>errors++};
+await run.apply(controller,args);assert.equal(partial,1);assert.equal(restored,0);assert.equal(errors,0);
+controller.uploadRegistrationDocumentPackage=async()=>{throw Error('Documento rechazado');};await run.apply(controller,args);assert.equal(partial,1);assert.equal(errors,1);assert.equal(restored,1);
+controller.uploadRegistrationDocumentPackage=async()=>{};args[0].data.scheduleReserved=true;await run.apply(controller,args);assert.equal(closed,1);assert.equal(partial,1);
+console.log('PASS: registro confirmado sin instructor cierra inscripcion, mensaje solicitado, respuesta perdida conciliada, expediente accesible y errores de documentos separados. Sin red ni escrituras.');
+})().catch(error=>{console.error(error);process.exitCode=1});

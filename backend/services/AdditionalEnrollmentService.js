@@ -77,7 +77,8 @@ class AdditionalEnrollmentService {
           CASE WHEN $2::numeric-$3::numeric<=0 THEN 'pagado' ELSE 'pendiente' END)`,[enrollment.id,course.price,discount]);
       const reservation=await Cycles.reserveSchedule({...actor,branch_id:actorBranch},{studentId,enrollmentId:enrollment.id,schedulePlan:data.schedulePlan},client);
       await this.validateCrossCourseTheory(client,studentId,enrollment.id);
-      if(data.registrationTransfer)await Cash.createTransfer({studentId,enrollmentId:enrollment.id,amount:data.registrationTransfer.amount,
+      let registrationTransfer = null;
+      if(data.registrationTransfer)registrationTransfer=await Cash.createTransfer({studentId,enrollmentId:enrollment.id,amount:data.registrationTransfer.amount,
         reference:data.registrationTransfer.reference,transferDate:new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Guayaquil'}).format(new Date())},actor,access,data.requestContext,client);
       await client.query('INSERT INTO history(student_id,action) VALUES($1,$2)',[studentId,`Matricula adicional: ${course.name}. Se conservan los otros cursos y la cuenta de acceso.`]);
       await Audit.log({userId:actor.id,role:actor.role,branchId:targetBranch,action:'STUDENT_ADDITIONAL_ENROLLMENT_CREATED',module:'ESTUDIANTES',
@@ -85,7 +86,7 @@ class AdditionalEnrollmentService {
         metadata:{studentId,courseId:data.course_id,existingIdentityPreserved:true},requestContext:data.requestContext},client);
       await client.query('SELECT refresh_student_operational_status($1)',[studentId]);
       await client.query('COMMIT');
-      return {...student,enrollment_id:enrollment.id,existingStudent:true,scheduleReserved:true,assignedInstructor:reservation.instructor};
+      return {...student,enrollment_id:enrollment.id,existingStudent:true,scheduleReserved:true,assignedInstructor:reservation.instructor,registration_transfer_id:registrationTransfer?.id || null};
     } catch(error) {await client.query('ROLLBACK');throw error;}
     finally {client.release();}
   }

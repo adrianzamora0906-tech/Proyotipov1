@@ -14,7 +14,7 @@ const {chromium}=require('C:/Users/USUARIO/AppData/Local/npm-cache/_npx/e41f203b
    document.body.innerHTML=`<div id="student-modal-overlay" aria-hidden="false"><div class="enrollment-calendar"><button class="active" data-course-instructor-id="${slot.instructorId}"></button><button class="schedule-option" data-schedule='${JSON.stringify({cycleId:slot.cycleId,date:slot.date,time:'08:00 - 09:40'})}'><span class="schedule-option-capacity">1 cupo disponible</span></button></div></div>`;
    const cell=document.querySelector('.schedule-option');
    const emit=holds=>window.dispatchEvent(new CustomEvent('erp:schedule-holds',{detail:{type:'schedule-holds',holds}}));
-   emit([{mine:false,slots:[slot]}]);const blocked=cell.disabled && cell.textContent.includes('otro usuario');
+   emit([{mine:false,slots:[slot]}]);const blocked=cell.getAttribute('aria-disabled')==='true' && cell.dataset.selectionHeld==='true' && cell.textContent.includes('otro usuario');
    emit([{mine:true,slots:[slot]}]);const own=!cell.disabled;
    emit([]);const released=!cell.disabled && cell.textContent==='1 cupo disponible';
    const {holdScheduleSelection}=await import('/src/js/core/realtime/ScheduleSelectionHolds.js');

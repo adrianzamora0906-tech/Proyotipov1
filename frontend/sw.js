@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v58-profile-password-sticker';
+const CACHE_NAME = 'sportmancar-offline-v76-pending-class-batch';
 const APP_SHELL = [
   '/',
   '/index.html',

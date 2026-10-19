@@ -14,16 +14,18 @@ async function getStudentScope(req, useDefaultBranch = true) {
     return req.query.branch_id ? { branch_id: req.query.branch_id } : {};
   }
   const branchId = effectiveBranchId(req);
+  if (!isUuid(branchId)) throw require('../middleware/errorHandler').createError(403, 'No se pudo verificar la sucursal de la sesión');
   if (req.user.role === 'instructor' && req.authorization?.permissions?.includes('STUDENT_CREATE')) {
     return { branch_id: branchId };
   }
   const location = await db.query('SELECT city_id FROM branches WHERE id = $1', [branchId]);
+  if (!location.rows.length) throw require('../middleware/errorHandler').createError(403, 'Sucursal de la sesión no disponible');
   const cityId = location.rows[0]?.city_id || null;
   if (req.query.scope === 'created') {
     return { created_only: true, created_by: req.user.id };
   }
   if (req.query.scope === 'all') {
-    return { city_id: cityId };
+    return cityId ? { city_id: cityId } : { branch_id: branchId };
   }
   if (req.query.branch_id) {
     const allowed = await db.query('SELECT id FROM branches WHERE id = $1 AND city_id = $2', [req.query.branch_id, cityId]);
@@ -31,6 +33,7 @@ async function getStudentScope(req, useDefaultBranch = true) {
   }
   if (useDefaultBranch) return { branch_id: branchId };
   return {
+    ...(!cityId ? { branch_id: branchId } : {}),
     city_id: cityId,
     created_by: req.user.id,
     updated_by: req.user.id,
@@ -38,6 +41,15 @@ async function getStudentScope(req, useDefaultBranch = true) {
 }
 
 class StudentController {
+  static writeScope(req) { return getStudentScope(req, false); }
+  static readScope(req) {
+    const permissions = req.authorization?.permissions || [];
+    const cashier = req.user.role === 'caja' || req.authorization?.roles?.includes('CASHIER');
+    if (cashier && permissions.includes('STUDENT_VIEW') && permissions.includes('PAYMENT_VIEW') && permissions.includes('PAYMENT_CREATE')) {
+      return Promise.resolve({});
+    }
+    return getStudentScope(req, false);
+  }
   static editAccess(req) {
     return {global:!!req.authorization?.global,branchId:effectiveBranchId(req),requestContext:req.requestContext};
   }
@@ -45,14 +57,20 @@ class StudentController {
   static async editContext(req,res,next) {
     try {
       if (!isUuid(req.params.id)) return res.status(400).json({success:false,error:'Estudiante invalido'});
-      res.json({success:true,data:await StudentRecordEditService.context(req.params.id,req.user,StudentController.editAccess(req))});
+      const started=performance.now();
+      const data=await StudentRecordEditService.context(req.params.id,req.user,StudentController.editAccess(req));
+      res.setHeader('Server-Timing',`edit_context;dur=${(performance.now()-started).toFixed(1)}`);
+      res.json({success:true,data});
     } catch(error) {next(error);}
   }
 
   static async editOptions(req,res,next) {
     try {
       if (!isUuid(req.params.id)) return res.status(400).json({success:false,error:'Estudiante invalido'});
-      res.json({success:true,data:await StudentRecordEditService.options(req.params.id,req.user,StudentController.editAccess(req),req.query)});
+      const started=performance.now();
+      const data=await StudentRecordEditService.options(req.params.id,req.user,StudentController.editAccess(req),req.query);
+      res.setHeader('Server-Timing',`edit_options;dur=${(performance.now()-started).toFixed(1)}`);
+      res.json({success:true,data});
     } catch(error) {next(error);}
   }
 
@@ -109,10 +127,22 @@ class StudentController {
       return res.json({ success: true, data });
     } catch (error) { next(error); }
   }
+  static async listSummary(req, res, next) {
+    try {
+      const { search, province, city, instructor_id, date_from, date_to, created_date, course_type } = req.query;
+      const common = { search, province, city, instructor_id, date_from, date_to, created_date, course_type, ...await getStudentScope(req) };
+      const [counts, reservations] = await Promise.all([
+        StudentService.getAll({ ...common, aggregate: true }),
+        StudentService.getActiveSeatReservations({ ...common, aggregate: true }),
+      ]);
+      res.json({ success: true, data: { counts, reservations } });
+    } catch (error) { next(error); }
+  }
   static async getAll(req, res, next) {
     try {
       const { status, search, province, city, instructor_id, date_from, date_to, created_date, registration_type, course_type } = req.query;
-      const students = await StudentService.getAll({ status, search, province, city, instructor_id, date_from, date_to, created_date, registration_type, course_type, ...await getStudentScope(req) });
+      const students = await StudentService.getAll({ status, search, province, city, instructor_id, date_from, date_to, created_date, registration_type, course_type, ...await getStudentScope(req),
+        ...(req.query.paginated === 'true' ? { paginated: true, page: /^\d{1,7}$/.test(req.query.page) ? Number(req.query.page) : 1, group: req.query.group, preferred_branch: effectiveBranchId(req) } : {}) });
       return res.json({ success: true, data: students });
     } catch (error) { next(error); }
   }
@@ -128,6 +158,7 @@ class StudentController {
         city: req.query.city,
         course_type: req.query.course_type,
         ...await getStudentScope(req),
+        ...(req.query.paginated === 'true' ? { paginated: true, page: /^\d{1,7}$/.test(req.query.page) ? Number(req.query.page) : 1 } : {}),
       });
       return res.json({ success: true, data: reservations });
     } catch (error) { next(error); }
@@ -159,7 +190,7 @@ class StudentController {
   static async getById(req, res, next) {
     try {
       if (!isUuid(req.params.id)) return res.status(400).json({ success: false, error: 'ID de estudiante invÃ¡lido' });
-      const student = await StudentService.getById(req.params.id, await getStudentScope(req, false));
+      const student = await StudentService.getById(req.params.id, await StudentController.readScope(req));
       return res.json({ success: true, data: student });
     } catch (error) { next(error); }
   }
@@ -217,6 +248,7 @@ class StudentController {
   static async update(req, res, next) {
     try {
       if (!isUuid(req.params.id)) return res.status(400).json({ success: false, error: 'ID de estudiante invÃ¡lido' });
+      await StudentService.assertReadAccess(req.params.id, await StudentController.writeScope(req));
       const student = await StudentService.update(req.params.id, req.body, req.user.id);
       return res.json({ success: true, data: student });
     } catch (error) { next(error); }
@@ -227,6 +259,7 @@ class StudentController {
       if (!isUuid(req.params.id)) return res.status(400).json({ success: false, error: 'ID de estudiante invÃ¡lido' });
       const { status } = req.body;
       if (!status) return res.status(422).json({ success: false, error: 'Estado requerido' });
+      await StudentService.assertReadAccess(req.params.id, await StudentController.writeScope(req));
       const student = await StudentService.updateStatus(req.params.id, status, req.user.id);
       return res.json({ success: true, data: student });
     } catch (error) { next(error); }
@@ -261,7 +294,8 @@ class StudentController {
   static async getHistory(req, res, next) {
     try {
       if (!isUuid(req.params.id)) return res.status(400).json({ success: false, error: 'ID de estudiante invÃ¡lido' });
-      const history = await StudentService.getHistory(req.params.id);
+      await StudentService.assertReadAccess(req.params.id,await StudentController.readScope(req));
+      const history = await StudentService.getHistory(req.params.id, req.query.paginated === 'true' ? req.query.page || '1' : null);
       return res.json({ success: true, data: history });
     } catch (error) { next(error); }
   }

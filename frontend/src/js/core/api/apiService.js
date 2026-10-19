@@ -355,8 +355,8 @@ class ApiService {
     return apiClient.post('/course-cycles/instructor-preview', data);
   }
 
-  static async getStudentScheduleChangeOptions(studentId) {
-    return apiClient.get(`/course-cycles/student/${studentId}/schedule-change-options`);
+  static async getStudentScheduleChangeOptions(studentId, instructorId = '') {
+    return apiClient.get(`/course-cycles/student/${studentId}/schedule-change-options${instructorId ? `?instructor_id=${encodeURIComponent(instructorId)}` : ''}`);
   }
 
   static async changeStudentScheduleDay(data) {

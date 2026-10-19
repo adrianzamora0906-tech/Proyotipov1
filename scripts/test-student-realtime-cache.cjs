@@ -1,0 +1,23 @@
+const fs=require('node:fs'),assert=require('node:assert/strict'),vm=require('node:vm'),crypto=require('node:crypto');
+const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+(async()=>{
+ global.window=new EventTarget();
+ const load=async p=>import('data:text/javascript;base64,'+Buffer.from(fs.readFileSync(p,'utf8')).toString('base64'));
+ const {subscribeStudentChanges,studentChangeKey,affectedStudentSections}=await load('frontend/src/js/core/realtime/StudentChanges.js');
+ const {readStudentCached,clearStudentReadCache}=await load('frontend/src/js/core/realtime/StudentReadCache.js');
+ const first=await studentChangeKey('student-one'),second=await studentChangeKey('student-two');
+ const seen=[];const stop=subscribeStudentChanges('student-one',topics=>seen.push(topics));
+ const notify=detail=>window.dispatchEvent(new CustomEvent('erp:realtime',{detail}));
+ notify({topics:['payments'],changes:[{topic:'payments',studentKey:second}]});await delay(300);assert.equal(seen.length,0);
+ notify({topics:['payments'],changes:[{topic:'payments',studentKey:first}]});notify({topics:['documents'],changes:[{topic:'documents',studentKey:first}]});await delay(300);assert.equal(seen.length,1);assert.deepEqual(seen[0].sort(),['documents','payments']);
+ assert.deepEqual(affectedStudentSections(['payments']),['balance','payments','receipts','history']);assert.equal(affectedStudentSections(['resync']),null);
+ notify({topics:['resync']});await delay(300);assert.equal(seen.length,2);stop();notify({topics:['students']});await delay(300);assert.equal(seen.length,2);
+ let calls=0;const read=scope=>readStudentCached(scope,'s','balance',async()=>++calls);
+ assert.deepEqual(await Promise.all([read('session1'),read('session1')]),[1,1]);assert.equal(await read('session2'),2);clearStudentReadCache('s',['documents']);assert.equal(await read('session1'),1);clearStudentReadCache('s',['balance']);assert.equal(await read('session1'),3);
+ window.dispatchEvent(new Event('erp:sessionChanged'));assert.equal(await read('session1'),4);
+ let failures=0;for(let i=0;i<2;i++)await readStudentCached('x','x','detail',async()=>{failures++;throw Error('fail')}).catch(()=>{});assert.equal(failures,2);
+ const messages=[];const context={require:p=>p==='ws'?{WebSocket:{OPEN:1}}:p==='./ScheduleSelectionHolds'?class{}:{},module:{exports:{}},setTimeout,clearTimeout,console};
+ vm.runInNewContext(fs.readFileSync('backend/services/RealtimeService.js','utf8'),context);const server=new context.module.exports({getPermissions:async()=>[]});server.wss={clients:[{user:{id:'operator'},readyState:1,bufferedAmount:0,send:value=>messages.push(JSON.parse(value))}]};
+ server.publish(JSON.stringify({topic:'payments',studentKey:first}));server.publish('documents');await delay(200);assert.equal(messages.length,1);assert(messages[0].changes.some(c=>c.studentKey===first));assert(messages[0].changes.some(c=>c.topic==='documents'&&c.studentKey===null));assert.deepEqual(messages[0].topics,['payments','documents']);
+ console.log('PASS: avisos dirigidos, agrupacion de eventos, reconexion, limpieza, cache por sesion, solicitudes compartidas, errores no cacheados y compatibilidad WebSocket.');
+})().catch(error=>{console.error(error);process.exitCode=1});

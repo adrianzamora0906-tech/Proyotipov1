@@ -69,12 +69,41 @@ class ReceiptService {
 
   static async getPrintHTML(id, branchId = null) {
     const receipt = await this.getById(id, branchId);
+    return this.renderHTML(receipt);
+  }
+
+  static async getTransferPrintHTML(id, actor, authorization = {}) {
+    const branchId = authorization.operationalCoverage?.operational_branch_id || authorization.branchId || actor.branch_id;
+    const permissions = authorization.permissions || [];
+    const canReadBranchPayments = permissions.some(permission =>
+      ['PAYMENT_VIEW','PAYMENT_CREATE','TRANSFER_VERIFY','TRANSFER_APPROVE'].includes(permission));
+    const globalRead = Boolean(authorization.global || permissions.includes('TRANSFER_APPROVE')
+      || (permissions.includes('TRANSFER_VERIFY') && await require('./CashOperationsService').isCentralTransferVerifier(actor.id)));
+    const result = await db.query(`SELECT tv.id,tv.amount,tv.reference,tv.created_at,tv.status,
+      tv.bank,tv.transfer_date,'transferencia' AS payment_method,
+      TRIM(CONCAT(s.first_name,' ',s.last_name)) AS "studentName",s.identification cedula,
+      COALESCE(c.name,sc.name,'Servicio') AS "courseName",b.name AS "branchName",
+      TRIM(CONCAT(u.first_name,' ',u.last_name)) AS "cashierName"
+      FROM transfer_payment_verifications tv JOIN students s ON s.id=tv.student_id
+      JOIN branches b ON b.id=tv.branch_id LEFT JOIN users u ON u.id=tv.created_by
+      LEFT JOIN enrollments e ON e.id=tv.enrollment_id LEFT JOIN courses c ON c.id=e.course_id
+      LEFT JOIN service_transactions st ON st.id=tv.service_transaction_id
+      LEFT JOIN service_catalog sc ON sc.id=st.service_id
+      WHERE tv.id=$1 AND tv.status IN ('PENDING','AWAITING_APPROVAL')
+        AND ($2::boolean OR ($5::boolean AND tv.branch_id=$3::uuid) OR tv.created_by=$4::uuid)`,
+    [id,globalRead,branchId || null,actor.id,canReadBranchPayments]);
+    if (!result.rows.length) throw createError(404,'Constancia pendiente no disponible');
+    return this.renderHTML({...result.rows[0],pending_transfer:true,receipt_number:`TR-${id}`});
+  }
+
+  static renderHTML(receipt) {
+    const pending = receipt.pending_transfer === true;
     return `
       <div class="receipt" style="font-family:Arial,sans-serif;max-width:340px;margin:0 auto;padding:20px;color:#101828;background:#fff;">
         <div style="text-align:center;border-bottom:1px dashed #000;padding-bottom:10px;margin-bottom:10px;">
           <h2 style="margin:0;font-size:21px;color:#17226b;">SPORTMANCAR</h2>
           <p style="margin:3px 0;font-size:12px;">Escuela de Conducción</p>
-          <strong style="display:block;margin-top:9px;font-size:14px;">COMPROBANTE DE PAGO</strong>
+          <strong style="display:block;margin-top:9px;font-size:14px;">${pending ? 'CONSTANCIA DE TRANSFERENCIA PENDIENTE' : 'COMPROBANTE DE PAGO'}</strong>
           <p style="margin:5px 0 0;font-size:12px;">N.º ${escapeHtml(receipt.receipt_number)}</p>
         </div>
         <div style="margin-bottom:10px;font-size:13px;line-height:1.45;">
@@ -86,13 +115,13 @@ class ReceiptService {
           <p style="margin:5px 0;"><strong>Registrado por:</strong> ${escapeHtml(receipt.cashierName || 'N/A')}</p>
         </div>
         <div style="border-top:1px dashed #000;border-bottom:1px dashed #000;padding:10px 0;margin-bottom:10px;font-size:14px;">
-          <p style="display:flex;justify-content:space-between;margin:4px 0;"><strong>Valor pagado</strong><strong>$${Number(receipt.amount).toFixed(2)}</strong></p>
+          <p style="display:flex;justify-content:space-between;margin:4px 0;"><strong>${pending ? 'Valor declarado (no confirmado)' : 'Valor pagado'}</strong><strong>$${Number(receipt.amount).toFixed(2)}</strong></p>
           <p style="display:flex;justify-content:space-between;margin:4px 0;"><span>Método</span><span>${escapeHtml(receipt.payment_method)}</span></p>
           ${receipt.reference ? `<p style="display:flex;justify-content:space-between;margin:4px 0;"><span>Referencia</span><span>${escapeHtml(receipt.reference)}</span></p>` : ''}
           ${receipt.card_batch ? `<p style="display:flex;justify-content:space-between;margin:4px 0;"><span>Lote tarjeta</span><span>${escapeHtml(receipt.card_batch)}</span></p>` : ''}
-          <p style="display:flex;justify-content:space-between;margin:4px 0;"><span>Saldo pendiente</span><strong>$${Number(receipt.balance || 0).toFixed(2)}</strong></p>
+          ${pending ? '<p style="font-weight:bold;color:#9a3412;">Transferencia pendiente de verificaci&oacute;n y aprobaci&oacute;n. No acredita un pago confirmado ni reduce el saldo del estudiante.</p>' : `<p style="display:flex;justify-content:space-between;margin:4px 0;"><span>Saldo pendiente</span><strong>$${Number(receipt.balance || 0).toFixed(2)}</strong></p>`}
         </div>
-        <div style="text-align:center;font-size:11px;color:#667085;"><p style="margin:4px 0;">Conserve este comprobante.</p><p style="margin:4px 0;">Gracias por su pago.</p></div>
+        <div style="text-align:center;font-size:11px;color:#667085;"><p style="margin:4px 0;">Este documento no tiene validez tributaria.</p><p style="margin:4px 0;">${pending ? 'Constancia de registro; no es comprobante de pago.' : 'Conserve este comprobante. Gracias por su pago.'}</p></div>
       </div>
     `;
   }

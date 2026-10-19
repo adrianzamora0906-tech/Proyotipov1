@@ -5,7 +5,13 @@ const { PDFDocument } = require('pdf-lib');
 const AuditService = require('./AuditService');
 
 class DocumentService {
-  static async getStudentSummaries({ cityId = null } = {}) {
+  static async studentIdForDocument(id) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw createError(400,'Documento invalido');
+    const result = await db.query('SELECT student_id FROM student_documents WHERE id=$1',[id]);
+    if (!result.rows.length) throw createError(404,'Documento no encontrado');
+    return result.rows[0].student_id;
+  }
+  static async getStudentSummaries({ cityId = null, branchId = null } = {}) {
     const result = await db.query(`
       SELECT s.id AS "studentId", s.identification AS cedula,
         s.first_name || ' ' || s.last_name AS "studentName", s.phone,
@@ -18,8 +24,9 @@ class DocumentService {
       LEFT JOIN student_documents sd ON sd.student_id = s.id
       LEFT JOIN document_types dt ON dt.id = sd.document_type_id
       WHERE s.status <> 'inhabilitado' AND ($1::uuid IS NULL OR b.city_id = $1)
+        AND ($2::uuid IS NULL OR s.branch_id = $2)
       ORDER BY b.name, s.first_name, s.last_name
-    `, [cityId]);
+    `, [cityId, branchId]);
     const baseRequiredTypes = ['cedula', 'certificado_bachiller', 'carnet_tipo_sangre'];
     const documentNames = {
       cedula: 'Cedula',
@@ -50,10 +57,22 @@ class DocumentService {
   /**
    * Obtener documentos de un estudiante
    */
-  static async getByStudent(studentId) {
+  static assertStudentAccess(studentId,scope) {
+    return require('./StudentService').assertReadAccess(studentId,scope);
+  }
+
+  static async getContent(studentId, documentId) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(documentId)) throw createError(400,'Documento invalido');
+    const result = await db.query('SELECT id, file_path AS file_url FROM student_documents WHERE id=$1 AND student_id=$2',[documentId,studentId]);
+    if (!result.rows.length) throw createError(404,'Documento no encontrado');
+    return result.rows[0];
+  }
+
+  static async getByStudent(studentId, metadata = false) {
     const result = await db.query(`
       SELECT sd.id, sd.student_id, dt.code AS type, dt.name,
-        sd.file_path AS file_url, sd.observations, sd.uploaded_at, sd.created_at
+        ${metadata ? "CASE WHEN NULLIF(sd.file_path,'') IS NOT NULL THEN '/api/students/' || sd.student_id || '/documents/' || sd.id || '/content' END" : 'sd.file_path'} AS file_url,
+        sd.observations, sd.uploaded_at, sd.created_at
       FROM student_documents sd
       JOIN document_types dt ON dt.id = sd.document_type_id
       WHERE sd.student_id = $1 ORDER BY sd.uploaded_at DESC
@@ -416,11 +435,12 @@ class DocumentService {
     }
   }
 
-  static async getMobileUploadResult(token) {
+  static async getMobileUploadResult(token, actor, global = false) {
+    if (!actor?.id || !/^[a-f0-9]{64}$/i.test(token)) throw createError(404,'Enlace no encontrado');
     const result = await db.query(
       `SELECT token, document_type AS type, file_url AS "fileUrl",
         certificate_file_url AS "certificateFileUrl", observations,
-        used_at AS "usedAt", expires_at AS "expiresAt"
+          used_at AS "usedAt", expires_at AS "expiresAt", created_by
        FROM mobile_document_upload_tokens
        WHERE token = $1`,
       [token]
@@ -428,7 +448,8 @@ class DocumentService {
 
     if (result.rows.length === 0) throw createError(404, 'Enlace no encontrado');
     const upload = result.rows[0];
-    if (!upload.usedAt && new Date(upload.expiresAt).getTime() < Date.now()) throw createError(410, 'Este enlace ya expiro');
+      if (!global && String(upload.created_by) !== String(actor.id)) throw createError(404,'Enlace no encontrado');
+      if (new Date(upload.expiresAt).getTime() < Date.now()) throw createError(410, 'Este enlace ya expiro');
     return {
       completed: Boolean(upload.usedAt && upload.fileUrl),
       type: upload.type,

@@ -90,7 +90,10 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // ════════════════════════════════════════
 // LOGGING
 // ════════════════════════════════════════
-app.use(morgan('dev'));
+morgan.token('private-url', req => String(req.originalUrl || req.url).split('?')[0]
+  .replace(/(\/mobile-upload(?:-token)?\/)[^/]+/g, '$1[redacted]'));
+app.use(morgan(':method :private-url :status :response-time ms - :res[content-length]'));
+app.use('/api',require('./middleware/privateApiResponses'));
 
 // ════════════════════════════════════════
 // RUTAS

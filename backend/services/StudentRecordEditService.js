@@ -57,7 +57,8 @@ class StudentRecordEditService {
       ORDER BY ps.scheduled_start,ps.id ${lock ? 'FOR UPDATE OF ps' : ''}`, [id]);
     const readPayments = () => client.query(`SELECT p.* FROM payments p JOIN enrollments e ON e.id=p.enrollment_id
       WHERE e.student_id=$1 AND e.id=ANY($2::uuid[]) AND p.status<>'anulado' ORDER BY p.id ${lock ? 'FOR UPDATE OF p' : ''}`, [id,enrollments.map(e=>e.id)]);
-    const readDocuments = () => client.query(`SELECT d.id,t.code type,t.name,d.file_path,d.observations,d.uploaded_at
+    const readDocuments = () => client.query(`SELECT d.id,t.code type,t.name,
+      (NULLIF(d.file_path,'') IS NOT NULL) file_path,md5(COALESCE(d.file_path,'')) file_revision,d.observations,d.uploaded_at
       FROM student_documents d JOIN document_types t ON t.id=d.document_type_id
       WHERE d.student_id=$1 ORDER BY t.code ${lock ? 'FOR UPDATE OF d' : ''}`, [id]);
     const readAccount = () => client.query(`SELECT id,username,email,first_name,last_name,branch_id,must_change_password
@@ -132,6 +133,9 @@ class StudentRecordEditService {
         AND ($2::uuid IS NULL OR cc.course_id=$2) AND ($3::text IS NULL OR cc.modality=$3)
       ORDER BY cc.start_date,cc.code LIMIT 40`, [branch.id,filters.course_id || null,filters.modality || null,id])).rows;
     const result = [];
+    const busyCache = new Map(), theoryCache = new Map();
+    const rangeStart = cycles.length ? cycles.map(item=>iso(item.start_date)).sort()[0] : null;
+    const rangeEnd = cycles.length ? cycles.map(item=>iso(item.end_date)).sort().at(-1) : null;
     for (const cycle of cycles) {
       const instructors = (await db.query(`SELECT DISTINCT ip.id,TRIM(CONCAT(u.first_name,' ',u.last_name)) name
         FROM instructor_profiles ip JOIN users u ON u.id=ip.user_id
@@ -143,7 +147,9 @@ class StudentRecordEditService {
       const layout = Cycles.calendarLayout(cycle);
       const slots = [];
       for (const instructor of instructors) {
-        const busy = (await db.query(`SELECT date,start_time,end_time FROM (
+        let busy = busyCache.get(instructor.id);
+        if (!busy) {
+          busy = (await db.query(`SELECT date,start_time,end_time FROM (
           SELECT a.schedule_date date,a.start_time,a.end_time FROM course_cycle_schedule_assignments a
             WHERE a.instructor_id=$1 AND a.status='activo' AND a.student_id<>$2
           UNION ALL SELECT b.schedule_date,b.start_time,b.end_time FROM referred_instructor_schedule_blocks b
@@ -158,8 +164,12 @@ class StudentRecordEditService {
             FROM additional_driving_practices ap CROSS JOIN LATERAL
               generate_series(ap.start_date,ap.start_date+(ap.number_of_days-1),INTERVAL '1 day') d
             WHERE ap.instructor_id=$1 AND ap.student_id<>$2 AND ap.status IN ('SCHEDULED','IN_PROGRESS')
-        ) occupied WHERE date BETWEEN $3::date AND $4::date`, [instructor.id,id,cycle.start_date,cycle.end_date])).rows;
-        const theory=(await db.query('SELECT class_date,start_time,end_time,recurring,modality FROM theory_class_schedules WHERE instructor_id=$1 AND active=TRUE',[instructor.id])).rows;
+        ) occupied WHERE date BETWEEN $3::date AND $4::date`, [instructor.id,id,rangeStart,rangeEnd])).rows;
+          busyCache.set(instructor.id,busy);
+        }
+        if (!theoryCache.has(instructor.id)) theoryCache.set(instructor.id,
+          (await db.query('SELECT class_date,start_time,end_time,recurring,modality FROM theory_class_schedules WHERE instructor_id=$1 AND active=TRUE',[instructor.id])).rows);
+        const theory=theoryCache.get(instructor.id);
         for (const date of layout.dates) for (const [start,end] of layout.slots) {
           const weekday=new Date(`${date}T12:00:00Z`).getUTCDay();
           const available = !busy.some(b=>iso(b.date)===date && time(b.start_time)<end && time(b.end_time)>start)
@@ -445,6 +455,12 @@ class StudentRecordEditService {
           [enrollment.id,enrollment.theory_modality,enrollment.theory_start_time,enrollment.theory_end_time]);
         else if (['por_confirmar','virtual'].includes(theorySelection)) await client.query('UPDATE theory_group_students SET active=FALSE WHERE enrollment_id=$1',[enrollment.id]);
         await Sessions.reconcilePracticalSessions(client,enrollment.id,academic.schedulePlan.preferredInstructorId,actor.id);
+        const previousInstructors=[...new Set(snapshot.assignments.filter(a=>a.enrollment_id===enrollment.id).map(a=>a.instructor_id).filter(Boolean))];
+        const nextInstructor=academic.schedulePlan.preferredInstructorId;
+        await require('./InstructorChangeFeedbackService').create(previousInstructors.filter(id=>id!==nextInstructor).map(previousInstructorId=>({
+          studentId:id,enrollmentId:enrollment.id,branchId:cycle.branch_id,previousInstructorId,newInstructorId:nextInstructor,
+          assignmentId:academic.schedulePlan.selections.map(s=>({date:s.date,time:s.time}))
+        })),actor,'Cambio de instructor confirmado desde edicion del expediente',client);
       }
       if (prepared.finance || personal.discount_benefit!==undefined || (academic && enrollment.course_id!==academic.courseId)) {
         const payment=snapshot.payments[0];

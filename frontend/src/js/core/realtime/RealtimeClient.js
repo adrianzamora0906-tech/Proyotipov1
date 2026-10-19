@@ -45,7 +45,11 @@ class RealtimeClient {
         if (this.hasConnected) window.dispatchEvent(new CustomEvent('erp:realtime', { detail:{ topics:['resync'] } }));
         this.hasConnected = true;
       } else if (message.type === 'changed' && Array.isArray(message.topics)) {
-        window.dispatchEvent(new CustomEvent('erp:realtime', { detail:{ topics:message.topics } }));
+        window.dispatchEvent(new CustomEvent('erp:realtime', { detail:{ topics:message.topics, changes:Array.isArray(message.changes) ? message.changes : undefined } }));
+      } else if (message.type === 'payment-void-changed') {
+        window.dispatchEvent(new CustomEvent('erp:payment-void-changed'));
+      } else if (message.type === 'instructor-feedback-changed') {
+        window.dispatchEvent(new CustomEvent('erp:instructor-feedback-changed'));
       } else if (message.type === 'schedule-holds' || message.type === 'schedule-hold-result') {
         window.dispatchEvent(new CustomEvent('erp:schedule-holds', { detail:message }));
       }

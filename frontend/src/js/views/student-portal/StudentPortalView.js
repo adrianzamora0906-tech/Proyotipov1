@@ -99,6 +99,7 @@ export default class StudentPortalView extends Component{
     </div>`;
   }
   async mount(){
+    import('../../services/InstructorChangeFeedback.js').then(module=>module.instructorChangeFeedback.start()).catch(error=>console.warn('Seguimiento:',error.message));
     document.querySelector('.student-portal')?.addEventListener('change',async event=>{
       if(event.target.id!=='student-enrollment-select')return;
       const select=event.target,previous=this.selectedEnrollmentId;

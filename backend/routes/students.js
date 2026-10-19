@@ -10,6 +10,7 @@ const requirePermission = require('../middleware/requirePermission');
 router.use(authMiddleware);
 
 // GET /api/students/search - Buscar estudiantes (debe ir antes de /:id)
+router.get('/list-summary', requirePermission('STUDENT_VIEW'), StudentController.listSummary);
 router.get('/search', requirePermission('STUDENT_VIEW'), StudentController.search);
 router.get('/locations/cities', StudentController.getCities);
 router.get('/branches/all', StudentController.getBranches);
@@ -59,6 +60,7 @@ router.get('/:id/history', requirePermission('STUDENT_VIEW'), StudentController.
 router.delete('/:id', requirePermission('STUDENT_UPDATE'), StudentController.delete);
 
 // Documentos del estudiante
+router.get('/:studentId/documents/:documentId/content', requirePermission('DOCUMENT_VIEW'), DocumentController.getContent);
 router.get('/:studentId/documents', requirePermission('DOCUMENT_VIEW'), DocumentController.getByStudent);
 router.post('/:studentId/documents', requirePermission('DOCUMENT_CREATE'), DocumentController.create);
 router.post(

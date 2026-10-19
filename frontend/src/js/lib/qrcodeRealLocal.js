@@ -1,3 +1,5 @@
+import './qrcode.browser.js';
+
 export function renderQrDataUrl(value, options = {}) {
   return new Promise((resolve, reject) => {
     const QRCode = window.QRCode || globalThis.QRCode;

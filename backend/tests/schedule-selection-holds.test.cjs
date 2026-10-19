@@ -2,6 +2,14 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const Holds = require('../services/ScheduleSelectionHolds');
 const slot = { instructorId:'3502fb7e-eb33-4338-9375-bc5701009367', cycleId:'646b0818-29bb-496c-a7f9-06fd85b6c9ee', date:'2026-10-19',start:'08:00',end:'09:40' };
+test('examen separado de clase: admite dos examenes y rechaza el tercero',()=>{
+ const holds=new Holds();assert(holds.replace('class',[slot]));
+ const exam={...slot,mode:'exam_only'};
+ assert(holds.replace('exam1',[exam]));assert(holds.replace('exam2',[exam]));
+ assert.equal(holds.replace('exam3',[exam]),false);
+ assert.equal(holds.replace('class2',[slot]),false);
+ holds.replace('exam1',[]);assert(holds.replace('exam3',[exam]));
+});
 test('15 selecciones del mismo cupo: solo una obtiene la retencion', async () => {
   const holds = new Holds();
   const results = await Promise.all(Array.from({length:15}, (_,i) => Promise.resolve().then(() => holds.replace(i,[slot]))));

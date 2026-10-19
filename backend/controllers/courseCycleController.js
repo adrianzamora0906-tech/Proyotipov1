@@ -75,7 +75,10 @@ class CourseCycleController {
 
   static async studentScheduleChangeOptions(req, res, next) {
     try {
-      const cycle = await CourseCycleService.getStudentScheduleChangeOptions(req.user, req.params.studentId);
+      const start=performance.now();
+      const user={...req.user,branch_id:req.authorization?.operationalCoverage?.operational_branch_id || req.user.branch_id,globalAccess:Boolean(req.authorization?.global)};
+      const cycle = await CourseCycleService.getStudentScheduleChangeOptions(user, req.params.studentId, req.query);
+      res.setHeader('Server-Timing',`schedule_options;dur=${(performance.now()-start).toFixed(1)}`);
       res.json({ success: true, data: cycle });
     } catch (error) {
       next(error);
@@ -84,7 +87,8 @@ class CourseCycleController {
 
   static async changeStudentScheduleDay(req, res, next) {
     try {
-      const assignment = await CourseCycleService.changeStudentScheduleDay(req.user, req.body);
+      const user={...req.user,branch_id:req.authorization?.operationalCoverage?.operational_branch_id || req.user.branch_id,globalAccess:Boolean(req.authorization?.global)};
+      const assignment = await CourseCycleService.changeStudentScheduleDay(user, req.body);
       res.json({ success: true, data: assignment });
     } catch (error) {
       next(error);

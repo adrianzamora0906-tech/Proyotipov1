@@ -5,6 +5,13 @@ const StudentService = require('../services/StudentService');
 const effectiveCollectionBranchId = (req) => req.authorization?.operationalCoverage?.operational_branch_id || req.authorization?.branchId || req.user.branch_id;
 
 class PaymentController {
+  static async transferReceipt(req,res,next) {
+    try {
+      if (!/^[a-f0-9-]{36}$/i.test(req.params.id)) return res.status(400).json({success:false,error:'Identificador invalido'});
+      const html = await require('../services/ReceiptService').getTransferPrintHTML(req.params.id,req.user,req.authorization);
+      return res.json({success:true,html});
+    } catch(error) { next(error); }
+  }
   static async checkInstructorStudent(req, data) {
     if (req.user.role !== 'instructor' || req.authorization?.global) return;
     const branchId = effectiveCollectionBranchId(req);
@@ -49,6 +56,7 @@ class PaymentController {
       if (req.user.role === 'instructor' && !req.authorization?.global) {
         await StudentService.getById(req.params.studentId, { branch_id:effectiveCollectionBranchId(req) });
       }
+      await StudentService.assertReadAccess(req.params.studentId,await require('./studentController').readScope(req));
       const balance = await PaymentService.getStudentBalance(req.params.studentId,req.query.enrollmentId || null);
 
       return res.json({
@@ -65,7 +73,8 @@ class PaymentController {
       if (req.user.role === 'instructor' && !req.authorization?.global) {
         await StudentService.getById(req.params.studentId, { branch_id:effectiveCollectionBranchId(req) });
       }
-      const payments = await PaymentService.getStudentPayments(req.params.studentId);
+      await StudentService.assertReadAccess(req.params.studentId,await require('./studentController').readScope(req));
+      const payments = await PaymentService.getStudentPayments(req.params.studentId, req.query.paginated === 'true' ? req.query.page || '1' : null);
 
       return res.json({
         success: true,

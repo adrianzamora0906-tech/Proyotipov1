@@ -14,6 +14,7 @@ class RealtimeService {
     this.createClient = createClient;
     this.getPermissions = getPermissions;
     this.pending = new Set();
+    this.pendingChanges = new Map();
     this.selectionHolds = new ScheduleSelectionHolds();
     this.ready = false;
     this.stopped = false;
@@ -121,13 +122,32 @@ class RealtimeService {
     client.on('error', retry);
     client.on('end', retry);
     client.on('notification', message => {
-      if (message.channel === 'erp_changes') this.publish(message.payload);
+      if (message.channel === 'erp_payment_void' || message.channel === 'erp_instructor_feedback') {
+        try {
+          const change = JSON.parse(message.payload);
+          const type=message.channel==='erp_payment_void'?'payment-void-changed':'instructor-feedback-changed';
+          if (change.type !== type || !Array.isArray(change.userIds)) return;
+          for (const ws of this.wss.clients) {
+            if (ws.user && change.userIds.includes(ws.user.id) && ws.readyState === WebSocket.OPEN) {
+              if (ws.bufferedAmount > 65536) ws.terminate();
+              else ws.send(JSON.stringify({type}));
+            }
+          }
+        } catch (_) { /* Ignore malformed notifications. */ }
+        return;
+      }
+      if (message.channel === 'erp_student_changes' || (message.channel === 'erp_changes' && (!this.targetedChanges || message.payload === 'authorization'))) this.publish(message.payload);
     });
     try {
       await client.connect();
       const migration = await client.query("SELECT 1 FROM schema_migrations WHERE migration_name='108_realtime_notifications.sql'");
       if (!migration.rows.length) throw new Error('Apply migration 108_realtime_notifications.sql');
+      const targeted = await client.query("SELECT 1 FROM schema_migrations WHERE migration_name='112_targeted_realtime_changes.sql'");
+      this.targetedChanges = targeted.rows.length > 0;
       await client.query('LISTEN erp_changes');
+      await client.query('LISTEN erp_student_changes');
+      await client.query('LISTEN erp_payment_void');
+      await client.query('LISTEN erp_instructor_feedback');
       if (!failed && !this.stopped) this.ready = true;
     } catch (error) {
       console.warn('WebSocket database listener unavailable:',error.message);
@@ -135,12 +155,21 @@ class RealtimeService {
     }
   }
 
-  publish(topic) {
+  publish(notification) {
+    let change;
+    try { change = JSON.parse(notification); } catch (_) { change = { topic: notification }; }
+    const topic = change?.topic;
     if (!TOPICS.has(topic) || this.stopped) return;
     this.pending.add(topic);
+    const studentKey = /^[a-f0-9]{64}$/.test(change.studentKey || '') ? change.studentKey : null;
+    // Bound batches; overflow becomes a safe module-level invalidation.
+    if (this.pendingChanges.size >= 200 || !studentKey) this.pendingChanges.set(topic, { topic, studentKey: null });
+    else this.pendingChanges.set(topic + ':' + studentKey, { topic, studentKey });
     if (this.flushTimer) return;
     this.flushTimer = setTimeout(async () => {
       const topics = [...this.pending];
+      const changes = [...this.pendingChanges.values()];
+      this.pendingChanges.clear();
       this.pending.clear();
       this.flushTimer = null;
       if (topics.includes('authorization')) {
@@ -154,7 +183,7 @@ class RealtimeService {
         }));
         this.broadcastSelectionHolds();
       }
-      const payload = JSON.stringify({ type:'changed', topics });
+      const payload = JSON.stringify({ type:'changed', topics, changes });
       for (const ws of this.wss.clients) {
         if (ws.user && ws.readyState === WebSocket.OPEN) {
           if (ws.bufferedAmount > 65536) ws.terminate();

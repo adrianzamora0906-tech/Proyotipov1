@@ -1,0 +1,21 @@
+const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
+const RealtimeService = require('../backend/services/RealtimeService');
+const db = require('../backend/config/database');
+(async () => {
+  const client = new EventEmitter();
+  const queries = [];
+  client.connect = async () => {};
+  client.query = async sql => { queries.push(sql); return {rows:[{}]}; };
+  const service = new RealtimeService({createClient:()=>client});
+  const sockets = ['dayana','requester','other'].map(id=>({user:{id},readyState:1,bufferedAmount:0,messages:[],send(value){this.messages.push(JSON.parse(value));}}));
+  service.wss={clients:new Set(sockets)};
+  await service.connectDatabase();
+  assert(queries.includes('LISTEN erp_payment_void'));
+  client.emit('notification',{channel:'erp_payment_void',payload:JSON.stringify({type:'payment-void-changed',userIds:['dayana','requester']})});
+  assert.deepEqual(sockets.map(socket=>socket.messages.length),[1,1,0]);
+  assert.deepEqual(sockets[0].messages[0],{type:'payment-void-changed'});
+  client.emit('notification',{channel:'erp_payment_void',payload:'invalid'});
+  assert.equal(sockets[0].messages.length,1);
+  console.log('PASS: avisos WebSocket dirigidos solo a responsable y solicitante; sin datos financieros.');
+})().catch(error=>{console.error(error);process.exitCode=1;}).finally(()=>db.pool.end());

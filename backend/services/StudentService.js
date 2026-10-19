@@ -6,6 +6,16 @@ const AuditService = require('./AuditService');
 const { createError } = require('../middleware/errorHandler');
 
 class StudentService {
+  static async assertReadAccess(studentId, scope) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(studentId)) throw createError(400,'Estudiante invalido');
+    const result = await db.query(`SELECT s.id FROM students s LEFT JOIN branches b ON b.id=s.branch_id
+      WHERE s.id=$1 AND (($2::uuid IS NULL AND $3::uuid IS NULL AND $4::uuid IS NULL)
+        OR s.branch_id=$2 OR b.city_id=$3 OR s.city_id=$3 OR s.created_by=$4 OR s.updated_by=$5)`,
+      [studentId,scope.branch_id || null,scope.city_id || null,scope.created_by || null,scope.updated_by || scope.created_by || null]);
+    if (!result.rows.length) throw createError(404,'Estudiante no encontrado');
+  }
+
+
   static async getBranchAdminAttendance(studentId, user, lock = false, client = db) {
     const branchAdmin = await client.query(`SELECT ur.branch_id FROM user_roles ur
       JOIN roles r ON r.id=ur.role_id AND r.code='BRANCH_ADMIN'
@@ -125,7 +135,7 @@ class StudentService {
     } else if (filters.course_type === 'moto') {
       where += ` AND (course.name ILIKE '%moto%' OR course.name ILIKE '%clase a%')`;
     }
-    const result = await db.query(`
+    let sql = `
       SELECT reservation.id,reservation.cycle_id,reservation.course_id,reservation.branch_id,reservation.instructor_id,
         reservation.referred_name name,
         reservation.referred_identification identification,reservation.referred_phone phone,
@@ -151,8 +161,15 @@ class StudentService {
       ) requested ON TRUE
       WHERE ${where}
       ORDER BY cycle.start_date,requested.start_time,reservation.referred_name
-    `, params);
-    return result.rows;
+    `;
+    if (filters.aggregate) return Number((await db.query(`SELECT COUNT(*) total FROM (${sql}) source`, params)).rows[0].total);
+    if (filters.paginated) {
+      const total = Number((await db.query(`SELECT COUNT(*) total FROM (${sql}) source`, params)).rows[0].total);
+      const page = Math.min(Math.max(1, Math.ceil(total / 10)), Math.max(1, Number(filters.page) || 1));
+      sql = `SELECT id,name,identification,phone,created_by_name,instructor_name,course_name,cycle_code,start_date,start_time,end_time,expires_at FROM (${sql}) source LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      return { reservations: (await db.query(sql, [...params, 10, (page - 1) * 10])).rows, total, page, pageSize: 10 };
+    }
+    return (await db.query(sql, params)).rows;
   }
 
   static async createTemporarySeatReservation(data = {}, user, access = {}) {
@@ -345,7 +362,7 @@ class StudentService {
     const params = [];
     let idx = 1;
 
-    if (filters.status !== 'inhabilitado') sql += " AND s.status <> 'inhabilitado'";
+    if (filters.status !== 'inhabilitado' && !filters.aggregate) sql += " AND s.status <> 'inhabilitado'";
     if (filters.status === 'active') {
       sql += ` AND EXISTS (SELECT 1 FROM enrollments active_e WHERE active_e.student_id = s.id AND active_e.status = 'activo')`;
     } else if (filters.status === 'payment_pending') {
@@ -433,6 +450,35 @@ class StudentService {
       params.push(filters.city_id);
     }
 
+    // Counts and the candidate page do not need creator coverage, account or course projections.
+    const instructorStart = sql.indexOf('      LEFT JOIN LATERAL (\n        SELECT ip.id');
+    const instructorEnd = sql.indexOf(') instructor ON true', instructorStart) + ') instructor ON true'.length;
+    const needsInstructor = filters.instructor_id || filters.date_from || filters.date_to || filters.group === 'instructor';
+    const instructorJoin = needsInstructor ? sql.slice(instructorStart,instructorEnd) : '';
+    const filterSql = 'SELECT s.id,s.status,s.registration_type FROM students s LEFT JOIN branches b ON b.id=s.branch_id ' + instructorJoin + sql.slice(sql.indexOf('      WHERE 1=1'));
+    if (filters.aggregate) {
+      sql = filterSql.replace('SELECT s.id,s.status,s.registration_type', "SELECT s.id,s.status,s.registration_type,EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=s.id AND e.status='activo') active");
+      return (await db.query(`SELECT status, COALESCE(registration_type,'REGULAR') registration_type,
+        active,
+        COUNT(*)::int count FROM (${sql}) source GROUP BY status, COALESCE(registration_type,'REGULAR'), active`, params)).rows;
+    }
+    if (filters.paginated) {
+      sql = sql.replace(/SELECT s\.\*[\s\S]*?FROM students s/, `SELECT s.id,s.identification,s.first_name,s.last_name,s.email,s.status,s.branch_id,s.registration_type,s.created_at,
+        b.name branch, TRIM(CONCAT(creator.first_name,' ',creator.last_name)) created_by_name,
+        creator_branch.name registered_by_branch_name, creator_city.name registered_by_city_name,
+        instructor.instructor_name FROM students s`);
+      const total = Number((await db.query(`SELECT COUNT(*) AS total FROM (${filterSql}) source`, params)).rows[0].total);
+      const pageSize = 10;
+      const page = Math.min(Math.max(1, Math.ceil(total / pageSize)), Math.max(1, Number(filters.page) || 1));
+      const ordering = filters.group === 'instructor'
+        ? ' ORDER BY instructor.instructor_name NULLS LAST, s.created_at DESC, s.id'
+        : ' ORDER BY (s.branch_id = $' + idx++ + ') DESC NULLS LAST, b.name, s.created_at DESC, s.id';
+      if (filters.group !== 'instructor') params.push(filters.preferred_branch || null);
+      const bounds = ` LIMIT $${idx++} OFFSET $${idx++}`;
+      sql = `WITH visible AS MATERIALIZED (${filterSql}${ordering}${bounds}) ${sql} AND s.id IN (SELECT id FROM visible)${ordering}`;
+      const result = await db.query(sql, [...params, pageSize, (page - 1) * pageSize]);
+      return { students: result.rows, total, page, pageSize };
+    }
     sql += ' ORDER BY s.created_at DESC';
     const result = await db.query(sql, params);
     return result.rows;
@@ -449,6 +495,7 @@ class StudentService {
     const updatedBy = scope.updated_by || createdBy;
     const result = await db.query(`
       SELECT s.*, b.name as branch_name, pickup.name as pickup_branch_name, c.name as city_name, c.province as city_province,
+        TRIM(CONCAT(creator.first_name, ' ', creator.last_name)) AS created_by_name,
         TRIM(CONCAT(referrer.first_name, ' ', referrer.last_name)) AS referred_by_name,
         referrer_branch.name AS referred_by_branch_name,
         instructor.instructor_id,
@@ -507,6 +554,7 @@ class StudentService {
       LEFT JOIN branches pickup ON pickup.id = s.pickup_branch_id
       LEFT JOIN cities c ON s.city_id = c.id
       LEFT JOIN users referrer ON referrer.id = s.referred_by_user_id
+      LEFT JOIN users creator ON creator.id = s.created_by
       LEFT JOIN branches referrer_branch ON referrer_branch.id = referrer.branch_id
       LEFT JOIN LATERAL (
         SELECT ip.id AS instructor_id,
@@ -799,6 +847,7 @@ class StudentService {
           (branch_id,student_id,amount,bank,reference,transfer_date,created_by,enrollment_id)
           VALUES($1,$2,$3,'No especificado',$4,(NOW() AT TIME ZONE 'America/Guayaquil')::date,$5,$6)
           RETURNING id,status`, [branchId, student.id, registrationTransfer.amount, registrationTransfer.reference, userId,enrollmentId])).rows[0];
+        student.registration_transfer_id = transfer.id;
         await AuditService.log({
           userId,
           branchId,
@@ -1010,7 +1059,8 @@ class StudentService {
   /**
    * Obtener historial del estudiante
    */
-  static async getHistory(studentId) {
+  static async getHistory(studentId, page = null) {
+    if (page !== null) return require('./ReadPage')('SELECT id,action,timestamp FROM history WHERE student_id=$1 ORDER BY timestamp DESC,id DESC',[studentId],page);
     const result = await db.query(
       'SELECT * FROM history WHERE student_id = $1 ORDER BY timestamp DESC',
       [studentId]

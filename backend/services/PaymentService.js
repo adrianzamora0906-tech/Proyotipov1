@@ -17,13 +17,15 @@ class PaymentService {
   static async requestPaymentVoid(detailId, reason, actor, requestContext) {
     if (!reason || !String(reason).trim()) throw createError(422, 'El motivo de anulación es obligatorio');
     const result = await db.query(`
-      INSERT INTO payment_void_requests(payment_detail_id, branch_id, requested_by, reason)
+      WITH inserted AS (INSERT INTO payment_void_requests(payment_detail_id, branch_id, requested_by, reason)
       SELECT pd.id, e.branch_id, $2, $3
       FROM payment_details pd
       JOIN payments p ON p.id=pd.payment_id
       JOIN enrollments e ON e.id=p.enrollment_id
       WHERE pd.id=$1 AND pd.status='ACTIVE'
-      RETURNING *`, [detailId, actor.id, reason.trim()]);
+      RETURNING *) SELECT inserted.*, pg_notify('erp_payment_void', json_build_object('type','payment-void-changed','userIds',
+        json_build_array(inserted.requested_by::text,(SELECT value #>> '{}' FROM settings WHERE scope_type='GLOBAL' AND branch_id IS NULL AND key='payments.central_void_approver_user_id' LIMIT 1)))::text)
+      FROM inserted`, [detailId, actor.id, reason.trim()]);
     if (!result.rows.length) throw createError(404, 'Pago activo no encontrado');
     return result.rows[0];
   }
@@ -73,6 +75,7 @@ class PaymentService {
       entityType: 'PAYMENT_VOID_REQUEST', entityId: requestId,
       description: approved ? 'Anulacion aprobada por responsable central' : 'Anulacion rechazada por responsable central',
       newValues: { status: approved ? 'APPROVED' : 'REJECTED', note: note || null }, requestContext }, client);
+    await client.query("SELECT pg_notify('erp_payment_void',$1)", [JSON.stringify({type:'payment-void-changed',userIds:[actor.id,pending.rows[0].requested_by]})]);
     await client.query('COMMIT');
     return result.rows[0];
     } catch (error) { await client.query('ROLLBACK'); throw error; }
@@ -304,8 +307,8 @@ class PaymentService {
   /**
    * Obtener pagos de un estudiante
    */
-  static async getStudentPayments(studentId) {
-    const result = await db.query(`
+  static async getStudentPayments(studentId, page = null) {
+    const sql = `
       SELECT pd.*, p.total, p.final_amount, p.status as payment_status,e.id AS enrollment_id,c.name AS course_name,
         EXISTS(SELECT 1 FROM payment_void_requests vr WHERE vr.payment_detail_id=pd.id AND vr.status='PENDING') void_pending
       FROM payment_details pd
@@ -313,8 +316,10 @@ class PaymentService {
       JOIN enrollments e ON p.enrollment_id = e.id
       JOIN courses c ON c.id=e.course_id
       WHERE e.student_id = $1 AND p.status != 'anulado'
-      ORDER BY pd.created_at DESC
-    `, [studentId]);
+      ORDER BY pd.created_at DESC,pd.id DESC
+    `;
+    if (page !== null) return require('./ReadPage')(sql,[studentId],page);
+    const result = await db.query(sql,[studentId]);
     return result.rows;
   }
 

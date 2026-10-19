@@ -7,6 +7,10 @@ test('snapshot conserva resultado y revision con lecturas paralelas; escritura m
  async function run(lock){
   let active=0,peak=0;
   const client={query:async(sql)=>{
+   if(sql.includes('FROM student_documents d')) {
+    assert(sql.includes('md5(COALESCE(d.file_path'));
+    assert(sql.includes("NULLIF(d.file_path,'') IS NOT NULL"));
+   }
    active++;peak=Math.max(peak,active);
    await new Promise(resolve=>setTimeout(resolve,5));active--;
    if(sql.includes('SELECT * FROM students'))return {rows:[{id:'student',status:'activo'}]};

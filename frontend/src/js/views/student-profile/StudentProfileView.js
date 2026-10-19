@@ -1,9 +1,13 @@
+import { apiClient } from '../../core/api/ApiClient.js';
+import { subscribeStudentChanges, affectedStudentSections } from '../../core/realtime/StudentChanges.js';
+import { readStudentCached, clearStudentReadCache } from '../../core/realtime/StudentReadCache.js';
 /**
  * Student Profile View
  * Expediente del estudiante con pestañas
  */
 
 import Component from '../../components/Component.js';
+import { renderQrDataUrl } from '../../lib/qrcodeRealLocal.js';
 import { subscribeRealtime } from '../../core/realtime/RealtimeClient.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
 import StudentService from '../../services/StudentService.js';
@@ -38,7 +42,7 @@ class StudentProfileView extends Component {
       `;
     }
 
-    const student = await StudentService.getStudent(studentId);
+    const student = await this.readSection('detail', () => StudentService.getStudent(studentId));
     this.student = student;
 
     if (!student) {
@@ -50,29 +54,20 @@ class StudentProfileView extends Component {
     this.documentsLoadPromise = null;
     this.historyLoaded = false;
     this.historyLoadPromise = null;
-    const [attendanceResult, paymentsResult, balanceResult, scheduleResult] = await Promise.allSettled([
+    this.financialPage = 1;
+    this.historyPage = 1;
+    this.financialLoaded = false;
+    this.financialLoadPromise = null;
+    const [attendanceResult, scheduleResult] = await Promise.allSettled([
       isBranchAdmin ? ApiService.getBranchAdminAttendance(studentId) : Promise.resolve(null),
-      PaymentService.getStudentPayments(studentId),
-      PaymentService.getStudentBalance(studentId),
-      ApiService.getStudentSchedule(studentId),
+      this.readSection('schedule', () => ApiService.getStudentSchedule(studentId)),
     ]);
     const branchAdminAttendance = attendanceResult.status === 'fulfilled' && attendanceResult.value?.success
       ? attendanceResult.value.data : null;
-    const payments = paymentsResult.status === 'fulfilled' ? paymentsResult.value : [];
-    const totalPaid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    const balanceInfo = balanceResult.status === 'fulfilled'
-      ? balanceResult.value : { total: 0, paid: totalPaid, balance: 0 };
     const schedule = scheduleResult.status === 'fulfilled' && scheduleResult.value?.success
       ? scheduleResult.value.data : ScheduleService.getStudentSchedule(studentId);
     this.studentSchedule = schedule;
     const history = [];
-    const pendingBalance = Math.max(0, Number(balanceInfo?.balance || 0));
-    const pendingVerification = Math.max(0,Number(balanceInfo?.pendingVerification || 0));
-    const pendingTransfers = balanceInfo?.pendingTransfers || [];
-    const paidAmount = Number(balanceInfo?.paid ?? totalPaid);
-    this.paymentEnrollments=balanceInfo?.enrollments || [];
-    const canProcessPayments = authService.can('PAYMENT_CREATE');
-    const canVoidPayments = authService.can('PAYMENT_VOID');
     const activeEnrollment = (student.enrollments || []).find(enrollment => enrollment.status === 'activo') || (student.enrollments || [])[0] || null;
     const classStartDate = activeEnrollment?.practical_start_date
       || activeEnrollment?.practicalStartDate
@@ -204,6 +199,14 @@ class StudentProfileView extends Component {
               <div class="card-body">
                 <div class="info-grid personal-info-grid">
                   <div class="info-item">
+                    <span class="info-label">Inscrito por</span>
+                    <span class="info-value">${escapeHtml(student.createdByName || 'Sin registrar')}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Fecha y hora de registro</span>
+                    <span class="info-value">${student.createdAt && !Number.isNaN(Date.parse(student.createdAt)) ? new Intl.DateTimeFormat('es-EC', { timeZone: 'America/Guayaquil', dateStyle: 'short', timeStyle: 'medium' }).format(new Date(student.createdAt)) : 'Sin registrar'}</span>
+                  </div>
+                  <div class="info-item">
                     <span class="info-label">Nombre Completo</span>
                     <span class="info-value">${student.firstName} ${student.lastName}</span>
                   </div>
@@ -311,71 +314,7 @@ class StudentProfileView extends Component {
           <!-- Documents load only when their tab is opened. -->
           <div class="tab-pane" data-tab="documents"></div>
 
-          <!-- Financial -->
-          <div class="tab-pane" data-tab="financial">
-            <div class="card">
-              <div class="card-header">
-                <h3 class="card-title">Estado Financiero</h3>
-              </div>
-              <div class="card-body">
-                <div class="financial-info">
-                  <div class="financial-item">
-                    <span>Total Pagado</span>
-                    <span class="financial-value" style="color: var(--success);">$${paidAmount.toFixed(2)}</span>
-                  </div>
-                  <div class="financial-item">
-                    <span>Estado</span>
-                    <span class="badge ${this.getStatusBadgeClass(student.status)}">
-                      ${this.getStatusLabel(student.status)}
-                    </span>
-                  </div>
-                </div>
-
-                ${pendingVerification > 0 ? `<div class="financial-info mt-4">
-                  <div class="financial-item"><span>Transferencias pendientes de aprobaci&oacute;n</span><strong class="financial-value">$${pendingVerification.toFixed(2)}</strong></div>
-                  <div class="financial-item"><span>Saldo contable</span><strong class="financial-value">$${pendingBalance.toFixed(2)}</strong></div>
-                  <div class="financial-item"><span>Saldo si se aprueban</span><strong class="financial-value">$${Math.max(0,pendingBalance-pendingVerification).toFixed(2)}</strong></div>
-                </div><div class="mt-4">${pendingTransfers.map(transfer=>`<p><strong>$${Number(transfer.amount).toFixed(2)}</strong> &middot; ${transfer.status==='AWAITING_APPROVAL'?'Pendiente de aprobaci&oacute;n':'Pendiente de verificaci&oacute;n'}${transfer.reference ? ` &middot; Referencia: ${escapeHtml(transfer.reference)}` : ''}</p>`).join('')}</div>` : ''}
-
-                ${this.paymentEnrollments.length>1 ? `<div class="cash-table-wrap mt-4"><table class="table"><thead><tr><th>Curso</th><th>Pagado</th><th>Saldo</th></tr></thead><tbody>${this.paymentEnrollments.map(enrollment=>`<tr><td>${escapeHtml(enrollment.course)}</td><td>$${Number(enrollment.paid).toFixed(2)}</td><td>$${Number(enrollment.balance).toFixed(2)}</td></tr>`).join('')}</tbody></table></div>` : ''}
-                ${pendingBalance > 0 && canProcessPayments ? `
-                  <button class="btn btn-primary mt-4" id="record-payment-btn"
-                    data-cedula="${student.cedula}" data-balance="${pendingBalance}">
-                    Procesar pago ($${pendingBalance.toFixed(2)} pendiente)
-                  </button>
-                ` : pendingBalance === 0 ? `
-                  <p class="mt-4" style="color: var(--success); font-weight: 600;">Pago completado. No existen valores pendientes.</p>
-                ` : `
-                  <p class="mt-4" style="color: var(--gray-500);">Saldo pendiente: $${pendingBalance.toFixed(2)}. Debe procesarlo el personal de caja.</p>
-                `}
-
-                ${payments.length > 0 ? `
-                  <div class="payments-history mt-4">
-                    <h4>Historial de Pagos</h4>
-                    ${payments.map(payment => `
-                      <div class="payment-item">
-                        <div>
-                          <div class="payment-concept">${escapeHtml(payment.concept || 'Pago registrado')}</div>
-                          ${payment.course_name ? `<div class="payment-date">${escapeHtml(payment.course_name)}</div>` : ''}
-                          ${this.renderPaymentMethod(payment)}
-                          <div class="payment-date">${DateHelper.format(payment.created_at || payment.date, 'DD/MM/YYYY HH:MM')}</div>
-                        </div>
-                        <div style="display:flex; align-items:center; gap:.75rem;">
-                          <div style="font-weight: 600; color: var(--success);">$${Number(payment.amount || 0).toFixed(2)}</div>
-                          ${payment.void_pending ? '<span class="badge badge-warning">Anulación pendiente</span>' : canVoidPayments && String(payment.status || 'ACTIVE').toUpperCase() === 'ACTIVE' ? `
-                            <button type="button" class="btn btn-small btn-danger void-payment-btn"
-                              data-payment-id="${payment.id}" data-payment-amount="${Number(payment.amount || 0).toFixed(2)}">
-                              Anular
-                            </button>
-                          ` : ''}
-                        </div>
-                      </div>
-                    `).join('')}
-                  </div>
-                ` : ''}
-              </div>
-            </div>
-          </div>
+          <div class="tab-pane" data-tab="financial"><p>Preparando estado financiero...</p></div>
 
           <!-- Schedule -->
           <div class="tab-pane" data-tab="schedule">
@@ -532,6 +471,7 @@ class StudentProfileView extends Component {
         document.querySelector(`.tab-pane[data-tab="${tabName}"]`)?.classList.add('active');
         if (tabName === 'documents') this.loadDocumentsTab();
         if (tabName === 'history') this.loadHistoryTab();
+        if (tabName === 'financial') this.loadFinancialTab();
       });
     });
 
@@ -539,6 +479,9 @@ class StudentProfileView extends Component {
     document.getElementById('edit-student-btn')?.addEventListener('click', () => {
       this.openEditStudentModal(studentId);
     });
+    if (new URLSearchParams(window.location.search).get('changeSchedule')==='1' && authService.can('SCHEDULE_CHANGE')) {
+      this.openScheduleModal(studentId,{allowInitial:false});
+    }
 
     document.getElementById('register-branch-admin-attendance')?.addEventListener('click', async event => {
       const button = event.currentTarget;
@@ -578,6 +521,93 @@ class StudentProfileView extends Component {
       this.openDeleteStudentModal(studentId);
     });
 
+    document.getElementById('save-notes-btn')?.addEventListener('click', () => {
+      const notes = document.getElementById('notes-textarea').value;
+      StudentService.updateStudent(studentId, { notes });
+      alert('Observaciones guardadas');
+    });
+
+    document.getElementById('select-schedule-btn')?.addEventListener('click', () => this.openScheduleModal(studentId, { allowInitial: true }));
+    document.getElementById('change-schedule-btn')?.addEventListener('click', () => this.openScheduleModal(studentId, { allowInitial: false }));
+    document.getElementById('change-theory-schedule-btn')?.addEventListener('click', () => this.openTheoryScheduleModal(studentId));
+
+    this.updateNotificationBadge();
+    const root = document.querySelector('.student-profile');
+    this.stopProfileChanges?.();
+    this.stopProfileChanges = subscribeStudentChanges(studentId, topics => {
+      if (!root?.isConnected) return;
+      const sections = affectedStudentSections(topics);
+      clearStudentReadCache(studentId, sections);
+      if (!sections || sections.includes('detail')) {
+        void this.refreshVisibleProfile(root);
+        return;
+      }
+      if (sections.includes('payments') || sections.includes('balance')) void this.queueProfileRead(async () => { await this.financialLoadPromise; if (!root.isConnected) return; clearStudentReadCache(studentId, ['payments','balance']); this.financialLoaded = false; await this.loadFinancialTab(); });
+      if (sections.includes('documents') && authService.can('DOCUMENT_VIEW')) void this.queueProfileRead(async () => { await this.documentsLoadPromise; if (!root.isConnected) return; clearStudentReadCache(studentId, ['documents']); this.documentsLoaded = false; await this.loadDocumentsTab(); });
+      if (sections.includes('history')) void this.queueProfileRead(async () => { await this.historyLoadPromise; if (!root.isConnected) return; clearStudentReadCache(studentId, ['history']); this.historyLoaded = false; await this.loadHistoryTab(); });
+    });
+    window.clearTimeout(this.backgroundTimer);
+    this.backgroundTimer = window.setTimeout(async () => {
+      for (const load of [() => authService.can('PAYMENT_VIEW') && this.loadFinancialTab(),
+        () => this.loadHistoryTab(), () => authService.can('DOCUMENT_VIEW') && this.loadDocumentsTab()]) {
+        if (!root?.isConnected) return;
+        await this.queueProfileRead(() => root?.isConnected && load());
+      }
+    }, 600);
+  }
+
+  unmount() {
+    this.stopProfileChanges?.();
+    window.clearTimeout(this.backgroundTimer);
+    super.unmount();
+  }
+
+  appendReadPagination(pane,page,hasMore,onChange) {
+    const navigation=document.createElement('nav');navigation.className='student-pagination';
+    const previous=document.createElement('button');previous.type='button';previous.className='btn btn-secondary';previous.textContent='Anterior';previous.disabled=page<=1;previous.onclick=()=>onChange(page-1);
+    const label=document.createElement('span');label.textContent='Pagina '+page;
+    const next=document.createElement('button');next.type='button';next.className='btn btn-secondary';next.textContent='Siguiente';next.disabled=!hasMore;next.onclick=()=>onChange(page+1);
+    navigation.append(previous,label,next);pane.append(navigation);
+  }
+
+  queueProfileRead(load) {
+    this.backgroundWork = (this.backgroundWork || Promise.resolve()).catch(() => {}).then(load);
+    return this.backgroundWork;
+  }
+
+  readSection(section, load) {
+    const user = authService.getCurrentUser();
+    const scope = [apiClient.getToken(), user?.branch_id, user?.scope, user?.roles, user?.permissions];
+    return readStudentCached(scope, this.props.studentId, section, load);
+  }
+
+  async refreshVisibleProfile(root) {
+    if (this.refreshingProfile) { this.refreshAgain = true; return; }
+    this.refreshingProfile = true;
+    const tab = root.querySelector('.tab-button.active')?.dataset.tab || 'personal';
+    const draftNotes = root.querySelector('#notes-textarea')?.value;
+    try {
+      const html = await this.render();
+      if (!root.isConnected) return;
+      const template = document.createElement('template'); template.innerHTML = html;
+      const replacement = template.content.querySelector('.student-profile');
+      if (!replacement) return;
+      root.replaceWith(replacement);
+      await this.mount();
+      if (draftNotes !== undefined && replacement.querySelector('#notes-textarea')) replacement.querySelector('#notes-textarea').value = draftNotes;
+      replacement.querySelector(`.tab-button[data-tab="${tab}"]`)?.click();
+    } catch (error) { console.warn('No se pudo actualizar el expediente:', error.message); }
+    finally {
+      this.refreshingProfile = false;
+      if (this.refreshAgain) { this.refreshAgain = false; const current = document.querySelector('.student-profile'); if (current?.isConnected) void this.refreshVisibleProfile(current); }
+    }
+  }
+
+  setupFinancialListeners(studentId) {
+    document.querySelectorAll('[data-transfer-constancy]').forEach(button => button.addEventListener('click', async () => {
+      const { showTransferReceipt } = await import('../../services/TransferReceipt.js');
+      await showTransferReceipt(button.dataset.transferConstancy);
+    }));
     document.getElementById('record-payment-btn')?.addEventListener('click', event => {
       if (this.paymentEnrollments?.length>1) {
         window.history.pushState(null,null,`/cash/pending?search=${encodeURIComponent(this.student.cedula)}`);
@@ -598,17 +628,121 @@ class StudentProfileView extends Component {
       }));
     });
 
-    document.getElementById('save-notes-btn')?.addEventListener('click', () => {
-      const notes = document.getElementById('notes-textarea').value;
-      StudentService.updateStudent(studentId, { notes });
-      alert('Observaciones guardadas');
-    });
+  }
 
-    document.getElementById('select-schedule-btn')?.addEventListener('click', () => this.openScheduleModal(studentId, { allowInitial: true }));
-    document.getElementById('change-schedule-btn')?.addEventListener('click', () => this.openScheduleModal(studentId, { allowInitial: false }));
-    document.getElementById('change-theory-schedule-btn')?.addEventListener('click', () => this.openTheoryScheduleModal(studentId));
+  renderFinancialPane(payments, balanceInfo) {
+    const student = this.student;
+    const totalPaid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const pendingBalance = Math.max(0, Number(balanceInfo?.balance || 0));
+    const pendingVerification = Math.max(0, Number(balanceInfo?.pendingVerification || 0));
+    const pendingTransfers = balanceInfo?.pendingTransfers || [];
+    const paidAmount = Number(balanceInfo?.paid ?? totalPaid);
+    this.paymentEnrollments = balanceInfo?.enrollments || [];
+    const canProcessPayments = authService.can('PAYMENT_CREATE');
+    const canVoidPayments = authService.can('PAYMENT_VOID');
+    return `          <!-- Financial -->
+          <div class="tab-pane" data-tab="financial">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Estado Financiero</h3>
+              </div>
+              <div class="card-body">
+                <div class="financial-info">
+                  <div class="financial-item">
+                    <span>Total Pagado</span>
+                    <span class="financial-value" style="color: var(--success);">$${paidAmount.toFixed(2)}</span>
+                  </div>
+                  <div class="financial-item">
+                    <span>Estado</span>
+                    <span class="badge ${this.getStatusBadgeClass(student.status)}">
+                      ${this.getStatusLabel(student.status)}
+                    </span>
+                  </div>
+                </div>
 
-    this.updateNotificationBadge();
+                ${pendingVerification > 0 ? `<div class="financial-info mt-4">
+                  <div class="financial-item"><span>Transferencias pendientes de aprobaci&oacute;n</span><strong class="financial-value">$${pendingVerification.toFixed(2)}</strong></div>
+                  <div class="financial-item"><span>Saldo contable</span><strong class="financial-value">$${pendingBalance.toFixed(2)}</strong></div>
+                  <div class="financial-item"><span>Saldo si se aprueban</span><strong class="financial-value">$${Math.max(0,pendingBalance-pendingVerification).toFixed(2)}</strong></div>
+                </div><div class="mt-4">${pendingTransfers.map(transfer=>`<p><strong>$${Number(transfer.amount).toFixed(2)}</strong> &middot; ${transfer.status==='AWAITING_APPROVAL'?'Pendiente de aprobaci&oacute;n':'Pendiente de verificaci&oacute;n'}${transfer.reference ? ` &middot; Referencia: ${escapeHtml(transfer.reference)}` : ''} <button type="button" class="btn btn-small btn-secondary" data-transfer-constancy="${escapeHtml(transfer.id)}">Ver constancia</button></p>`).join('')}</div>` : ''}
+
+                ${this.paymentEnrollments.length>1 ? `<div class="cash-table-wrap mt-4"><table class="table"><thead><tr><th>Curso</th><th>Pagado</th><th>Saldo</th></tr></thead><tbody>${this.paymentEnrollments.map(enrollment=>`<tr><td>${escapeHtml(enrollment.course)}</td><td>$${Number(enrollment.paid).toFixed(2)}</td><td>$${Number(enrollment.balance).toFixed(2)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+                ${pendingBalance > 0 && canProcessPayments ? `
+                  <button class="btn btn-primary mt-4" id="record-payment-btn"
+                    data-cedula="${student.cedula}" data-balance="${pendingBalance}">
+                    Procesar pago ($${pendingBalance.toFixed(2)} pendiente)
+                  </button>
+                ` : pendingBalance === 0 ? `
+                  <p class="mt-4" style="color: var(--success); font-weight: 600;">Pago completado. No existen valores pendientes.</p>
+                ` : `
+                  <p class="mt-4" style="color: var(--gray-500);">Saldo pendiente: $${pendingBalance.toFixed(2)}. Debe procesarlo el personal de caja.</p>
+                `}
+
+                ${payments.length > 0 ? `
+                  <div class="payments-history mt-4">
+                    <h4>Historial de Pagos</h4>
+                    ${payments.map(payment => `
+                      <div class="payment-item">
+                        <div>
+                          <div class="payment-concept">${escapeHtml(payment.concept || 'Pago registrado')}</div>
+                          ${payment.course_name ? `<div class="payment-date">${escapeHtml(payment.course_name)}</div>` : ''}
+                          ${this.renderPaymentMethod(payment)}
+                          <div class="payment-date">${DateHelper.format(payment.created_at || payment.date, 'DD/MM/YYYY HH:MM')}</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:.75rem;">
+                          <div style="font-weight: 600; color: var(--success);">$${Number(payment.amount || 0).toFixed(2)}</div>
+                          ${payment.void_pending ? '<span class="badge badge-warning">Anulación pendiente</span>' : canVoidPayments && String(payment.status || 'ACTIVE').toUpperCase() === 'ACTIVE' ? `
+                            <button type="button" class="btn btn-small btn-danger void-payment-btn"
+                              data-payment-id="${payment.id}" data-payment-amount="${Number(payment.amount || 0).toFixed(2)}">
+                              Anular
+                            </button>
+                          ` : ''}
+                        </div>
+                      </div>
+                    `).join('')}
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+
+`;
+  }
+
+  async loadFinancialTab() {
+    if (!authService.can('PAYMENT_VIEW')) return;
+    if (this.financialLoaded || this.financialLoadPromise) return this.financialLoadPromise;
+    const pane = document.querySelector('.tab-pane[data-tab="financial"]');
+    if (!pane) return;
+    pane.setAttribute('aria-busy', 'true');
+    pane.textContent = 'Cargando estado financiero...';
+    this.financialLoadPromise = (async () => {
+      try {
+        // Sequential reads keep background work bounded. Do not replace failures with a zero balance.
+        const paymentsResult = await this.readSection('payments:' + this.financialPage, () => apiClient.get('/students/' + encodeURIComponent(this.props.studentId) + '/payments?paginated=true&page=' + this.financialPage));
+        if (!pane.isConnected) return;
+        if (!paymentsResult.success) throw new Error('No se pudieron cargar los pagos.');
+        const balanceResult = await this.readSection('balance', () => ApiService.getStudentBalance(this.props.studentId));
+        if (!balanceResult.success) throw new Error('No se pudo cargar el saldo.');
+        if (!pane.isConnected) return;
+        const template = document.createElement('template');
+        template.innerHTML = this.renderFinancialPane(paymentsResult.data.items, balanceResult.data);
+        pane.replaceChildren(...template.content.querySelector('[data-tab="financial"]').childNodes);
+        this.setupFinancialListeners(this.props.studentId);
+        this.appendReadPagination(pane,this.financialPage,paymentsResult.data.hasMore,page=>{this.financialPage=page;this.financialLoaded=false;void this.loadFinancialTab();});
+        this.financialLoaded = true;
+      } catch (error) {
+        if (!pane.isConnected) return;
+        pane.textContent = error.message || 'No se pudo cargar el estado financiero.';
+        const retry = document.createElement('button');
+        retry.type = 'button'; retry.className = 'btn btn-secondary'; retry.textContent = 'Reintentar';
+        retry.onclick = () => this.loadFinancialTab(); pane.append(retry);
+      } finally {
+        this.financialLoadPromise = null;
+        if (pane.isConnected) pane.removeAttribute('aria-busy');
+      }
+    })();
+    return this.financialLoadPromise;
   }
 
   renderDocumentsPane(documents) {
@@ -672,11 +806,15 @@ class StudentProfileView extends Component {
     pane.textContent = 'Cargando historial...';
     this.historyLoadPromise = (async () => {
       try {
-        const history = await StudentService.getStudentHistory(this.props.studentId);
+        const result = await this.readSection('history:' + this.historyPage, () => apiClient.get('/students/' + encodeURIComponent(this.props.studentId) + '/history?paginated=true&page=' + this.historyPage));
+        if (!result.success) throw new Error('No se pudo cargar el historial');
+        const history = result.data.items;
         if (!pane.isConnected) return;
         pane.innerHTML = history.length ? `<div class="timeline">${history.map(item =>
           `<div class="timeline-item"><div class="timeline-time">${DateHelper.format(item.timestamp,'HH:MM')}</div><div class="timeline-content">${escapeHtml(item.action)}</div><div class="timeline-date">${DateHelper.format(item.timestamp,'DD/MM/YYYY')}</div></div>`).join('')}</div>` : '<p>Sin historial</p>';
+        this.appendReadPagination(pane,this.historyPage,result.data.hasMore,page=>{this.historyPage=page;this.historyLoaded=false;void this.loadHistoryTab();});
         this.historyLoaded = true;
+        import('../../services/InstructorChangeFeedback.js').then(module=>module.renderAdminInstructorFeedback(this.props.studentId,pane)).catch(error=>console.warn('Seguimiento:',error.message));
       } catch (error) {
         if (!pane.isConnected) return;
         pane.textContent = 'No se pudo cargar el historial. ';
@@ -699,7 +837,7 @@ class StudentProfileView extends Component {
     pane.textContent = 'Cargando documentos...';
     this.documentsLoadPromise = (async () => {
       try {
-        const result = await ApiService.getStudentDocuments(this.props.studentId);
+        const result = await this.readSection('documents', () => apiClient.get('/students/' + encodeURIComponent(this.props.studentId) + '/documents?metadata=true'));
         if (!result.success) throw new Error(result.error || 'No se pudieron cargar los documentos.');
         if (!pane.isConnected) return;
         const template = document.createElement('template');
@@ -1006,8 +1144,17 @@ class StudentProfileView extends Component {
 
   async openEditStudentModal(studentId) {
     if (!authService.can('STUDENT_UPDATE')) return;
-    window.history.pushState(null, null, `/students/new?edit=${encodeURIComponent(studentId)}`);
-    window.dispatchEvent(new PopStateEvent('popstate'));
+    const editData = () => { window.history.pushState(null, null, `/students/new?edit=${encodeURIComponent(studentId)}`); window.dispatchEvent(new PopStateEvent('popstate')); };
+    if (!authService.can('SCHEDULE_CHANGE')) { editData(); return; }
+    const modal=document.getElementById('profile-action-modal');
+    if (!modal) { editData(); return; }
+    const name=`${this.student?.firstName || ''} ${this.student?.lastName || ''}`.trim();
+    modal.innerHTML=`<section class="modal profile-edit-choice-modal" role="dialog" aria-modal="true" aria-labelledby="profile-edit-choice-title"><header class="modal-header"><div><h3 class="modal-title" id="profile-edit-choice-title">Editar estudiante</h3>${name?`<p class="profile-edit-choice-name">${escapeHtml(name)}</p>`:''}</div><button type="button" class="modal-close" data-close-modal aria-label="Cerrar">&times;</button></header><div class="modal-body profile-edit-choices"><button type="button" class="profile-edit-choice" data-edit-personal><span class="profile-edit-choice-icon"><i data-lucide="user-round-pen" aria-hidden="true"></i></span><span class="profile-edit-choice-label">Datos del estudiante</span><i data-lucide="chevron-right" aria-hidden="true"></i></button><button type="button" class="profile-edit-choice profile-edit-choice--schedule" data-edit-pending><span class="profile-edit-choice-icon"><i data-lucide="calendar-clock" aria-hidden="true"></i></span><span class="profile-edit-choice-label">Clases pendientes<small>Horario e instructor</small></span><i data-lucide="chevron-right" aria-hidden="true"></i></button></div><footer class="modal-footer"><button type="button" class="btn btn-secondary" data-close-modal>Cancelar</button></footer></section>`;
+    modal.classList.add('active');this.bindProfileModalClose(modal);
+    modal.querySelector('[data-edit-personal]').onclick=editData;
+    modal.querySelector('[data-edit-pending]').onclick=()=>this.openScheduleModal(studentId,{allowInitial:false});
+    window.lucide?.createIcons();
+    modal.querySelector('[data-edit-personal]').focus();
   }
 
   async openCourseRescheduleModal(studentId) {
@@ -1613,9 +1760,15 @@ class StudentProfileView extends Component {
       </section>`;
   }
 
-  async openCourseCycleScheduleModal(studentId, modal) {
-    const result = await ApiService.getStudentScheduleChangeOptions(studentId);
+  async openCourseCycleScheduleModal(studentId, modal, instructorId = '') {
+    const previousObservation=modal.querySelector('#profile-schedule-observation')?.value || '';
+    const result = await ApiService.getStudentScheduleChangeOptions(studentId, instructorId);
+    if (!modal.isConnected) return;
     const cycle = result.success ? result.data : null;
+    if (cycle) {
+      const today = new Intl.DateTimeFormat('en-CA', {timeZone:'America/Guayaquil',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+      cycle.currentAssignments = (cycle.currentAssignments || []).filter(item => item.canMove !== false && item.date >= today);
+    }
     modal.innerHTML = `
       <div class="modal profile-schedule-modal">
         <div class="modal-header">
@@ -1623,7 +1776,7 @@ class StudentProfileView extends Component {
           <button class="modal-close" data-close-modal>×</button>
         </div>
         <div class="modal-body">
-          ${cycle ? `${this.renderProfileScheduleCalendar(cycle)}
+          ${cycle ? `${this.renderCurrentPracticeAssignments(cycle)}<label class="form-group"><span class="form-label">Nuevo instructor para las clases pendientes</span><select class="form-input" id="pending-class-instructor">${(cycle.instructors || [cycle.instructor]).map(item=>`<option value="${escapeHtml(item.id)}" ${item.id===cycle.selectedInstructorId?'selected':''}>${escapeHtml(item.name)}</option>`).join('')}</select></label>${this.renderProfileScheduleCalendar(cycle)}
             <label class="profile-schedule-observation" for="profile-schedule-observation">
               <span>Observación del cambio <strong>*</strong></span>
               <textarea id="profile-schedule-observation" class="form-textarea" maxlength="1000" rows="3"
@@ -1638,8 +1791,22 @@ class StudentProfileView extends Component {
         </div>
       </div>
     `;
+    if (modal.querySelector('#profile-schedule-observation')) modal.querySelector('#profile-schedule-observation').value=previousObservation;
     this.bindProfileModalClose(modal);
+    const destinationCalendar = modal.querySelector('.enrollment-calendar');
+    if (destinationCalendar && cycle) destinationCalendar.dataset.pendingAssignments = JSON.stringify(cycle.currentAssignments);
+    modal.querySelector('#pending-class-instructor')?.addEventListener('change',async event=>{
+      const select=event.currentTarget;select.disabled=true;
+      modal.querySelector('#confirm-profile-schedule').disabled=true;
+      try {await this.openCourseCycleScheduleModal(studentId,modal,select.value);}
+      catch(error){select.disabled=false;modal.querySelector('#profile-schedule-error').textContent=error.message||'No se pudo consultar la disponibilidad. Vuelve a elegir el instructor.';modal.querySelector('#confirm-profile-schedule').disabled=true;}
+    });
     if (cycle) this.mountProfileScheduleModal(modal, studentId);
+  }
+
+  renderCurrentPracticeAssignments(cycle) {
+    const assignments = cycle.currentAssignments || [];
+    return `<section class="profile-current-practices"><h3>Próximas clases pendientes (${assignments.length})</h3><div class="profile-pending-calendar">${assignments.map(item => `<article><strong>${escapeHtml(item.date.split('-').reverse().join('/'))}</strong><span>${escapeHtml(item.startTime)} - ${escapeHtml(item.endTime)}</span><small>${escapeHtml(item.instructorName || 'Sin instructor')}</small></article>`).join('') || '<p>No hay clases pendientes para cambiar.</p>'}</div></section>`;
   }
 
   renderProfileScheduleCalendar(cycle) {
@@ -1654,10 +1821,7 @@ class StudentProfileView extends Component {
       const parsed = new Date(`${date}T12:00:00`);
       return { date, name: dayNames[parsed.getDay()], label: date.slice(5).split('-').reverse().join('/') };
     });
-    const slots = [...(cycle.slots || [])].filter(slot => days.some(day =>
-      Number(slot.occupancyByDate?.[day.date]?.available ?? slot.available ?? 0) > 0
-      || (cycle.currentAssignments || []).some(item => item.date === day.date
-        && item.startTime === slot.startTime && item.endTime === slot.endTime)))
+    const slots = [...(cycle.slots || [])]
       .sort((first, second) => String(first.startTime || '').localeCompare(String(second.startTime || '')));
     const instructorName = cycle.instructor?.name
       || (cycle.currentAssignments || []).find(item => item.instructorName)?.instructorName
@@ -1677,7 +1841,7 @@ class StudentProfileView extends Component {
             </div>
           </div>
         </div>
-        <div class="schedule-rotation-message">Selecciona por celda el nuevo horario de cada d&iacute;a. Instructor: <strong>${instructorName || 'Sin instructor asignado'}</strong>.</div>
+        <div class="schedule-rotation-message">Instructor: <strong>${escapeHtml(instructorName || 'Sin instructor asignado')}</strong> · <span data-pending-count>0 de ${(cycle.currentAssignments || []).length} clases seleccionadas</span></div>
         <div class="enrollment-calendar-grid" style="--cycle-count: ${Math.min(days.length, 5)};">
           <div class="enrollment-calendar-heading">Hora</div>
           ${days.map((day, dayIndex) => `
@@ -1706,10 +1870,9 @@ class StudentProfileView extends Component {
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const isPast = day.date < today;
-    const disabled = isPast || (!isCurrent && available <= 0);
-    if (!isCurrent && (available <= 0 || isPast)) {
-      return `<div class="enrollment-calendar-empty-cell" data-day-index="${dayIndex}" aria-label="Horario no disponible"></div>`;
-    }
+    const source=assignments.find(item=>item.startTime===slot.startTime&&item.endTime===slot.endTime);
+    const changingInstructor=Boolean(source&&cycle.selectedInstructorId&&source.instructorId!==cycle.selectedInstructorId);
+    const disabled = isPast || (source?.canMove===false) || ((!isCurrent||changingInstructor) && available <= 0);
     const time = `${slot.startTime} - ${slot.endTime}`;
     const payload = JSON.stringify({
       id: `cycle:${cycle.id}:${slot.startTime}-${slot.endTime}`,
@@ -1720,17 +1883,18 @@ class StudentProfileView extends Component {
       dayIndex,
       course: cycle.vehicleType,
       assignmentId: isCurrent ? assignments.find(item => item.startTime === slot.startTime && item.endTime === slot.endTime)?.id : null,
+      changingInstructor,
     }).replace(/"/g, '&quot;');
     return `
       <button type="button"
-        class="schedule-option ${day.isExamDay ? 'exam-day' : ''} ${isCurrent ? 'current' : ''} ${disabled ? 'disabled' : ''}"
+        class="schedule-option ${day.isExamDay ? 'exam-day' : ''} ${isCurrent&&!changingInstructor ? 'current' : ''} ${disabled ? 'disabled' : ''}"
         data-schedule="${payload}"
         data-time="${time}"
         data-date="${day.date}"
         data-day-index="${dayIndex}"
         ${disabled ? 'disabled' : ''}>
-        <span class="schedule-option-status ${isCurrent ? 'current' : 'available'}">${isCurrent ? 'Horario actual' : 'Disponible'}</span>
-        <span class="schedule-option-capacity">${isCurrent ? 'Seleccionado' : `${available} cupo${available === 1 ? '' : 's'} disponible${available === 1 ? '' : 's'}`}</span>
+        <span class="schedule-option-status ${isCurrent&&!changingInstructor ? 'current' : available>0 ? 'available' : 'full'}">${isCurrent&&!changingInstructor ? 'Horario actual' : available>0 ? 'Disponible' : slot.occupancyByDate?.[day.date] ? 'Ocupado / bloqueado' : 'No configurado'}</span>
+        <span class="schedule-option-capacity">${source?.canMove===false ? 'Clase iniciada o realizada' : isCurrent&&!changingInstructor ? 'Seleccionado' : `${available} cupo${available === 1 ? '' : 's'} disponible${available === 1 ? '' : 's'}`}</span>
       </button>
     `;
   }
@@ -1747,10 +1911,15 @@ class StudentProfileView extends Component {
       const button = event.currentTarget;
       const calendar = modal.querySelector('.enrollment-calendar');
       const selections = this.getProfileScheduleSelections(calendar);
+      const pending = JSON.parse(calendar?.dataset.pendingAssignments || '[]');
       const observationField = modal.querySelector('#profile-schedule-observation');
       const observation = observationField?.value.trim() || '';
       const error = modal.querySelector('#profile-schedule-error');
       if (error) error.textContent = '';
+      if (!pending.length || selections.length !== pending.length) {
+        if (error) error.textContent = `Selecciona exactamente ${pending.length} clases para trasladar todas las pendientes.`;
+        return;
+      }
       if (!selections.length) {
         if (error) error.textContent = 'Debes seleccionar un horario disponible.';
         return;
@@ -1765,7 +1934,9 @@ class StudentProfileView extends Component {
         button.textContent = 'Guardando...';
         const response = await ApiService.changeStudentScheduleDay({
           studentId,
+          instructorId: modal.querySelector('#pending-class-instructor')?.value || undefined,
           cycleId: selections[0].cycleId,
+          replaceAllPending: true,
           changes: selections.map(selection => ({
             date: selection.date,
             time: selection.time,
@@ -1788,8 +1959,36 @@ class StudentProfileView extends Component {
     const calendar = option.closest('.enrollment-calendar');
     const error = modal.querySelector('#profile-schedule-error');
     if (error) error.textContent = '';
-    if (option.classList.contains('current')) {
+    if (calendar.dataset.pendingAssignments) {
+      const pending = JSON.parse(calendar.dataset.pendingAssignments);
+      if (option.classList.contains('selected')) option.classList.remove('selected');
+      else {
+        const sameDate = calendar.querySelector(`.schedule-option.selected[data-date="${option.dataset.date}"]`);
+        if (!sameDate && calendar.querySelectorAll('.schedule-option.selected').length >= pending.length) {
+          if (error) error.textContent = `Solo faltan ${pending.length} clases. Quita una selección para cambiarla.`;
+          return;
+        }
+        sameDate?.classList.remove('selected');
+        option.classList.add('selected');
+      }
+      const selected = [...calendar.querySelectorAll('.schedule-option.selected')].sort((a,b) => a.dataset.date.localeCompare(b.dataset.date));
+      const remaining = [...pending];
+      const pairs = selected.map(cell => {
+        const index = remaining.findIndex(source => source.date === cell.dataset.date);
+        return {cell, source:index >= 0 ? remaining.splice(index,1)[0] : null};
+      });
+      pairs.forEach(pair => {
+        const source = pair.source || remaining.shift();
+        pair.cell.dataset.schedule = JSON.stringify({...JSON.parse(pair.cell.dataset.schedule), assignmentId:source.id});
+      });
+      calendar.querySelector('[data-pending-count]').textContent = `${selected.length} de ${pending.length} clases seleccionadas`;
+      return;
+    }
+    const destination=JSON.parse(option.dataset.schedule || '{}');
+    if(destination.changingInstructor&&destination.assignmentId&&!calendar.dataset.moveOrigin){option.classList.toggle('selected');return;}
+    if (option.classList.contains('current') && !calendar.dataset.moveOrigin) {
       const source = JSON.parse(option.dataset.schedule || '{}');
+      if (source.changingInstructor) { option.classList.toggle('selected'); return; }
       if (!source.assignmentId) {
         if (error) error.textContent = 'Vuelve a abrir el calendario para cargar la clase actual';
         return;
@@ -1931,7 +2130,7 @@ class StudentProfileView extends Component {
         <div class="form-group" style="flex: 1 1 100%;">
           <label class="form-label">Cedula de identidad y carnet de tipo sanguineo</label>
           <small style="display:block; color:#047857; font-weight:700;">
-            ${bloodCard ? 'Documento consolidado completo' : 'Cedula cargada; falta agregar el carnet'}
+            ${bloodCard ? 'Cedula y carnet cargados' : 'Cedula cargada; falta agregar el carnet'}
           </small>
           ${uploaded.file_url ? `<a class="btn btn-small btn-secondary view-document-btn" style="margin-top:.5rem; display:inline-block" href="#" data-file-url="${uploaded.file_url}">Ver PDF actual</a>` : ''}
           ${!bloodCard ? `
@@ -1951,6 +2150,7 @@ class StudentProfileView extends Component {
       <div class="form-group" style="flex: 1 1 100%;">
         <label class="form-label">Cédula de identidad (PDF escaneado)</label>
         <input type="file" class="form-input" id="cedula-pdf-file" accept="application/pdf,.pdf">
+        ${!bloodCard ? `<label class="form-label" style="display:flex;align-items:center;gap:.6rem;margin-top:.75rem;"><input type="checkbox" id="cedula-pdf-includes-blood-card">Este PDF incluye la c&eacute;dula y el carnet de tipo de sangre</label>` : ''}
         <button type="button" class="btn btn-primary" id="upload-cedula-pdf" style="margin-top:.65rem;">Subir PDF de c&eacute;dula</button>
         <small id="cedula-pdf-status" style="display:block; margin-top:.5rem; color:var(--gray-500);">
           Selecciona el PDF escaneado de la c&eacute;dula.
@@ -1965,6 +2165,11 @@ class StudentProfileView extends Component {
     const button = document.getElementById('upload-cedula-pdf');
     const status = document.getElementById('cedula-pdf-status');
     if (!fileInput || !button || !status) return;
+
+    const combined = document.getElementById('cedula-pdf-includes-blood-card');
+    combined?.addEventListener('change', () => {
+      button.textContent = combined.checked ? 'Subir PDF de cedula y carnet' : 'Subir PDF de cedula';
+    });
 
     button.addEventListener('click', async () => {
       const file = fileInput.files?.[0];
@@ -1982,13 +2187,15 @@ class StudentProfileView extends Component {
       }
       try {
         button.disabled = true;
+        const includesBloodCard = Boolean(combined?.checked);
         status.textContent = 'Subiendo PDF de cedula...';
         const fileUrl = await this.readFileAsDataUrl(file);
         const response = await ApiService.createDocument(studentId, {
-          type: 'cedula', name: file.name, fileUrl,
+          type: includesBloodCard ? 'registro_documentos' : 'cedula', name: file.name, fileUrl,
+          includesBloodCard,
         });
         if (!response.success) throw new Error('No se pudo guardar el PDF de cedula.');
-        status.textContent = 'PDF de cedula cargado correctamente.';
+        status.textContent = includesBloodCard ? 'Cedula y carnet guardados con el mismo PDF.' : 'PDF de cedula cargado correctamente.';
         window.dispatchEvent(new CustomEvent('erp:dataChanged', { detail: { collection: 'documents', action: 'cedula-pdf-uploaded' } }));
       } catch (error) {
         status.textContent = error.message || 'No se pudo subir el PDF.';
@@ -2017,7 +2224,7 @@ class StudentProfileView extends Component {
       const uploadUrl = localOrigin && token.localUploadUrl
         ? token.localUploadUrl
         : `${window.location.origin}/mobile-upload/${token.token}`;
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(uploadUrl)}`;
+      const qrUrl = await renderQrDataUrl(uploadUrl, { width: 220, margin: 12 });
 
       modal.innerHTML = `
         <div class="modal mobile-capture-modal">
@@ -2124,7 +2331,7 @@ class StudentProfileView extends Component {
       const uploadUrl = localOrigin && token.localUploadUrl
         ? token.localUploadUrl
         : `${window.location.origin}/mobile-upload/${token.token}`;
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(uploadUrl)}`;
+      const qrUrl = await renderQrDataUrl(uploadUrl, { width: 220, margin: 12 });
 
       modal.innerHTML = `
         <div class="modal mobile-capture-modal">
@@ -2217,11 +2424,17 @@ class StudentProfileView extends Component {
     document.querySelectorAll('.view-document-btn').forEach(link => {
       link.addEventListener('click', async event => {
         event.preventDefault();
-        const dataUrl = link.dataset.fileUrl;
+        let dataUrl = link.dataset.fileUrl;
         if (!dataUrl) return;
 
         const preview = window.open('', '_blank');
         try {
+          if (/^\/api\/students\/[^/]+\/documents\/[^/]+\/content$/.test(dataUrl)) {
+            const result = await apiClient.get(dataUrl.replace(/^\/api/,''));
+            if (!result.success || !result.data?.file_url) throw new Error('Archivo no disponible');
+            dataUrl = result.data.file_url;
+          }
+          if (!/^data:(application\/pdf|image\/(jpeg|png));base64,/i.test(dataUrl) && !/^https?:\/\//i.test(dataUrl)) throw new Error('Archivo no valido');
           const response = await fetch(dataUrl);
           const file = await response.blob();
           const fileUrl = URL.createObjectURL(file);

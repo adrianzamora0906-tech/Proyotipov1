@@ -430,6 +430,8 @@ class SidebarLayout {
       this.initializeEventListeners();
     }
     this.updateNotificationBadge();
+    import('../services/InstructorChangeFeedback.js').then(module=>module.instructorChangeFeedback.start()).catch(error=>console.warn('Seguimiento:',error.message));
+    import('../services/PaymentVoidInbox.js').then(module => module.paymentVoidInbox.mount()).catch(error => console.warn('Bandeja de anulaciones:',error.message));
     this.startInstructorScheduleChangePolling();
   }
 

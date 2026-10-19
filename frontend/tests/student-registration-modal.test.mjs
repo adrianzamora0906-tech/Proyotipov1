@@ -11,7 +11,7 @@ test('el modal de Nuevo Estudiante se cierra al confirmar el horario', () => {
   assert.notEqual(submitStart, -1, 'No se encontró handleStudentSubmit');
   assert.notEqual(submitEnd, -1, 'No se pudo delimitar el flujo de matrícula');
 
-  const scheduleConfirmed = submitFlow.indexOf('await this.selectStudentSchedule(student.id, scheduleId, schedulePlan)');
+  const scheduleConfirmed = submitFlow.indexOf('await this.selectStudentSchedule(student.id, scheduleId, {...schedulePlan,enrollmentId:student.enrollment_id})');
   const modalClosed = submitFlow.indexOf('this.closeStudentModal();', scheduleConfirmed);
   const paymentContinues = submitFlow.indexOf('if (shouldCollectPayment) {', modalClosed);
 

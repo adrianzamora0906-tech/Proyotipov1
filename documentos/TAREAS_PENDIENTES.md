@@ -4,6 +4,17 @@ Actualizado: 12 de octubre de 2026.
 
 Este archivo registra pendientes acordados. Las tareas declaradas completas no se reabren aqui.
 
+## Seguimiento bilateral de cambios de instructor (19/10/2026)
+
+Estado: implementado el 19/10/2026 tras aprobacion del usuario. Requiere reinicio manual del backend y recarga del frontend. No bloquea la reasignacion de clases esperando respuestas.
+
+- Solicitar al estudiante, en su perfil, su motivo del cambio de instructor.
+- Solicitar de forma independiente al instructor anterior su version de lo ocurrido.
+- Cada participante no ve la respuesta del otro; administracion consulta ambas, autor y fecha.
+- Registrar estados pendiente, respondido y revisado, con recordatorios y trazabilidad.
+- El nuevo instructor solo recibe informacion operativa para continuar las clases.
+- Implementado para nuevos cambios de instructor en cambio de practicas pendientes y edicion completa. No crea solicitudes retroactivas para cambios anteriores.
+
 ## 1. Cambio de curso con ajuste financiero y aprobacion del gerente
 
 Estado: pendiente de definir detalles e implementar. Continuacion de la tarea 6 (edicion del estudiante).

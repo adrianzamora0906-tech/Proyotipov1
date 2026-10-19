@@ -345,7 +345,7 @@ class CashOperationsView extends Component {
         btn = host.querySelector("#cash-op-save");
       btn.disabled = true;
       try {
-        await ApiService.createTransferVerification({
+        const transferResult = await ApiService.createTransferVerification({
           studentId: p.studentId || p.student?.id,
           serviceTransactionId: p.serviceTransactionId || null,
           amount: Number(fd.get("amount")),
@@ -354,6 +354,10 @@ class CashOperationsView extends Component {
           transferDate: fd.get("transferDate"),
           proofUrl: fd.get("proofUrl"),
         });
+        if (transferResult.success && transferResult.data?.id) {
+          const { showTransferReceipt } = await import('../../services/TransferReceipt.js');
+          await showTransferReceipt(transferResult.data.id);
+        }
         this.refresh();
       } catch (e) {
         btn.disabled = false;

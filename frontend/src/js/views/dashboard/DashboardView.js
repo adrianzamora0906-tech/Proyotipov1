@@ -55,14 +55,7 @@ class DashboardView extends Component {
     const recentActivity = DashboardService.getRecentActivity(8, students);
     let voidRequests = [];
     let reviewedRequests = [];
-    {
-      try { voidRequests = (await ApiService.getPendingPaymentVoidRequests()).data || []; }
-      catch (error) { console.warn('No se cargaron solicitudes críticas:', error.message); }
-    }
-    if (canViewPayments) {
-      try { reviewedRequests = (await ApiService.getMyReviewedPaymentVoidRequests()).data || []; }
-      catch (error) { console.warn('No se cargaron respuestas de anulación:', error.message); }
-    }
+    // La bandeja compartida recibe pendientes y respuestas por WebSocket en todas las pantallas.
     const safe = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[character]));
 
     const dashboardContent = `

@@ -5,6 +5,7 @@ import StudentService from '../../services/StudentService.js';
 import ApiService from '../../core/api/apiService.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
+import { paymentVoidInbox } from '../../services/PaymentVoidInbox.js';
 
 class PendingPaymentsView extends Component {
   static branchCache = null;
@@ -176,7 +177,8 @@ class PendingPaymentsView extends Component {
           <div class="filter-actions"><button type="button" class="btn btn-secondary" id="filter-clear">Limpiar filtros</button></div>
         </form>
         <section class="payment-workspace">
-          <nav class="payment-tabs" aria-label="Tipos de pagos"><button class="payment-tab active" type="button" data-payment-tab="pending">Pendientes <b>${this.pendingAll.length}</b></button><button class="payment-tab" type="button" data-payment-tab="receipts">Realizados <b>-</b></button></nav>
+          <nav class="payment-tabs" aria-label="Tipos de pagos"><button class="payment-tab active" type="button" data-payment-tab="pending">Pendientes <b>${this.pendingAll.length}</b></button><button class="payment-tab" type="button" data-payment-tab="receipts">Realizados <b>-</b></button><button class="payment-tab" type="button" data-payment-tab="voids">Anulaciones pendientes <b>-</b></button></nav>
+          <div class="payment-panel" data-payment-panel="voids"><div class="payment-panel-title"><h2>Anulaciones pendientes</h2><span id="void-result-count" aria-live="polite"></span></div><div id="void-requests-content">Cargando anulaciones...</div></div>
           <div class="payment-panel active" data-payment-panel="pending"><div class="payment-panel-title"><h2>Pagos pendientes</h2><span id="pending-result-count">${this.pendingAll.length} resultados</span></div><div class="cash-table-wrap"><table class="cash-table"><thead><tr><th>Estudiante</th><th>Cédula</th><th>Curso</th><th>Transferencia</th><th>Saldo</th><th>Acción</th></tr></thead><tbody id="pending-payments-body">${pendingRows}</tbody></table></div><div id="pending-payments-pagination" class="cash-pagination"></div></div>
           <div class="payment-panel" data-payment-panel="receipts"><div class="payment-panel-title"><h2>Pagos realizados</h2><span id="receipts-result-count">${this.receiptsAll.length} resultados</span></div><div class="cash-table-wrap"><table class="cash-table"><thead><tr><th>Estudiante</th><th>Cédula</th><th>Curso</th><th>Abonó</th><th>Comprobante</th><th>Acción</th></tr></thead><tbody id="receipts-body">${receiptRows}</tbody></table></div><div id="receipts-pagination" class="cash-pagination"></div></div>
         </section>
@@ -191,6 +193,14 @@ class PendingPaymentsView extends Component {
   }
 
   async mount() {
+    this.voidInboxListener = () => { if (!this.disposed) this.renderVoidRequests(); };
+    window.addEventListener('erp:payment-void-inbox', this.voidInboxListener);
+    this.renderVoidRequests();
+    paymentVoidInbox.refresh();
+    document.querySelector('[data-payment-panel="voids"]')?.addEventListener('click', event => {
+      if (event.target.closest('[data-review-voids]')) paymentVoidInbox.renderInbox();
+      if (event.target.closest('[data-retry-voids]')) paymentVoidInbox.refresh();
+    });
     const openModal = async (studentId, branchIdFromRow = '', serviceTransactionId = '',enrollmentId=null) => {
       const student = await StudentService.getStudent(studentId);
       if (!student) return;
@@ -393,6 +403,7 @@ class PendingPaymentsView extends Component {
   }
 
   applyPendingFilters() {
+    this.renderVoidRequests();
     const search = (document.getElementById('filter-cedula')?.value || '').trim().toLowerCase();
     const branch = document.getElementById('filter-branch')?.value || '';
     const from = document.getElementById('filter-from')?.value || '';
@@ -434,6 +445,36 @@ class PendingPaymentsView extends Component {
     });
     this.renderPendingTable();
     this.renderReceiptsTable();
+  }
+
+  renderVoidRequests() {
+    const content = document.getElementById('void-requests-content');
+    if (!content) return;
+    const all = paymentVoidInbox.pending || [];
+    const count = document.querySelector('[data-payment-tab="voids"] b');
+    if (!paymentVoidInbox.pending && !paymentVoidInbox.error) {
+      if (count) count.textContent = '-';
+      content.textContent = 'Cargando anulaciones...';
+      return;
+    }
+    if (count) count.textContent = paymentVoidInbox.error ? '!' : all.length;
+    if (paymentVoidInbox.error) {
+      content.innerHTML = `<p role="alert">${this.escape(paymentVoidInbox.error)}</p><button type="button" class="btn btn-secondary" data-retry-voids>Reintentar</button>`;
+      return;
+    }
+    const search = document.getElementById('filter-cedula')?.value.trim().toLowerCase() || '';
+    const branch = document.getElementById('filter-branch')?.value || '';
+    const from = document.getElementById('filter-from')?.value || '';
+    const to = document.getElementById('filter-to')?.value || '';
+    const dateKey = value => new Intl.DateTimeFormat('en-CA', {timeZone:'America/Guayaquil',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(value));
+    const rows = all.filter(row => {
+      if (search && !`${row.student_name} ${row.identification}`.toLowerCase().includes(search)) return false;
+      if (branch && row.branch_id !== branch) return false;
+      const date = row.requested_at ? dateKey(row.requested_at) : '';
+      return (!from || date >= from) && (!to || date <= to);
+    });
+    document.getElementById('void-result-count').textContent = `${rows.length} resultados`;
+    content.innerHTML = rows.length ? `<div class="cash-table-wrap"><table class="cash-table"><thead><tr><th>Estudiante</th><th>Sucursal</th><th>Pago</th><th>Solicitado por</th><th>Fecha y hora</th><th>Motivo</th><th>Accion</th></tr></thead><tbody>${rows.map(row => `<tr><td><a href="/student-profile/${encodeURIComponent(row.student_id)}">${this.escape(row.student_name)}</a><small style="display:block">${this.escape(row.identification)}</small></td><td>${this.escape(row.branch_name)}</td><td>${this.money(row.amount)}<small style="display:block">${this.escape(row.payment_method)}</small></td><td>${this.escape(row.requested_by_name)}</td><td>${row.requested_at ? new Intl.DateTimeFormat('es-EC',{timeZone:'America/Guayaquil',dateStyle:'short',timeStyle:'short'}).format(new Date(row.requested_at)) : 'Sin registrar'}</td><td>${this.escape(row.reason)}</td><td><button type="button" class="btn btn-secondary" data-review-voids>Revisar</button></td></tr>`).join('')}</tbody></table></div>` : '<p>No hay anulaciones pendientes para tu usuario con estos filtros.</p>';
   }
 
   renderPendingTable() {
@@ -527,6 +568,7 @@ class PendingPaymentsView extends Component {
   }
 
   unmount() {
+    window.removeEventListener('erp:payment-void-inbox', this.voidInboxListener);
     this.disposed=true;
     if (this.refreshTimer) window.clearInterval(this.refreshTimer);
     super.unmount();

@@ -6,6 +6,7 @@
 import { storageService } from '../core/storage/StorageService.js';
 import ApiService from '../core/api/apiService.js';
 import { authService } from '../core/auth/AuthService.js';
+import { showTransferReceipt } from './TransferReceipt.js';
 
 class PaymentService {
   static useApi = true;
@@ -93,6 +94,7 @@ class PaymentService {
         });
         if (result.success) {
           if (result.data.pendingTransfer) {
+            await showTransferReceipt(result.data.transfer?.id);
             return { success:true, pendingTransfer:true, transfer:result.data.transfer };
           }
           const response = {

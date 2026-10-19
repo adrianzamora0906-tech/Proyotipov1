@@ -17,14 +17,19 @@ function paint() {
     const instructorId = calendar?.querySelector('[data-course-instructor-id].active')?.dataset.courseInstructorId
       || document.getElementById('preferred-instructor-select')?.value;
     const times = String(slot.time || '').match(/(\d{2}:\d{2})\s*[-–]\s*(\d{2}:\d{2})/);
-    const blocked = Boolean(times && holds.some(hold => !hold.mine && hold.slots.some(held =>
-      held.instructorId === instructorId && held.date === slot.date && held.start < times[2] && held.end > times[1])));
+    const mode = document.getElementById('selected-practical-mode')?.value === 'exam_only' ? 'exam_only' : 'classes';
+    const competing = times ? holds.filter(hold => !hold.mine && hold.slots.some(held =>
+      (held.mode || 'classes') === mode && held.instructorId === instructorId && held.date === slot.date
+        && (mode === 'exam_only' ? held.start === times[1] : held.start < times[2] && held.end > times[1]))) : [];
+    const blocked = competing.length >= (mode === 'exam_only' ? 2 : 1);
     if (blocked) {
       if (!cell.dataset.selectionHeld) {
         cell.dataset.selectionHeld = 'true';
         cell.dataset.selectionWasDisabled = String(cell.disabled);
       }
-      cell.disabled = true;
+      // Conserva el doble clic para examen; el clic de clase comprueba selectionHeld.
+      cell.disabled = mode === 'exam_only';
+      cell.setAttribute('aria-disabled','true');
       cell.title = 'En seleccion por otro usuario';
       const label = cell.querySelector('.schedule-option-capacity');
       if (label) {
@@ -33,6 +38,7 @@ function paint() {
       }
     } else if (cell.dataset.selectionHeld) {
       cell.disabled = cell.dataset.selectionWasDisabled === 'true';
+      cell.setAttribute('aria-disabled',String(cell.disabled));
       delete cell.dataset.selectionHeld;
       delete cell.dataset.selectionWasDisabled;
       cell.removeAttribute('title');
@@ -69,9 +75,10 @@ function start() {
   }, 25000);
 }
 function selectionSlots(plan, instructorId) {
+  const mode = document.getElementById('selected-practical-mode')?.value === 'exam_only' ? 'exam_only' : 'classes';
   return instructorId ? plan.map(slot => {
     const times = String(slot.time || '').match(/(\d{2}:\d{2})\s*[-–]\s*(\d{2}:\d{2})/);
-    return times ? { instructorId, cycleId:slot.cycleId, date:slot.date, start:times[1], end:times[2] } : null;
+    return times ? { instructorId, cycleId:slot.cycleId, date:slot.date, start:times[1], end:times[2], mode } : null;
   }).filter(slot => slot?.cycleId) : [];
 }
 let checking = false, requestNumber = 0;

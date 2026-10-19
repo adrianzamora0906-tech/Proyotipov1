@@ -102,10 +102,10 @@ class InstructorDashboardView extends Component {
     const entries = course?.students || [];
     const students = entries.filter(item => item.type !== 'block');
     const occupations = entries.filter(item => item.type === 'block');
-    const courseType = /moto/i.test(course?.course || '') ? 'Moto' : 'Automóvil';
+    const courseType = course?.isAdditionalPractice ? 'Horas practicas' : /moto/i.test(course?.course || '') ? 'Moto' : 'Automóvil';
     return `<div class="instructor-schedule-course">
       <div class="instructor-students-summary">
-        <span class="matriculated">${students.length} matriculado${students.length === 1 ? '' : 's'}</span>
+        <span class="matriculated">${students.length} ${course?.isAdditionalPractice ? (students.length === 1 ? 'estudiante de practicas' : 'estudiantes de practicas') : `matriculado${students.length === 1 ? '' : 's'}`}</span>
         ${occupations.length ? `<span class="transport">${occupations.length} ocupaci${occupations.length === 1 ? 'on' : 'ones'}</span>` : ''}
         <span class="reserved">${escapeHtml(course?.code || '')}</span>
       </div>

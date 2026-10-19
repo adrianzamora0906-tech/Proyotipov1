@@ -1467,12 +1467,25 @@ class CourseCycleService {
     return { date: officialStartDate, officialStartDate, available: false, advanced: false };
   }
 
-  static async getStudentScheduleChangeOptions(user, studentId) {
+  static async scheduleChangeInstructors(cycle, client = db) {
+    return (await client.query(`SELECT ip.id,TRIM(CONCAT_WS(' ',u.first_name,u.last_name)) name
+      FROM instructor_profiles ip JOIN users u ON u.id=ip.user_id AND u.active=TRUE
+      JOIN branches home ON home.id=u.branch_id
+      JOIN branches target ON target.id=$1 AND target.city_id=home.city_id
+      JOIN instructor_course_capabilities cap ON cap.instructor_id=ip.id AND cap.course_id=$2 AND cap.active=TRUE
+      WHERE ip.status='activo' AND ip.deleted_at IS NULL AND NOT EXISTS (
+        SELECT 1 FROM instructor_branch_priorities p WHERE p.instructor_id=ip.id AND p.active=TRUE
+        AND p.assignment_type='priority' AND p.effective_from<=CURRENT_DATE
+        AND (p.effective_until IS NULL OR p.effective_until>=CURRENT_DATE) AND p.branch_id<>$1)
+      ORDER BY name`,[cycle.branch_id,cycle.course_id])).rows;
+  }
+
+  static async getStudentScheduleChangeOptions(user, studentId, filters = {}) {
     if (!studentId) throw createError(422, 'Estudiante requerido');
 
     const params = [studentId];
     let branchFilter = '';
-    if (user.branch_id) {
+    if (user.branch_id && !user.globalAccess) {
       params.push(user.branch_id);
       branchFilter = `AND EXISTS (
         SELECT 1 FROM branches scope_branch
@@ -1519,7 +1532,10 @@ class CourseCycleService {
     const row = cycleResult.rows[0];
     const assignmentsResult = await db.query(`
       SELECT a.id, a.schedule_date, a.start_time, a.end_time, a.instructor_id,
-             concat_ws(' ', u.first_name, u.last_name) AS instructor_name
+             concat_ws(' ', u.first_name, u.last_name) AS instructor_name,
+             NOT EXISTS(SELECT 1 FROM practical_sessions ps WHERE ps.enrollment_id=a.enrollment_id
+               AND ps.deleted_at IS NULL AND ps.scheduled_start=a.schedule_date+a.start_time
+               AND ps.status NOT IN ('PROGRAMADA','PROXIMA','CANCELADA','REPROGRAMADA')) can_move
       FROM course_cycle_schedule_assignments a
       LEFT JOIN instructor_profiles ip ON ip.id = a.instructor_id
       LEFT JOIN users u ON u.id = ip.user_id
@@ -1533,11 +1549,17 @@ class CourseCycleService {
       endTime: normalizeTime(assignment.end_time),
       instructorId: assignment.instructor_id,
       instructorName: assignment.instructor_name,
+      canMove: assignment.can_move,
     }));
     const assignedInstructor = currentAssignments.find(assignment => assignment.instructorId) || null;
     if (!assignedInstructor) {
       throw createError(404, 'El estudiante no tiene un instructor practico asignado');
     }
+
+    const instructors = await this.scheduleChangeInstructors(row);
+    const selectedInstructor = filters.instructor_id ? instructors.find(item=>String(item.id)===String(filters.instructor_id)) : null;
+    if (filters.instructor_id && !selectedInstructor) throw createError(422,'Instructor no disponible para este curso y canton');
+    const targetInstructor = selectedInstructor || {id:assignedInstructor.instructorId,name:assignedInstructor.instructorName};
 
     const occupancyResult = await db.query(`
       SELECT schedule_date,start_time,end_time,COUNT(*)::int AS occupied
@@ -1553,15 +1575,27 @@ class CourseCycleService {
         SELECT schedule_date,start_time,end_time
         FROM instructor_availability_overrides
         WHERE instructor_id=$1 AND active=TRUE
+        UNION ALL SELECT ps.scheduled_start::date,ps.scheduled_start::time,ps.scheduled_end::time
+          FROM practical_sessions ps JOIN enrollments e ON e.id=ps.enrollment_id
+          WHERE ps.instructor_id=$1 AND e.student_id<>$2 AND ps.deleted_at IS NULL AND ps.status NOT IN ('CANCELADA','REPROGRAMADA')
+        UNION ALL SELECT d::date,ap.daily_start_time,(ap.daily_start_time+INTERVAL '100 minutes')::time
+          FROM additional_driving_practices ap CROSS JOIN LATERAL generate_series(ap.start_date,ap.start_date+ap.number_of_days-1,INTERVAL '1 day') d
+          WHERE ap.instructor_id=$1 AND ap.student_id<>$2 AND ap.status IN ('SCHEDULED','IN_PROGRESS')
       ) instructor_occupation
       GROUP BY schedule_date,start_time,end_time
-    `, [assignedInstructor.instructorId, studentId]);
+    `, [targetInstructor.id, studentId]);
     const occupancy = new Map(occupancyResult.rows.map(item => [
       `${toDateString(item.schedule_date)}:${normalizeTime(item.start_time)}:${normalizeTime(item.end_time)}`,
       Number(item.occupied),
     ]));
     const capacity = 1;
     const dates = cycleDates(row);
+    const theory = (await db.query('SELECT class_date,start_time,end_time,recurring,modality FROM theory_class_schedules WHERE instructor_id=$1 AND active=TRUE',[targetInstructor.id])).rows;
+    for (const date of dates) for (const [start,end] of practicalSlots(row)) {
+      const weekday=new Date(`${date}T12:00:00`).getDay();
+      if (occupancyResult.rows.some(b=>toDateString(b.schedule_date)===date&&normalizeTime(b.start_time)<end&&normalizeTime(b.end_time)>start)
+        || theory.some(t=>(toDateString(t.class_date)===date||(t.recurring&&((t.modality==='presencial_regular'&&weekday>=1&&weekday<=5)||(t.modality==='presencial_sabado'&&weekday===6))))&&normalizeTime(t.start_time)<end&&normalizeTime(t.end_time)>start)) occupancy.set(`${date}:${start}:${end}`,1);
+    }
 
     return {
       id: row.id,
@@ -1584,9 +1618,11 @@ class CourseCycleService {
           : 'presencial_regular',
       group: row.group_code ? { code: row.group_code, name: row.group_name } : null,
       slotCapacity: capacity,
+      instructors,
+      selectedInstructorId: targetInstructor.id,
       instructor: {
-        id: assignedInstructor.instructorId,
-        name: assignedInstructor.instructorName,
+        id: targetInstructor.id,
+        name: targetInstructor.name,
       },
       currentAssignments,
       slots: practicalSlots(row).map(([startTime, endTime]) => {
@@ -1637,11 +1673,31 @@ class CourseCycleService {
       `, [cycleId]);
       if (!cycleResult.rows.length) throw createError(404, 'Curso vigente no encontrado');
       const cycle = cycleResult.rows[0];
-      if (user.branch_id && String(user.branch_id) !== String(cycle.branch_id)) {
-        throw createError(403, 'No tienes acceso a este curso');
+      const targetInstructorId = data.instructorId || null;
+      if (targetInstructorId && !(await this.scheduleChangeInstructors(cycle,client)).some(item=>String(item.id)===String(targetInstructorId))) {
+        throw createError(422,'Instructor no disponible para este curso y canton');
+      }
+      if (!user.globalAccess && user.branch_id && String(user.branch_id) !== String(cycle.branch_id)) {
+        const sameCity=await client.query('SELECT 1 FROM branches source JOIN branches target ON target.city_id=source.city_id WHERE source.id=$1 AND target.id=$2',[user.branch_id,cycle.branch_id]);
+        if (!sameCity.rows.length) throw createError(403, 'No tienes acceso a este curso');
       }
       const validDates = cycleDates(cycle);
       const today = toDateString(new Date());
+      if (data.replaceAllPending === true) {
+        const pending = await client.query(`SELECT a.id
+          FROM course_cycle_schedule_assignments a
+          WHERE a.student_id=$1 AND a.cycle_id=$2 AND a.status='activo'
+            AND a.schedule_date >= CURRENT_DATE
+            AND NOT EXISTS (SELECT 1 FROM practical_sessions ps
+              WHERE ps.enrollment_id=a.enrollment_id AND ps.deleted_at IS NULL
+                AND ps.scheduled_start=a.schedule_date+a.start_time
+                AND ps.status NOT IN ('PROGRAMADA','PROXIMA','CANCELADA','REPROGRAMADA'))
+          FOR UPDATE OF a`, [studentId,cycleId]);
+        if (!pending.rows.length || sourceIds.length !== pending.rows.length
+          || pending.rows.some(row => !sourceIds.includes(row.id))) {
+          throw createError(409,'Las clases pendientes cambiaron. Vuelve a abrir el calendario y selecciona todas.');
+        }
+      }
       if (requestedChanges.length > validDates.length) {
         throw createError(422, 'La cantidad de cambios supera los dias del curso');
       }
@@ -1670,6 +1726,7 @@ class CourseCycleService {
       const capacity = Number(capacityResult.rows[0]?.slot_capacity) || 1;
       const insertedAssignments = [];
       const notificationDetails = new Map();
+      const feedbackChanges = [];
 
       for (const change of changes) {
         const { date, startTime, endTime } = change;
@@ -1685,6 +1742,10 @@ class CourseCycleService {
           throw createError(404, `El estudiante no tiene un horario asignado para el dia ${date}`);
         }
         const current = currentResult.rows[0];
+        const nextInstructorId = targetInstructorId || current.instructor_id;
+        for (const id of [...new Set([current.instructor_id,nextInstructorId])].filter(Boolean).sort()) {
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`instructor-slot:${id}:${date}:${startTime}:${endTime}`]);
+        }
         if (currentResult.rows.length > 1) throw createError(422,'Selecciona la clase actual que deseas trasladar');
         const previousDate = toDateString(current.schedule_date);
         if (previousDate < today) throw createError(422,'No puedes trasladar una clase de una fecha pasada');
@@ -1694,7 +1755,8 @@ class CourseCycleService {
             AND status NOT IN ('PROGRAMADA','PROXIMA','CANCELADA','REPROGRAMADA') LIMIT 1`,
         [current.enrollment_id,current.instructor_id,previousDate,current.start_time]);
         if (startedClass.rows.length) throw createError(409,'La clase ya fue iniciada o realizada y no puede trasladarse');
-        if (previousDate === date && normalizeTime(current.start_time) === startTime && normalizeTime(current.end_time) === endTime) {
+        if (previousDate === date && normalizeTime(current.start_time) === startTime && normalizeTime(current.end_time) === endTime && nextInstructorId === current.instructor_id) {
+          if (data.replaceAllPending === true) continue;
           throw createError(409, `El horario seleccionado para ${date} ya es el actual`);
         }
         const studentConflict = await client.query(`SELECT 1 FROM course_cycle_schedule_assignments
@@ -1716,6 +1778,10 @@ class CourseCycleService {
           throw createError(409, `No hay cupos disponibles el ${date} en ese horario`);
         }
         if (current.instructor_id) {
+          const theoryConflict = await client.query(`SELECT 1 FROM theory_class_schedules WHERE instructor_id=$1 AND active=TRUE
+            AND (class_date=$2::date OR (recurring=TRUE AND ((modality='presencial_regular' AND EXTRACT(DOW FROM $2::date) BETWEEN 1 AND 5) OR (modality='presencial_sabado' AND EXTRACT(DOW FROM $2::date)=6))))
+            AND start_time<$4::time AND end_time>$3::time LIMIT 1`,[nextInstructorId,date,startTime,endTime]);
+          if (theoryConflict.rows.length) throw createError(409,'El instructor tiene teoria en ese horario');
           const instructorConflict = await client.query(`
             SELECT 1 FROM (
               SELECT schedule_date,start_time,end_time FROM course_cycle_schedule_assignments
@@ -1733,7 +1799,7 @@ class CourseCycleService {
                   generate_series(ap.start_date,ap.start_date+(ap.number_of_days-1),INTERVAL '1 day') d
                 WHERE ap.instructor_id=$1 AND ap.student_id<>$5 AND ap.status IN ('SCHEDULED','IN_PROGRESS')
             ) busy WHERE schedule_date=$2::date AND start_time<$4::time AND end_time>$3::time LIMIT 1
-          `, [current.instructor_id, date, startTime, endTime, studentId]);
+          `, [nextInstructorId, date, startTime, endTime, studentId]);
           if (instructorConflict.rows.length) {
             throw createError(409, `El instructor del estudiante ya esta ocupado el ${date} en ese horario`);
           }
@@ -1758,16 +1824,22 @@ class CourseCycleService {
             start_time, end_time, instructor_id, status, created_by
           ) VALUES ($1, $2, $3, $4, $5::time, $6::time, $7, 'activo', $8)
           RETURNING *
-        `, [cycleId, current.enrollment_id, studentId, date, startTime, endTime, current.instructor_id, user.id]);
+        `, [cycleId, current.enrollment_id, studentId, date, startTime, endTime, nextInstructorId, user.id]);
+        await require('./AuditService').log({userId:user.id,role:user.role,branchId:cycle.branch_id,
+          action:'STUDENT_PENDING_CLASS_REASSIGNED',module:'HORARIOS',entityType:'SCHEDULE_ASSIGNMENT',entityId:inserted.rows[0].id,
+          oldValues:{assignmentId:current.id,instructorId:current.instructor_id,date:previousDate,startTime:normalizeTime(current.start_time)},
+          newValues:{instructorId:nextInstructorId,date,startTime,endTime,observation},description:'Cambio de clase pendiente; conserva sesiones realizadas y pagos'},client);
         insertedAssignments.push(inserted.rows[0]);
-        if (current.instructor_id) {
-          const details = notificationDetails.get(String(current.instructor_id)) || [];
+        feedbackChanges.push({studentId,enrollmentId:current.enrollment_id,branchId:cycle.branch_id,
+          previousInstructorId:current.instructor_id,newInstructorId:nextInstructorId,assignmentId:inserted.rows[0].id});
+        for (const notifiedInstructor of [...new Set([current.instructor_id,nextInstructorId])].filter(Boolean)) {
+          const details = notificationDetails.get(String(notifiedInstructor)) || [];
           details.push({
             date,
             previous: `${previousDate} ${normalizeTime(current.start_time)} - ${normalizeTime(current.end_time)}`,
             next: `${startTime} - ${endTime}`,
           });
-          notificationDetails.set(String(current.instructor_id), details);
+          notificationDetails.set(String(notifiedInstructor), details);
         }
         await client.query(
           'INSERT INTO history (student_id, action) VALUES ($1, $2)',
@@ -1787,7 +1859,21 @@ class CourseCycleService {
           item.instructorId,
           user.id
         );
+        if (data.instructorId) {
+          const pending = (await client.query(`SELECT MIN(a.schedule_date) start_date,MAX(a.schedule_date) end_date,
+            COUNT(DISTINCT a.instructor_id)::int instructors,MIN(a.instructor_id::text) instructor_id
+            FROM course_cycle_schedule_assignments a WHERE a.enrollment_id=$1 AND a.status='activo'
+              AND a.schedule_date>=CURRENT_DATE AND NOT EXISTS(SELECT 1 FROM practical_sessions ps
+                WHERE ps.enrollment_id=a.enrollment_id AND ps.deleted_at IS NULL
+                AND ps.scheduled_start=a.schedule_date+a.start_time AND ps.status NOT IN ('PROGRAMADA','PROXIMA','CANCELADA','REPROGRAMADA'))`,[item.enrollmentId])).rows[0];
+          if (pending?.instructors===1 && pending.instructor_id===data.instructorId) {
+            await client.query('UPDATE enrollment_instructor_assignments SET active=FALSE,updated_at=NOW() WHERE enrollment_id=$1 AND active=TRUE',[item.enrollmentId]);
+            await client.query(`INSERT INTO enrollment_instructor_assignments(enrollment_id,instructor_id,assigned_by,start_date,end_date,observations)
+              VALUES($1,$2,$3,$4,$5,$6)`,[item.enrollmentId,data.instructorId,user.id,pending.start_date,pending.end_date,observation]);
+          }
+        }
       }
+      await require('./InstructorChangeFeedbackService').create(feedbackChanges,user,observation,client);
       const student = (await client.query(`
         SELECT concat_ws(' ', first_name, last_name) AS name
         FROM students WHERE id = $1

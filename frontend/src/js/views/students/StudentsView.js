@@ -4,6 +4,7 @@
  */
 
 import Component from '../../components/Component.js';
+import { renderQrDataUrl } from '../../lib/qrcodeRealLocal.js';
 import { subscribeRealtime } from '../../core/realtime/RealtimeClient.js';
 import { holdScheduleSelection, confirmScheduleSelection } from '../../core/realtime/ScheduleSelectionHolds.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
@@ -889,7 +890,7 @@ class StudentsView extends Component {
                 <div class="form-error" id="blood-type-card-error"></div>
                 <div class="additional-practice-only additional-practice-documents" hidden>
                   <div class="alert alert-info" style="display:flex"><div class="alert-content" id="additional-practice-document-help">Busca primero a la persona para conocer los documentos requeridos.</div></div>
-                  <span class="form-label required">Documento</span>
+                  <span class="form-label">Documento (opcional)</span>
                   <div class="registration-document-options">
                     <label class="registration-document-field">
                       <input type="file" class="form-input" name="additionalPracticeDocumentsFile" accept=".pdf,application/pdf,image/jpeg,image/png" capture="environment">
@@ -1577,6 +1578,12 @@ class StudentsView extends Component {
     form?.querySelectorAll('.referral-eligible-field input').forEach(field => { field.disabled = isRenewal; });
     this.setNormalCourseRequiredFields(!isRenewal && !isAdditionalPractice);
     this.setTemporaryReservationFieldsOptional(isRenewal || this.temporaryReservationMode);
+    const birthDate = form?.querySelector('[name="birthDate"]');
+    if (birthDate) {
+      birthDate.disabled = isAdditionalPractice;
+      if (isAdditionalPractice) birthDate.required = false;
+      birthDate.closest('.form-row').hidden = isAdditionalPractice;
+    }
     const title = document.getElementById('student-modal-title');
     if (title) title.textContent = isRenewal ? 'Registrar renovación de licencia' : (isAdditionalPractice ? 'Registrar prácticas adicionales' : 'Nuevo Estudiante');
     document.querySelector('.student-modal-steps')?.classList.toggle('renewal-mode', isRenewal);
@@ -1710,8 +1717,8 @@ class StudentsView extends Component {
     }
     const help = document.getElementById('additional-practice-document-help');
     if (help) help.textContent = result.data
-      ? 'Estudiante registrado: adjunta únicamente su licencia en PDF.'
-      : 'Persona externa: adjunta cédula y licencia juntas en un único PDF.';
+      ? 'La licencia es opcional. Puedes adjuntarla en PDF o imagen, o continuar sin documento.'
+      : 'Puedes adjuntar cédula y licencia en PDF o imagen. El documento es opcional para registrar las prácticas.';
     this.updateAdditionalPracticePrice();
   }
 
@@ -2286,7 +2293,7 @@ class StudentsView extends Component {
       const uploadUrl = localOrigin && token.localUploadUrl
         ? token.localUploadUrl
         : `${window.location.origin}/mobile-upload/${token.token}`;
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(uploadUrl)}`;
+      const qrUrl = await renderQrDataUrl(uploadUrl, { width: 220, margin: 12 });
       const samePhone = window.matchMedia('(max-width: 768px)').matches;
 
       overlay.innerHTML = `
@@ -3232,6 +3239,14 @@ class StudentsView extends Component {
       this.openStudentModal();
       document.getElementById('student-modal-title').textContent = `${context.student.status === 'inhabilitado' ? 'Habilitar estudiante' : 'Editar estudiante'}: ${context.student.first_name} ${context.student.last_name}`;
       document.getElementById('student-modal-submit').textContent = 'Revisar cambios';
+      form.querySelector('[data-edit-pending-classes]')?.remove();
+      if (authService.can('SCHEDULE_CHANGE') && context.assignments?.length) {
+        const pendingButton=document.createElement('button');
+        pendingButton.type='button';pendingButton.className='btn btn-secondary';pendingButton.dataset.editPendingClasses='true';
+        pendingButton.textContent='Cambiar horario o instructor de clases pendientes';
+        pendingButton.onclick=()=>{window.history.pushState(null,null,`/student-profile/${encodeURIComponent(studentId)}?changeSchedule=1`);window.dispatchEvent(new PopStateEvent('popstate'));};
+        form.querySelector('.student-modal-step[data-step="1"]')?.prepend(pendingButton);
+      }
       document.getElementById('temporary-reservation-toggle')?.remove();
       form.querySelectorAll('.student-registration-types input').forEach(input => { input.disabled = true; });
 
@@ -4143,9 +4158,17 @@ class StudentsView extends Component {
 
   bindScheduleOptionInteraction(option) {
     if (!option || option.dataset.listenerAttached) return;
-    option.addEventListener('click', () => this.handleScheduleCellClick(option));
+    option.addEventListener('click', event => {
+      clearTimeout(this.scheduleClickTimer);
+      if (event.detail > 1) return;
+      // Espera el gesto de doble clic antes de retener una fila completa.
+      this.scheduleClickTimer = setTimeout(() => {
+        if (option.isConnected) this.handleScheduleCellClick(option);
+      }, 550);
+    });
     option.addEventListener('dblclick', event => {
       event.preventDefault();
+      clearTimeout(this.scheduleClickTimer);
       this.toggleExamOnlyCell(option);
     });
     option.addEventListener('touchend', event => {
@@ -4154,6 +4177,7 @@ class StudentsView extends Component {
       if (this.lastScheduleTap?.key === key && now - this.lastScheduleTap.time < 450) {
         event.preventDefault();
         this.lastScheduleTap = null;
+        clearTimeout(this.scheduleClickTimer);
         this.toggleExamOnlyCell(option);
         return;
       }
@@ -4163,6 +4187,7 @@ class StudentsView extends Component {
   }
 
   toggleExamOnlyCell(option) {
+    if (this.scheduleSelectionChecking) return;
     const isSelectedExam = document.getElementById('selected-practical-mode')?.value === 'exam_only'
       && option.classList.contains('selected');
     if (isSelectedExam) {
@@ -4762,7 +4787,7 @@ class StudentsView extends Component {
         { type: 'required', message: 'La cédula es requerida' },
         { type: 'cedula', message: 'Formato de cédula inválido' },
       ],
-      birthDate: temporaryReservation || renewal ? [] : [{ type: 'birthDate', message: 'Debes ser mayor de 16 años' }],
+      birthDate: temporaryReservation || renewal || additionalPractice ? [] : [{ type: 'birthDate', message: 'Debes ser mayor de 16 años' }],
       email: additionalPractice || renewal ? [] : [
         { type: 'required', message: 'El email es requerido' },
         { type: 'email', message: 'Email inválido' },
@@ -5130,6 +5155,7 @@ class StudentsView extends Component {
     }
 
     const student = result.data;
+    let registrationStage = 'documents';
 
     try {
       if (submitBtn) submitBtn.textContent = 'Guardando documentos...';
@@ -5159,6 +5185,7 @@ class StudentsView extends Component {
       if (selectedCatalogType === 'tipo-f') {
         await this.uploadModalDocument(student.id, 'certificado_discapacidad', disabilityCertificate, 'Certificado de discapacidad');
       }
+      registrationStage = 'instructor';
       if (submitBtn) submitBtn.textContent = 'Reservando horario...';
       const scheduleReservation = student.scheduleReserved ? {instructor:student.assignedInstructor}
         : await this.selectStudentSchedule(student.id, scheduleId, {...schedulePlan,enrollmentId:student.enrollment_id});
@@ -5178,12 +5205,20 @@ class StudentsView extends Component {
         registrationModal.style.display = 'none';
       }
     } catch (error) {
+      if (registrationStage === 'instructor' && !student.scheduleReserved) {
+        await this.showRegisteredWithoutInstructor(student.id);
+        return;
+      }
       this.showModalAlert('error', error.message || 'El estudiante se registró, pero hubo un problema guardando documentos u horario.');
       this.restoreSubmitButton(submitBtn);
       return;
     }
 
 
+    if (student.registration_transfer_id) {
+      const { showTransferReceipt } = await import('../../services/TransferReceipt.js');
+      await showTransferReceipt(student.registration_transfer_id);
+    }
     if (shouldCollectPayment) {
       if (submitBtn) submitBtn.textContent = 'Registrando pago...';
       const paymentResult = await PaymentService.registerPayment({
@@ -5443,7 +5478,8 @@ class StudentsView extends Component {
     const startDate = formData.get('additionalPracticeStartDate');
     const dailyTime = formData.get('additionalPracticeTime');
     const days = Number(formData.get('additionalPracticeDays'));
-    if (!hasMobileDocument && !this.isPdfFile(documentFile) && !this.isImageFile(documentFile)) {
+    const hasDocumentFile = Boolean(documentFile && documentFile.size > 0);
+    if (!hasMobileDocument && (hasDocumentFile || mobileDocumentUrl) && !this.isPdfFile(documentFile) && !this.isImageFile(documentFile)) {
       const error = document.getElementById('additional-practice-document-error');
       if (error) error.textContent = 'Selecciona un PDF o toma una foto del documento.';
       this.goToModalStep(3);
@@ -5498,7 +5534,7 @@ class StudentsView extends Component {
         : 'Cédula y licencia para prácticas adicionales';
       if (hasMobileDocument) {
         await this.uploadModalDocumentFromDataUrl(student.id, 'licencia', mobileDocumentUrl, documentTitle);
-      } else {
+      } else if (hasDocumentFile) {
         let documentToUpload = documentFile;
         if (this.isImageFile(documentFile)) {
           const pdfBlob = await this.createSinglePhotoPdf(documentFile, 'Documento para prácticas adicionales');
@@ -5659,6 +5695,36 @@ class StudentsView extends Component {
     try { NotificationService.notifyScheduleSelected(studentId); }
     catch (error) { console.warn('El horario se guardó, pero no se pudo crear la notificación local:', error); }
     return null;
+  }
+
+  async showRegisteredWithoutInstructor(studentId) {
+    // Creation was confirmed. Closing prevents a second submission of the same registration.
+    this.closeStudentModal();
+    let message = 'El estudiante se registró, pero no se pudo confirmar la asignación del instructor. Revisa su expediente.';
+    try {
+      const result = await ApiService.getStudentSchedule(studentId);
+      if (result.success) {
+        message = result.data?.assignment_id
+          ? 'El estudiante se registró. Se encontró un horario guardado; revisa el instructor en su expediente.'
+          : 'El estudiante se registró, pero no se le asignó un instructor.';
+      }
+    } catch (_) { /* A lost response does not prove that the assignment failed. */ }
+    this.showModalAlert('warning', message);
+    const layer = document.getElementById('student-registration-result-modal');
+    const title = layer?.querySelector('#student-result-title');
+    if (title) title.textContent = 'Estudiante registrado';
+    const content = layer?.querySelector('.student-registration-result');
+    if (content) {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'btn btn-primary'; button.textContent = 'Abrir expediente';
+      button.addEventListener('click', () => {
+        layer.remove(); document.body.style.overflow = '';
+        window.history.pushState(null, null, '/student-profile/' + encodeURIComponent(studentId));
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      content.appendChild(button);
+    }
+    window.dispatchEvent(new CustomEvent('erp:dataChanged', { detail: { collection: 'students', studentId } }));
   }
 
   showModalAlert(type, message) {

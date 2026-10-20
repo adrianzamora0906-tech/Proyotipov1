@@ -1,11 +1,11 @@
 import { OfflineAttendanceQueue, registerAttendanceOfflineSupport } from '../lib/offlineAttendanceQueue.js';
+import { apiClient } from '../core/api/ApiClient.js';
 
 const content = document.getElementById('attendance-content');
 const params = new URLSearchParams(window.location.search);
 const token = params.get('token');
 const numericCode = params.get('code');
 const offlinePayloadValue = params.get('offline');
-const apiBases = [window.__SPORTMANCAR_CONFIG__?.API_BASE_URL || 'http://localhost:5000/api'];
 let authorizedLocation = null;
 let attendancePhase = 'ENTRY';
 let offlinePayload = null;
@@ -61,23 +61,14 @@ function decodeOfflinePayload(value) {
 }
 
 async function request(path, options = {}) {
-  let lastError;
-  for (const base of [...new Set(apiBases)]) {
-    try {
       const authToken = getAuthToken();
-      const response = await fetch(`${base}${path}`, {
+      const response = await apiClient.fetchWithFallback(path, {
         ...options,
         headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...(options.headers || {}) },
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error?.message || data.error || data.message || 'No se pudo completar la solicitud');
       return data;
-    } catch (error) {
-      lastError = error;
-      if (!/Failed to fetch|NetworkError|conexión/i.test(error.message)) throw error;
-    }
-  }
-  throw lastError || new Error('No hay conexión con el sistema');
 }
 
 async function loadChallenge() {

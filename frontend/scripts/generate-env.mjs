@@ -28,6 +28,7 @@ function readLocalEnvironment() {
 const localEnvironment = readLocalEnvironment();
 const apiBaseUrl = (process.env.API_BASE_URL || localEnvironment.API_BASE_URL || '').trim();
 const moodleUrl = (process.env.MOODLE_URL || localEnvironment.MOODLE_URL || '').trim();
+const fallbackUrl = (process.env.API_FALLBACK_URL || localEnvironment.API_FALLBACK_URL || '').trim();
 
 if (!apiBaseUrl) {
   throw new Error('Falta API_BASE_URL. Configura esta variable con la URL HTTPS del tunel terminada en /api.');
@@ -55,6 +56,16 @@ const publicConfig = {
   API_BASE_URL: normalizedApiBaseUrl,
   MOODLE_URL: moodleUrl
 };
+
+if (fallbackUrl) {
+  const fallback = new URL(fallbackUrl);
+  if (!['http:', 'https:'].includes(fallback.protocol) || fallback.username || fallback.password
+      || fallback.search || fallback.hash || (process.env.NETLIFY === 'true' && fallback.protocol !== 'https:')) {
+    throw new Error('API_FALLBACK_URL debe ser una URL HTTPS de la API sin credenciales, parametros ni fragmentos.');
+  }
+  if (fallback.pathname === '/') fallback.pathname = '/api';
+  publicConfig.API_FALLBACK_URL = fallback.toString().replace(/\/+$/, '');
+}
 
 const output = `// Generado durante el despliegue. No colocar secretos en este archivo.\nwindow.__SPORTMANCAR_CONFIG__ = ${JSON.stringify(publicConfig, null, 2)};\n`;
 writeFileSync(resolve(frontendDirectory, 'env.js'), output, 'utf8');

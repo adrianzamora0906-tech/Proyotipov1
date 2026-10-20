@@ -6,6 +6,7 @@ globalThis.window = {
   location: { hostname: 'localhost', origin: 'http://localhost', pathname: '/' },
   setTimeout,
   clearTimeout,
+  dispatchEvent() {},
 };
 
 const { default: ApiClient } = await import('../src/js/core/api/ApiClient.js');

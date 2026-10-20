@@ -7,6 +7,7 @@ class RealtimeClient {
     if (this.started) return;
     this.started = true;
     window.addEventListener('erp:sessionChanged', () => this.syncSession());
+    window.addEventListener('erp:apiBaseChanged', () => { this.disconnect(); this.syncSession(); });
     window.addEventListener('online', () => this.syncSession());
     window.addEventListener('popstate', () => this.syncSession());
     document.addEventListener('visibilitychange', () => { if (!document.hidden) this.syncSession(); });
@@ -66,6 +67,8 @@ class RealtimeClient {
           if (!await apiClient.tryRefresh()) { apiClient.expireSession(); return; }
         } catch (_) { /* Retry when the backend becomes available. */ }
       }
+      try { await apiClient.fetchWithFallback('/health'); } catch (_) { /* Reintentar al recuperar conexion. */ }
+      if (this.socket || !apiClient.getToken()) return;
       const delay = Math.min(30000,1000 * (2 ** Math.min(this.attempts++,5))) + Math.random()*500;
       this.retry = setTimeout(() => this.connect(),delay);
     };

@@ -170,8 +170,8 @@ export const registerAttendanceOfflineSupport = () => {
     OfflineAttendanceQueue.syncPending({
       async request({ path, method, body }) {
         const authToken = scope.sessionStorage?.getItem('erp_api_token') || '';
-        const base = scope.__SPORTMANCAR_CONFIG__?.API_BASE_URL || 'http://localhost:5000/api';
-        const response = await scope.fetch(`${base}${path}`, {
+        const { apiClient } = await import('../core/api/ApiClient.js');
+        const response = await apiClient.fetchWithFallback(path, {
           method,
           headers: {
             'Content-Type': 'application/json',

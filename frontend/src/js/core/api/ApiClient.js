@@ -10,6 +10,7 @@ const resolveApiBase = value => {
   } catch { return value.replace(/\/$/, ''); }
 };
 const DEFAULT_API_BASE = resolveApiBase(CONFIGURED_API_BASE);
+const FALLBACK_API_BASE = window.__SPORTMANCAR_CONFIG__?.API_FALLBACK_URL;
 
 class ApiClient {
   constructor() { this.tokenKey = 'erp_api_token'; this.lastBaseUrl = null; this.refreshPromise = null; }
@@ -18,6 +19,7 @@ class ApiClient {
     const urls = new Set();
     if (this.lastBaseUrl) urls.add(this.lastBaseUrl);
     urls.add(DEFAULT_API_BASE);
+    if (FALLBACK_API_BASE) urls.add(resolveApiBase(FALLBACK_API_BASE));
     const configured = CONFIGURED_API_BASE.replace(/\/$/, '');
     let configuredIsLocal = false;
     try { configuredIsLocal = ['localhost', '127.0.0.1'].includes(new URL(configured, window.location.origin).hostname); } catch {}
@@ -29,6 +31,12 @@ class ApiClient {
     let lastError;
     const method = String(options.method || 'GET').toUpperCase();
     const canRetrySafely = ['GET', 'HEAD', 'OPTIONS'].includes(method);
+    if (options.signal?.aborted) throw new DOMException('Solicitud cancelada', 'AbortError');
+    // Elegir una ruta disponible antes de la primera escritura, sin enviarla dos veces.
+    if (!canRetrySafely && !this.lastBaseUrl && this.getBaseUrls().length > 1) {
+      const health = await this.fetchWithFallback('/health', { signal: options.signal });
+      if (!health.ok) throw new Error('No se pudo comprobar la conexion con el servidor');
+    }
     for (const base of this.getBaseUrls()) {
       const controller = new AbortController();
       const externalSignal = options.signal;
@@ -37,16 +45,25 @@ class ApiClient {
         if (externalSignal.aborted) abortFromExternalSignal();
         else externalSignal.addEventListener('abort', abortFromExternalSignal, { once: true });
       }
-      const timeoutId = window.setTimeout(() => controller.abort('request-timeout'), REQUEST_TIMEOUT_MS);
+      const timeout = endpoint === '/health' && this.getBaseUrls().length > 1 ? 5000 : REQUEST_TIMEOUT_MS;
+      const timeoutId = window.setTimeout(() => controller.abort('request-timeout'), timeout);
       try {
         const response = await fetch(`${base}${endpoint}`, { ...options, signal: controller.signal });
-        this.lastBaseUrl = base;
+        if (canRetrySafely && [502, 503, 504, 530].includes(response.status)) {
+          lastError = new Error('El servidor no esta disponible');
+          continue;
+        }
+        this.setActiveBase(base);
         return response;
       } catch (error) {
+        if (externalSignal?.aborted) throw error;
+        if (this.lastBaseUrl === base) this.lastBaseUrl = null;
         if (controller.signal.aborted) {
           const timeoutError = new Error('El servidor tardó demasiado en responder. El proceso fue detenido para que la pantalla no quede bloqueada.');
           timeoutError.code = 'REQUEST_TIMEOUT';
-          throw timeoutError;
+          if (!canRetrySafely) throw timeoutError;
+          lastError = timeoutError;
+          continue;
         }
         lastError = error;
         // Una escritura nunca se repite automáticamente en otra URL porque
@@ -58,6 +75,12 @@ class ApiClient {
       }
     }
     throw lastError || new Error('No se pudo conectar con el servidor');
+  }
+
+  setActiveBase(base) {
+    if (this.lastBaseUrl === base) return;
+    this.lastBaseUrl = base;
+    queueMicrotask(() => window.dispatchEvent(new Event('erp:apiBaseChanged')));
   }
 
   getToken() {

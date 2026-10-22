@@ -44,7 +44,7 @@ import AdminResourceMonitorView from "./views/admin/AdminResourceMonitorView.js?
 import AdminSecurityView from "./views/admin/AdminSecurityView.js?v=tipo-instructor-20260819";
 import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js?v=actualizacion-parcial-20261014";
 import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=horarios-permisos-20261014";
-import ManagerReportsView from "./views/manager/ManagerReportsView.js?v=registrados-sin-estado-20261012";
+import ManagerReportsView from "./views/manager/ManagerReportsView.js?v=ventas-sin-matriculas-20261022";
 import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=permiso-sin-filtro-pago-20260820";
 import AdminSettingsView from "./views/admin/AdminSettingsView.js";
 import AdminReferralCampaignView from "./views/admin/AdminReferralCampaignView.js";

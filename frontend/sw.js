@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v76-pending-class-batch';
+const CACHE_NAME = 'sportmancar-offline-v82-sales-without-enrollments-card';
 const APP_SHELL = [
   '/',
   '/index.html',

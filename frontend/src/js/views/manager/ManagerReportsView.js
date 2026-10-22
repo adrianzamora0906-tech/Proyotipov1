@@ -25,6 +25,10 @@ const date = (value) =>
       )
     : "—";
 const types = {
+  sales: {
+    label: "Ventas",
+    description: "Inscripciones por sucursal de venta",
+  },
   today_enrollments: {
     label: "Registrados hoy",
     description: "Personas registradas durante el día de hoy",
@@ -35,7 +39,7 @@ const types = {
   },
   enrollments: {
     label: "Matrículas",
-    description: "Inscripciones registradas en el periodo",
+    description: "Inscripciones por sucursal de formación",
   },
   cycles: {
     label: "Cursos y ciclos",
@@ -55,6 +59,18 @@ const types = {
   },
 };
 const columns = {
+  sales: [
+    ["identification", "Cedula"],
+    ["name", "Estudiante"],
+    ["course", "Curso"],
+    ["branch", "Sucursal de venta"],
+    ["academic_branch", "Sucursal de formacion"],
+    ["registered_by", "Inscrito por"],
+    ["enrollment_date", "Inscripcion", "date"],
+    ["status", "Estado"],
+    ["amount", "Valor", "money"],
+    ["balance", "Pendiente", "money"],
+  ],
   today_enrollments: [
     ["identification", "Cédula"],
     ["name", "Estudiante"],
@@ -324,6 +340,7 @@ export default class ManagerReportsView extends Component {
     const style = document.createElement("style");
     style.id = "manager-report-usability-styles";
     style.textContent = `
+      @media(min-width:1251px){.report-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}}
       .report-summary{display:none;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;padding:0 18px 16px}
       .report-summary.show{display:grid}
       .report-summary span{display:grid;gap:3px;padding:11px 12px;border:1px solid #e4e7ec;border-radius:9px;background:#fbfcff;color:#475467;font-size:12px}
@@ -479,8 +496,8 @@ export default class ManagerReportsView extends Component {
       computed.services = s.services ?? this.branchInstructorReport.services ?? 0;
     }
     const cards = [
+      ["sales", s.sales, "Ventas"],
       ["today_enrollments", s.today_enrollments, "Registrados hoy"],
-      ["enrollments", computed.enrollments ?? s.enrollments, "Matrículas"],
       ["cycles", computed.cycles ?? s.cycles, "Ciclos"],
       ["instructors", computed.instructors ?? s.instructors, "Instructores"],
       ["payments", money(computed.collected ?? s.collected), "Ingresos cobrados"],

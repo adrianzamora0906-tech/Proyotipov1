@@ -4,6 +4,7 @@
  */
 
 import Component from '../../components/Component.js';
+import { bindStudentIdentityFields } from '../../helpers/StudentIdentityFields.js';
 import { renderQrDataUrl } from '../../lib/qrcodeRealLocal.js';
 import { subscribeRealtime } from '../../core/realtime/RealtimeClient.js';
 import { holdScheduleSelection, confirmScheduleSelection } from '../../core/realtime/ScheduleSelectionHolds.js';
@@ -683,8 +684,14 @@ class StudentsView extends Component {
                   </div>
                 </div>
 
-                <div class="form-row" id="student-identity-row">
+                <div class="form-row" id="student-nationality-row">
                   <div class="form-group">
+                    <label class="form-label" for="student-nationality">Nacionalidad</label>
+                    <input type="text" class="form-input" id="student-nationality" name="nationality" list="student-nationality-options" maxlength="100" autocomplete="off" value="ECUATORIANA" placeholder="BUSCAR NACIONALIDAD">
+                    <datalist id="student-nationality-options"></datalist>
+                    <div class="form-error"></div>
+                  </div>
+                  <div class="form-group" id="student-identity-row">
                     <label class="form-label required">Fecha de Nacimiento</label>
                     <input type="date" class="form-input" name="birthDate" required>
                     <div class="form-error"></div>
@@ -1104,6 +1111,7 @@ class StudentsView extends Component {
 
   async mountStudentModalEvents() {
     const form = document.getElementById('student-modal-form');
+    bindStudentIdentityFields(form);
     const provinceSelect = document.getElementById('modal-province-select');
     const citySelect = document.getElementById('modal-city-select');
     const branchSelect = document.getElementById('modal-branch-select');
@@ -1582,7 +1590,7 @@ class StudentsView extends Component {
     if (birthDate) {
       birthDate.disabled = isAdditionalPractice;
       if (isAdditionalPractice) birthDate.required = false;
-      birthDate.closest('.form-row').hidden = isAdditionalPractice;
+      birthDate.closest('.form-group').hidden = isAdditionalPractice;
     }
     const title = document.getElementById('student-modal-title');
     if (title) title.textContent = isRenewal ? 'Registrar renovación de licencia' : (isAdditionalPractice ? 'Registrar prácticas adicionales' : 'Nuevo Estudiante');
@@ -1629,7 +1637,7 @@ class StudentsView extends Component {
   async resolveRegistrationIdentity(identification,request) {
     const form=document.getElementById('student-modal-form');
     const status=document.getElementById('registration-identity-status');
-    const names=['firstName','lastName','birthDate','email','phone','address','bloodType'];
+    const names=['firstName','lastName','birthDate','email','phone','address','bloodType','nationality'];
     const before=Object.fromEntries(names.map(name=>[name,form?.elements[name]?.value]));
     try {
       const result=await ApiService.searchStudents(identification);
@@ -1645,7 +1653,7 @@ class StudentsView extends Component {
       const student=StudentService.normalizeStudent(found);
       this.registrationIdentityStudent=student;
       const values={firstName:student.firstName,lastName:student.lastName,birthDate:String(student.birthDate || '').slice(0,10),
-        email:student.email,phone:student.phone,address:student.address,bloodType:student.bloodType};
+        email:student.email,phone:student.phone,address:student.address,bloodType:student.bloodType,nationality:student.nationality};
       this.registrationIdentityFields=[];
       for (const [name,value] of Object.entries(values)) {
         const input=form.elements[name];
@@ -3254,7 +3262,7 @@ class StudentsView extends Component {
       const values = {
         firstName: student.first_name, lastName: student.last_name, cedula: student.identification,
         birthDate: String(student.birth_date || '').slice(0, 10), email: student.email,
-        phone: student.phone, address: student.address, bloodType: student.blood_type,
+        phone: student.phone, address: student.address, bloodType: student.blood_type, nationality: student.nationality,
         pickupBranchId: student.pickup_branch_id, disabilityPercentage: student.disability_percentage,
         referredByUserId: student.referred_by_user_id, discountBenefit: student.discount_benefit,
       };
@@ -3453,7 +3461,7 @@ class StudentsView extends Component {
       firstName: parts.slice(0, splitAt).join(' '),
       lastName: parts.slice(splitAt).join(' '),
       cedula: reservation.identification || '',
-      phone: draft.phone||reservation.phone||'',birthDate:draft.birthDate||'',email:draft.email||'',address:draft.address||'',bloodType:draft.bloodType||'',pickupBranchId:draft.pickupBranchId||authService.getEffectiveBranchId()||'',
+      phone: draft.phone||reservation.phone||'',birthDate:draft.birthDate||'',email:draft.email||'',address:draft.address||'',bloodType:draft.bloodType||'',nationality:draft.nationality||'',pickupBranchId:draft.pickupBranchId||authService.getEffectiveBranchId()||'',
     };
     Object.entries(values).forEach(([name, value]) => {
       const input = form.elements[name];
@@ -5130,6 +5138,7 @@ class StudentsView extends Component {
       phone: formData.get('phone'),
       address: formData.get('address'),
       bloodType: formData.get('bloodType'),
+      nationality: formData.get('nationality'),
       pickupBranchId: formData.get('pickupBranchId'),
       course_id: formData.get('course_id'),
       schedulePlan,
@@ -5285,7 +5294,7 @@ class StudentsView extends Component {
       identification: formData.get('cedula'), firstName: formData.get('firstName'),
       lastName: formData.get('lastName'), birthDate: formData.get('birthDate') || null,
       email: formData.get('email') || null, phone: formData.get('phone') || null,
-      address: formData.get('address') || null, bloodType: formData.get('bloodType') || null,
+      address: formData.get('address') || null, bloodType: formData.get('bloodType') || null, nationality: formData.get('nationality') || null,
       city_id: formData.get('city_id') || student.city_id,
       branch_id: branchId, pickupBranchId: formData.get('pickupBranchId') || student.pickup_branch_id || null,
       referredByUserId: formData.get('referredByUserId') || null,
@@ -5455,7 +5464,7 @@ class StudentsView extends Component {
     const result=await StudentService.createTemporaryReservation({
       identification:formData.get('cedula'),firstName:formData.get('firstName'),lastName:formData.get('lastName'),
       birthDate:formData.get('birthDate'),email:formData.get('email'),phone:formData.get('phone'),address:formData.get('address'),
-      bloodType:formData.get('bloodType'),pickupBranchId:formData.get('pickupBranchId'),cityId:this.currentBranchRecord?.city_id||formData.get('city_id'),branchId,registrationBranchId:authService.getCurrentUser()?.branch_id||null,courseId:formData.get('course_id'),
+      bloodType:formData.get('bloodType'),nationality:formData.get('nationality'),pickupBranchId:formData.get('pickupBranchId'),cityId:this.currentBranchRecord?.city_id||formData.get('city_id'),branchId,registrationBranchId:authService.getCurrentUser()?.branch_id||null,courseId:formData.get('course_id'),
       instructorId,referredByUserId:formData.get('referredByUserId')||null,notes:this.getVisibleRegistrationNotes(),schedulePlan,
       reservationDays:this.temporaryReservationDays||2,
     });
@@ -5520,7 +5529,7 @@ class StudentsView extends Component {
       const creation = await StudentService.createStudent({
         firstName: formData.get('firstName'), lastName: formData.get('lastName'), cedula: formData.get('cedula'),
         birthDate: formData.get('birthDate'), email: formData.get('email'), phone: formData.get('phone'),
-        address: formData.get('address'), bloodType: 'N/D', city_id: formData.get('city_id'), branch: formData.get('branch'),
+        address: formData.get('address'), nationality: formData.get('nationality'), bloodType: 'N/D', city_id: formData.get('city_id'), branch: formData.get('branch'),
         registrationType: 'ADDITIONAL_PRACTICE',
         referredByUserId: formData.get('referredByUserId') || null,
         notes: this.getVisibleRegistrationNotes(),
@@ -5575,7 +5584,7 @@ class StudentsView extends Component {
     const result = await StudentService.createLicenseRenewal({
       identification: formData.get('cedula'), firstName: formData.get('firstName'), lastName: formData.get('lastName'),
       birthDate: formData.get('birthDate'), email: formData.get('email'), phone: formData.get('phone'),
-      address: formData.get('address'), city_id: formData.get('city_id'), branch_id: branchId,
+      address: formData.get('address'), nationality: formData.get('nationality'), city_id: formData.get('city_id'), branch_id: branchId,
       notes: this.getVisibleRegistrationNotes(),
     });
     if (!result.success) {

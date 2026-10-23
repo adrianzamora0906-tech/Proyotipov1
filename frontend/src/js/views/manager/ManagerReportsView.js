@@ -651,8 +651,8 @@ export default class ManagerReportsView extends Component {
         const cell = row.children[3];
         if (cell) cell.textContent = coursePeriod(report.data[index]);
       });
-      document.getElementById("report-instructor-students-pagination").innerHTML =
       addInstructorScheduleColumns(table, report.data || []);
+      document.getElementById("report-instructor-students-pagination").innerHTML =
         `<button type="button" data-page="${pagination.page - 1}" ${pagination.page <= 1 ? "disabled" : ""}>Anterior</button><span>Página ${number(pagination.page)} de ${number(pagination.totalPages)}</span><button type="button" data-page="${pagination.page + 1}" ${pagination.page >= pagination.totalPages ? "disabled" : ""}>Siguiente</button>`;
     } catch (error) {
       table.innerHTML = `<p class="dashboard-empty">${esc(error.message || "No se pudo cargar la información.")}</p>`;

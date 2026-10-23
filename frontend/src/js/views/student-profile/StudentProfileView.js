@@ -231,6 +231,10 @@ class StudentProfileView extends Component {
                     <span class="info-value">${student.bloodType}</span>
                   </div>
                   <div class="info-item">
+                    <span class="info-label">Nacionalidad</span>
+                    <span class="info-value">${String(student.nationality || 'Sin registrar').replace(/[&<>"']/g, value => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[value]))}</span>
+                  </div>
+                  <div class="info-item">
                     <span class="info-label">Dirección</span>
                     <span class="info-value">${student.address || 'N/A'}</span>
                   </div>

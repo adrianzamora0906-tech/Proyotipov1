@@ -3,6 +3,7 @@ const { createError } = require('../middleware/errorHandler');
 
 class LicenseRenewalService {
   static async create(data, actor) {
+    data = require('./normalizeStudentIdentity')(data);
     const identification = String(data.identification || '').replace(/\D/g, '');
     const firstName = String(data.firstName || '').trim();
     const lastName = String(data.lastName || '').trim();
@@ -33,12 +34,12 @@ class LicenseRenewalService {
         student = (await client.query(`
           INSERT INTO students(
             branch_id,city_id,identification,first_name,last_name,birth_date,email,phone,
-            address,blood_type,status,created_by,registration_type,notes
-          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'N/D','pendiente_pago',$10,'LICENSE_RENEWAL',$11)
+            address,blood_type,status,created_by,registration_type,notes,nationality
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'N/D','pendiente_pago',$10,'LICENSE_RENEWAL',$11,$12)
           RETURNING id
         `, [branchId, data.city_id || null, identification, firstName, lastName,
           data.birthDate || null, data.email || null, data.phone || null,
-          data.address || null, actor.id, notes || null])).rows[0];
+          data.address || null, actor.id, notes || null, data.nationality || null])).rows[0];
         await client.query(
           'INSERT INTO history(student_id,action) VALUES($1,$2)',
           [student.id, 'Persona registrada para renovación de licencia'],

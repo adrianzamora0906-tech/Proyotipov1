@@ -173,6 +173,7 @@ class StudentService {
   }
 
   static async createTemporarySeatReservation(data = {}, user, access = {}) {
+    data = require('./normalizeStudentIdentity')(data);
     const identification=String(data.identification||'').replace(/\D/g,'');
     const firstName=String(data.firstName||'').trim(),lastName=String(data.lastName||'').trim();
     const branchId=data.branchId,courseId=data.courseId,instructorId=data.instructorId;
@@ -238,6 +239,7 @@ class StudentService {
       }
       const safeDraft={birthDate:data.birthDate||null,email:String(data.email||'').slice(0,160),phone:String(data.phone||'').slice(0,40),address:String(data.address||'').slice(0,300),bloodType:data.bloodType||null,pickupBranchId:data.pickupBranchId||user.branch_id||null,cityId:data.cityId||null,registrationBranchId:data.registrationBranchId||user.branch_id||null,referredByUserId:data.referredByUserId||null,theorySchedule:plan.theorySchedule||null,schedulePlan:plan};
       const firstTime=String(selections[0].time).match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);
+      safeDraft.nationality=data.nationality||null;
       const reservation=(await client.query(`INSERT INTO course_cycle_seat_reservations
         (cycle_id,instructor_id,referred_name,referred_phone,referred_identification,course_id,branch_id,reserved_start_time,reserved_end_time,notes,created_by,expires_at,reservation_kind,draft_data)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8::time,$9::time,$10,$11,NOW()+($12::int*INTERVAL '1 day'),'temporary_enrollment',$13::jsonb) RETURNING *`,
@@ -622,6 +624,7 @@ class StudentService {
    * Crear nuevo estudiante
    */
   static async create(data, userId, { allowDiscount = false, requestContext = {}, actor = null, access: authorization = {} } = {}) {
+    data = require('./normalizeStudentIdentity')(data);
     await db.query('SELECT expire_course_cycle_seat_reservations()');
     let seatReservation = null;
     const referralAttribution = await ReferralCampaignService.findPendingAttribution(data.identification);
@@ -785,8 +788,8 @@ class StudentService {
     const result = await db.query(`
       INSERT INTO students (identification, first_name, last_name, birth_date, email, phone,
         address, blood_type, branch_id, city_id, status, created_by, registration_type, referred_by_user_id, notes,
-        pickup_branch_id, disability_percentage, discount_benefit)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        pickup_branch_id, disability_percentage, discount_benefit, nationality)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       RETURNING *
     `, [
       data.identification,
@@ -807,6 +810,7 @@ class StudentService {
       pickupBranchId,
       isTypeF ? disabilityPercentage : null,
       discountBenefit,
+      data.nationality || null,
     ]);
 
     const student = result.rows[0];
@@ -887,6 +891,7 @@ class StudentService {
    * Actualizar estudiante
    */
   static async update(id, data, userId = null) {
+    data = require('./normalizeStudentIdentity')(data);
     const fields = [];
     const values = [];
     let idx = 1;
@@ -899,6 +904,7 @@ class StudentService {
       phone: 'phone',
       address: 'address',
       bloodType: 'blood_type',
+      nationality: 'nationality',
       pickupBranchId: 'pickup_branch_id',
       branch_id: 'branch_id',
       notes: 'notes',

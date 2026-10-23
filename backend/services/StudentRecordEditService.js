@@ -16,6 +16,7 @@ const fields = {
   lastName: ['last_name', 'Apellidos'], birthDate: ['birth_date', 'Fecha de nacimiento'],
   email: ['email', 'Correo'], phone: ['phone', 'Telefono'], address: ['address', 'Direccion'],
   bloodType: ['blood_type', 'Tipo de sangre'], city_id: ['city_id', 'Canton'],
+  nationality: ['nationality', 'Nacionalidad'],
   branch_id: ['branch_id', 'Sucursal'], pickupBranchId: ['pickup_branch_id', 'Lugar de recogida'],
   notes: ['notes', 'Observaciones'], disabilityPercentage: ['disability_percentage', 'Discapacidad (%)'],
   referredByUserId: ['referred_by_user_id', 'Referido por'],
@@ -194,6 +195,7 @@ class StudentRecordEditService {
 
   static async prepare(snapshot, payload, actor, access, client = db) {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw createError(422,'Datos de edicion invalidos');
+    payload = {...payload,personal:require('./normalizeStudentIdentity')(payload.personal || {})};
     const changes = [];
     const personal = {};
     for (const [key,[column,label]] of Object.entries(fields)) {

@@ -2,6 +2,7 @@ import Component from "../../components/Component.js";
 import SidebarLayout from "../../layouts/SidebarLayout.js";
 import AdminService from "../../services/AdminService.js";
 import ManagerService from "../../services/ManagerService.js";
+import { addInstructorScheduleColumns, formatInstructorCoursePeriod } from '../../helpers/InstructorReportColumns.js?v=periodo-compacto-20261023';
 import { authService } from "../../core/auth/AuthService.js";
 
 const esc = (value) =>
@@ -643,15 +644,7 @@ export default class ManagerReportsView extends Component {
             .join("")}</tbody></table>`
         : '<p class="dashboard-empty">No hay estudiantes para esta selección.</p>';
       // Convert class dates column to a "Periodo del curso" like ManagerAcademicView
-      const courseDate = (value) =>
-          new Date(`${String(value).slice(0, 10)}T00:00:00`).toLocaleDateString(
-            "es-EC",
-            { day: "numeric", month: "long", year: "numeric" },
-          ),
-        coursePeriod = (item) =>
-          item.start_date && item.end_date
-            ? `Del ${courseDate(item.start_date)} al ${courseDate(item.end_date)}`
-            : "Sin fecha";
+      const coursePeriod = formatInstructorCoursePeriod;
       const dateHeader = table.querySelector("thead th:nth-child(4)");
       if (dateHeader) dateHeader.textContent = "Periodo del curso";
       table.querySelectorAll("tbody tr").forEach((row, index) => {
@@ -659,6 +652,7 @@ export default class ManagerReportsView extends Component {
         if (cell) cell.textContent = coursePeriod(report.data[index]);
       });
       document.getElementById("report-instructor-students-pagination").innerHTML =
+      addInstructorScheduleColumns(table, report.data || []);
         `<button type="button" data-page="${pagination.page - 1}" ${pagination.page <= 1 ? "disabled" : ""}>Anterior</button><span>Página ${number(pagination.page)} de ${number(pagination.totalPages)}</span><button type="button" data-page="${pagination.page + 1}" ${pagination.page >= pagination.totalPages ? "disabled" : ""}>Siguiente</button>`;
     } catch (error) {
       table.innerHTML = `<p class="dashboard-empty">${esc(error.message || "No se pudo cargar la información.")}</p>`;

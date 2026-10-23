@@ -1,6 +1,7 @@
 import Component from "../../components/Component.js";
 import SidebarLayout from "../../layouts/SidebarLayout.js";
 import ManagerService from "../../services/ManagerService.js";
+import { addInstructorScheduleColumns, formatInstructorCoursePeriod } from '../../helpers/InstructorReportColumns.js?v=periodo-compacto-20261023';
 
 const money = (value) =>
   new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(
@@ -580,15 +581,7 @@ export default class ManagerAcademicView extends Component {
         }),
         report = response.data || {},
         pagination = report.pagination || {};
-      const courseDate = (value) =>
-          new Date(`${String(value).slice(0, 10)}T00:00:00`).toLocaleDateString(
-            "es-EC",
-            { day: "numeric", month: "long", year: "numeric" },
-          ),
-        coursePeriod = (item) =>
-          item.start_date && item.end_date
-            ? `Del ${courseDate(item.start_date)} al ${courseDate(item.end_date)}`
-            : "Sin fecha";
+      const coursePeriod = formatInstructorCoursePeriod;
       document.getElementById("instructor-students-summary").textContent =
         `${number(pagination.total)} estudiantes en el periodo`;
       document.getElementById("instructor-course-filters").innerHTML =
@@ -602,6 +595,7 @@ export default class ManagerAcademicView extends Component {
         const cell = row.children[3];
         if (cell) cell.textContent = coursePeriod(report.data[index]);
       });
+      addInstructorScheduleColumns(table, report.data || []);
       document.getElementById("instructor-students-pagination").innerHTML =
         `<button type="button" data-page="${pagination.page - 1}" ${pagination.page <= 1 ? "disabled" : ""}>Anterior</button><span>Página ${number(pagination.page)} de ${number(pagination.totalPages)}</span><button type="button" data-page="${pagination.page + 1}" ${pagination.page >= pagination.totalPages ? "disabled" : ""}>Siguiente</button>`;
     } catch (error) {

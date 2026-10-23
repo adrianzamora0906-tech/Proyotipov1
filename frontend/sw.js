@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v82-sales-without-enrollments-card';
+const CACHE_NAME = 'sportmancar-offline-v89-periodo-compacto';
 const APP_SHELL = [
   '/',
   '/index.html',

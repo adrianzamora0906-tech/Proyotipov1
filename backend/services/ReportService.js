@@ -558,7 +558,7 @@ class ReportService {
         }
         usedNames.add(sheetName);
         const instructorSheet = workbook.addWorksheet(sheetName);
-        const columns = 6;
+        const columns = 7;
         [1, 2, 3, 4].forEach((row) => instructorSheet.mergeCells(row, 1, row, columns));
         instructorSheet.getCell("A1").value = "UNIDAD DE ESCUELAS DE CAPACITACIÓN";
         instructorSheet.getCell("A2").value = "ESCUELA DE CAPACITACIÓN DE CONDUCTORES NO PROFESIONALES";
@@ -570,7 +570,7 @@ class ReportService {
         });
         instructorSheet.getRow(4).alignment = { horizontal: "center", vertical: "middle" };
         const grouped = new Map();
-        [...(detail.data || []), ...(detail.occupations || [])].forEach((student) => {
+        [...(detail.data || []).filter(item => item.activity_type !== 'EXAM_ONLY'), ...(detail.occupations || [])].forEach((student) => {
           if (!grouped.has(student.cycle_id)) grouped.set(student.cycle_id, []);
           grouped.get(student.cycle_id).push(student);
         });
@@ -588,7 +588,7 @@ class ReportService {
           instructorSheet.getCell(currentRow, 1).value = `Periodo del curso: ${course.start_date ? new Date(course.start_date).toLocaleDateString("es-EC") : ""} al ${course.end_date ? new Date(course.end_date).toLocaleDateString("es-EC") : ""}`;
           instructorSheet.getCell(currentRow, 1).font = { italic: true, color: { argb: "FF475467" } };
           currentRow += 1;
-          const labels = ["IDENTIFICACIÓN", "ESTUDIANTE", "CORREO", "CLASES", "ASISTENCIAS", "HORAS"];
+          const labels = ["IDENTIFICACIÓN", "ESTUDIANTE", "CORREO", "CLASES", "ASISTENCIAS", "HORAS", "HORAS PROGRAMADAS"];
           labels.forEach((label, index) => {
             const cell = instructorSheet.getCell(currentRow, index + 1);
             cell.value = label;
@@ -599,8 +599,8 @@ class ReportService {
           currentRow += 1;
           students.forEach((student, studentIndex) => {
             const values = student.is_occupation
-              ? ["OCUPACION", `${student.name} (${student.schedule_time})`, "", student.classes, "", ""]
-              : [student.identification, student.name, student.email, student.classes, student.attended, Number(student.hours || 0)];
+              ? ["OCUPACION", `${student.name} (${student.schedule_time})`, "", student.classes, "", "", ""]
+              : [student.identification, student.name, student.email, student.classes, student.attended, Number(student.hours || 0), Number(student.scheduled_hours || 0)];
             values.forEach((value, index) => {
               const cell = instructorSheet.getCell(currentRow, index + 1);
               cell.value = value ?? "";
@@ -614,7 +614,7 @@ class ReportService {
         if (detail.exams?.length) {
           instructorSheet.mergeCells(currentRow, 1, currentRow, columns);
           const examTitle = instructorSheet.getCell(currentRow++, 1);
-          examTitle.value = "SOLO EXAMEN";
+          examTitle.value = "FORMACIÓN INTENSIVA";
           examTitle.font = { bold: true, color: { argb: "FFFFFFFF" } };
           examTitle.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4F46E5" } };
           ["IDENTIFICACION", "ESTUDIANTE", "CURSO", "FECHA Y HORA", "ESTADO", "RESULTADO"].forEach((label, index) => {
@@ -632,7 +632,7 @@ class ReportService {
           });
         }
         if (!grouped.size && !detail.exams?.length) instructorSheet.getCell("A6").value = "No existen cursos con estudiantes en el periodo seleccionado.";
-        [18, 28, 36, 12, 15, 12].forEach((width, index) => { instructorSheet.getColumn(index + 1).width = width; });
+        [18, 28, 36, 12, 15, 12, 22].forEach((width, index) => { instructorSheet.getColumn(index + 1).width = width; });
         instructorSheet.views = [{ state: "frozen", ySplit: 4 }];
       }
     }

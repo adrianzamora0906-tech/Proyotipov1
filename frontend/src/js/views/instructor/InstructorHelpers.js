@@ -1,3 +1,7 @@
+export function renderFormationCounts(counts={}) {
+  return `<section data-monthly-students aria-label="Alumnos de este mes"><h3>Alumnos de este mes</h3><div class="instructor-students-summary">${[['normal','Formación normal'],['intensive','Formación intensiva'],['additional','Horas prácticas adicionales']].map(([key,label])=>`<span class="matriculated">${label}: <strong>${Number(counts[key])||0}</strong></span>`).join('')}</div><p class="text-sm text-gray-500">Solo examen se incluye en formación intensiva.</p></section>`;
+}
+
 export function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')

@@ -1,7 +1,7 @@
 import Component from '../../components/Component.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
 import InstructorStudentService from '../../services/instructorStudentService.js';
-import { badgeClass, escapeHtml, formatDateTime, stateMessage } from './InstructorHelpers.js';
+import { renderFormationCounts, badgeClass, escapeHtml, formatDateTime, stateMessage } from './InstructorHelpers.js?v=conteo-formacion-20261027';
 
 class InstructorStudentsView extends Component {
   async render() {
@@ -16,6 +16,9 @@ class InstructorStudentsView extends Component {
       });
       const detail = selectedEnrollment ? await InstructorStudentService.getStudent(selectedEnrollment) : null;
 
+      const normal=result.data.filter(s=>!s.formationCategory||s.formationCategory==='normal');
+      const intensive=result.data.filter(s=>s.formationCategory==='intensive');
+      const additional=[...result.data.filter(s=>s.formationCategory==='additional'),...(result.additionalPractices||[])].filter((s,i,all)=>all.findIndex(other=>other.studentId===s.studentId)===i);
       const content = `
         <div class="instructor-page">
           <div class="page-header">
@@ -25,6 +28,7 @@ class InstructorStudentsView extends Component {
             </div>
           </div>
 
+          ${renderFormationCounts(result.monthlyStudentCounts)}
           <form class="card instructor-filters" id="student-filter-form">
             <div class="form-group"><label class="form-label">Buscar</label><input class="form-input" name="search" value="${escapeHtml(params.get('search') || '')}" placeholder="Nombre del estudiante"></div>
             <div class="form-group"><label class="form-label">Curso</label><input class="form-input" name="course" value="${escapeHtml(params.get('course') || '')}" placeholder="Automovil o moto"></div>
@@ -32,16 +36,8 @@ class InstructorStudentsView extends Component {
             <button class="btn btn-secondary" type="button" id="clear-instructor-student-filters">Limpiar filtros</button>
           </form>
 
-          <div class="card">
-            <div class="card-header"><h3 class="card-title">Asignaciones activas</h3><span class="badge badge-primary">${result.data.length}</span></div>
-            <div class="card-body">${result.data.length ? this.renderRows(result.data) : '<div class="instructor-empty">No tienes estudiantes asignados con esos filtros.</div>'}</div>
-          </div>
-
+          ${[['Formación normal',normal],['Formación intensiva',intensive],['Horas prácticas adicionales',additional]].map(([label,items])=>`<div class="card"><div class="card-header"><h3 class="card-title">${label}</h3><span class="badge badge-primary">${items.length}</span></div><div class="card-body">${items.length?this.renderRows(items):'<div class="instructor-empty">No tienes estudiantes en esta categoria con esos filtros.</div>'}</div></div>`).join('')}
           ${detail ? this.renderDetail(detail.data) : ''}
-          ${result.additionalPractices?.length ? `<section>
-            <h3>Practicas adicionales</h3>
-            ${this.renderRows(result.additionalPractices)}
-          </section>` : ''}
         </div>
       `;
       const layout = await SidebarLayout.render(content);

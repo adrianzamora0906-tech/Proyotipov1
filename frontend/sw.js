@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v90-nationality-registration';
+const CACHE_NAME = 'sportmancar-offline-v113-cash-report-payment-actors';
 const APP_SHELL = [
   '/',
   '/index.html',

@@ -3,6 +3,7 @@ import SidebarLayout from '../../layouts/SidebarLayout.js';
 import PaymentService from '../../services/PaymentService.js';
 import ApiService from '../../core/api/apiService.js';
 import { authService } from '../../core/auth/AuthService.js';
+import {openCashSalesReport} from '../../helpers/CashSalesReportModal.js';
 
 class CashDashboardView extends Component {
   async refreshRealtime() {
@@ -43,7 +44,7 @@ class CashDashboardView extends Component {
       <div class="dashboard cash-dashboard">
         <div class="dashboard-header cash-dashboard__header">
           <div><span class="cash-dashboard__eyebrow">Gestión financiera</span><h1>Panel de Caja</h1><p>Control de cobros y comprobantes del día.</p></div>
-          <div class="cash-dashboard__date"><span>Hoy</span><strong>${today}</strong></div>
+          <div class="cash-dashboard__date"><span>Hoy</span><strong>${today}</strong><button type="button" class="btn btn-secondary" id="cash-sales-report">Ventas / Excel</button></div>
         </div>
 
         <div class="stats-grid cash-stats-grid">
@@ -86,6 +87,7 @@ class CashDashboardView extends Component {
   }
 
   async mount() {
+    document.getElementById('cash-sales-report')?.addEventListener('click',openCashSalesReport);
     const overlay = document.getElementById('cash-search-overlay');
     const input = document.getElementById('cash-student-search');
     const results = document.getElementById('cash-search-results');

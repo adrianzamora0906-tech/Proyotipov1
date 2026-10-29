@@ -1,0 +1,22 @@
+const fs=require('node:fs'),assert=require('node:assert/strict');
+const {chromium}=require('C:/Users/USUARIO/AppData/Local/npm-cache/_npx/e41f203b7505f1fb/node_modules/playwright');
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
+ for(const width of [390,1280]){const page=await browser.newPage({viewport:{width,height:900}});
+ await page.setContent('<style>*{box-sizing:border-box;margin:0}body{font-family:Arial}button,input{padding:10px}</style><button id="open">Ventas / Excel</button>');
+ const source=fs.readFileSync('frontend/src/js/helpers/CashSalesReportModal.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export function openCashSalesReport','window.openCashSalesReport=function');
+ await page.addScriptTag({content:`window.downloads=0;const apiClient={get:async()=>({data:{totals:{sales:1,amount:164.99,paid:100,balance:64.99,withoutAccount:0},rows:[{date:'2026-10-28',identification:'0123456789',student:'ESTUDIANTE PRUEBA',course:'Clase B',branch:'Flavio',seller:'Caja',amount:164.99,paid:100,balance:64.99}]}}),downloadGet:async()=>{window.downloads++;return {blob:new Blob(['excel']),filename:'ventas.xlsx'}}};${source};document.getElementById('open').onclick=window.openCashSalesReport;`});
+ await page.evaluate(()=>{const original=apiClient.get;apiClient.get=async(...args)=>{const result=await original(...args);Object.assign(result.data.rows[0],{payment_methods:'1. efectivo ($60.00)\n2. tarjeta ($40.00)',payment_registered_by:'1. Cajera A\n2. Cajera B'});return result;};});
+ await page.locator('#open').click();assert(await page.locator('#cash-sales-export').isDisabled());
+ const centered=()=>{const r=document.querySelector('dialog').getBoundingClientRect();return Math.abs(r.x+r.width/2-innerWidth/2)<2&&Math.abs(r.y+r.height/2-innerHeight/2)<2;};
+ assert(await page.evaluate(centered));
+ await page.getByRole('button',{name:'Vista previa'}).click();await page.waitForFunction(()=>!document.getElementById('cash-sales-export').disabled);
+ assert((await page.locator('.cash-sales-results').innerText()).includes('0123456789'));
+ const detail=await page.locator('.cash-sales-results').innerText();assert(detail.includes('efectivo ($60.00)'));assert(detail.includes('tarjeta ($40.00)'));assert(detail.includes('Cajera A'));assert(detail.includes('Cajera B'));
+ assert(await page.evaluate(()=>{const r=document.querySelector('dialog').getBoundingClientRect();return r.x>=0&&r.right<=innerWidth;}));
+ assert(await page.evaluate(centered));
+ await page.screenshot({path:'.tmp/cash-sales-modal-'+width+'.png',fullPage:true});
+ await page.locator('#cash-sales-export').click();await page.waitForFunction(()=>window.downloads===1);
+ await page.locator('[name=from]').fill('2026-10-01');assert(await page.locator('#cash-sales-export').isDisabled());
+ await page.keyboard.press('Escape');await page.locator('dialog').waitFor({state:'detached'});await page.close();
+ }console.log('Modal Caja: fechas, vista previa, exportacion, invalidacion y Escape verificados a 390/1280 px.');
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

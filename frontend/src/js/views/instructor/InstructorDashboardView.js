@@ -2,7 +2,7 @@ import Component from '../../components/Component.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
 import InstructorDashboardService from '../../services/instructorDashboardService.js';
 import { authService } from '../../core/auth/AuthService.js';
-import { badgeClass, escapeHtml, formatDateTime, formatTime, stateMessage } from './InstructorHelpers.js';
+import { renderFormationCounts, badgeClass, escapeHtml, formatDateTime, formatTime, stateMessage } from './InstructorHelpers.js?v=conteo-formacion-20261027';
 import { openAttendanceQrModal } from './AttendanceQrModal.js';
 import { openCompleteSessionModal } from './CompleteSessionModal.js';
 import PracticalSessionService from '../../services/practicalSessionService.js';
@@ -16,6 +16,8 @@ class InstructorDashboardView extends Component {
     const dashboard = result.data;
     const previous = this.dashboardData;
     this.dashboardData = dashboard;
+    const monthly=root.querySelector("[data-monthly-students]");
+    if(monthly)monthly.outerHTML=renderFormationCounts(dashboard.summary.monthlyStudentCounts);
     const values = {
       next:dashboard.summary.nextSession ? formatTime(dashboard.summary.nextSession.scheduledStart) : 'Sin clases',
       today:dashboard.summary.scheduledToday,completed:dashboard.summary.monthlyCompletedSessions,
@@ -52,6 +54,7 @@ class InstructorDashboardView extends Component {
           ${authService.can('STUDENT_CREATE') ? `<div class="mobile-operation-actions"><a class="btn btn-primary" href="/students/new"><i data-lucide="user-plus" aria-hidden="true"></i>Registrar estudiante</a>
               <a class="btn btn-secondary" href="/students"><i data-lucide="users" aria-hidden="true"></i>Mis alumnos</a>
               ${authService.can('PAYMENT_CREATE') ? '<a class="btn btn-secondary" href="/cash"><i data-lucide="wallet" aria-hidden="true"></i>Registrar cobro</a>' : ''}</div>` : ''}
+          ${renderFormationCounts(dashboard.summary.monthlyStudentCounts)}
           <div class="stats-grid">
             ${this.renderStat(dashboard.summary.nextSession ? formatTime(dashboard.summary.nextSession.scheduledStart) : 'Sin clases', 'Próxima clase', 'next')}
             ${this.renderStat(dashboard.summary.scheduledToday, 'Clases de hoy', 'today')}

@@ -1,0 +1,26 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const source=fs.readFileSync(require('node:path').join(__dirname,'../src/js/views/students/StudentsView.js'),'utf8');
+const extract=(start,end)=>source.slice(source.indexOf('  '+start+'('),source.indexOf('  '+end+'('));
+const dates=['2026-10-30','2026-11-04','2026-11-05'];
+test('registro conserva fechas del servidor y hora sin regenerar feriados',()=>{
+ const context={document:{getElementById:()=>null},escapeHtml:String};
+ vm.createContext(context);
+ vm.runInContext(`this.view={${extract('flattenEnrollmentOptions','async loadModalTheoryGroups')},${extract('storeSchedulePlan','updateScheduleSelectionSummary')},${extract('renderEnrollmentCycleCalendar','async openRegistrationGallery')}};`,context);
+ const view=context.view;
+ const schedules=view.flattenEnrollmentOptions([{id:'course',startDate:dates[0],endDate:dates.at(-1),durationBusinessDays:3,slots:[{startTime:'10:00',endTime:'11:40',available:1,occupancyByDate:Object.fromEntries(dates.map(d=>[d,{available:1}]))}]}]);
+ assert.deepEqual(Array.from(schedules[0].calendarDates),dates);
+ assert.equal(schedules[0].time,'10:00 - 11:40');
+ view.getCourseBusinessDays=()=>{throw Error('No debe regenerar fechas entre inicio y fin');};
+ view.renderScheduleOption=s=>`<button data-date="${s.date}"></button>`;
+ const html=view.renderEnrollmentCycleCalendar({courseKey:'carro',modality:'normal',title:'Curso',schedules,cycle:{key:'course',calendarDates:schedules[0].calendarDates,startDate:dates[0],endDate:dates.at(-1),instructors:[]},cycleIndex:0,cycleCount:1,activeCycleIndex:0});
+ assert(!html.includes('11-02'));assert(!html.includes('11-03'));assert(html.includes('11-04'));assert(html.includes('10:00 - 11:40'));
+ const options=dates.map(date=>({dataset:{schedule:JSON.stringify({id:schedules[0].id,cycleId:'course',date,time:schedules[0].time})}}));
+ const calendar={dataset:{requiredClasses:'3'},querySelectorAll:selector=>selector==='.schedule-option.selected'?[options[0]]:options};
+ view.isRotationEnabled=()=>false;
+ const plan=view.storeSchedulePlan(calendar,true);
+ assert.deepEqual(Array.from(plan,p=>p.date),dates);
+ assert(plan.every(p=>p.time==='10:00 - 11:40'));
+});

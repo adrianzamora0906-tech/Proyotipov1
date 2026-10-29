@@ -366,6 +366,7 @@ export default class AtmAuthorizationView extends Component {
                           : 'Autorizacion'
                       }
                     </small>
+                    ${item.document_type==='PERMIT'?`<small>${esc(({DRAFT:'Borrador',CONFIRMED:'Compra confirmada',CANCELLED:'Compra anulada'})[item.purchase_status]||'Registro anterior sin confirmación')}${item.purchase_status?` · ${Number(item.purchase_count||0)} estudiantes`:''}</small>${item.confirmed_at?`<small>${dateTime(item.confirmed_at)}</small>`:''}`:''}
                   </td>
 
                   <td>
@@ -419,6 +420,8 @@ export default class AtmAuthorizationView extends Component {
                   <td class="atm-actions-cell">
 
                     <div class="atm-file-actions">
+                    ${item.purchase_status==='DRAFT'?`<button type="button" class="btn btn-small atm-confirm-purchase" data-id="${esc(item.id)}" data-count="${Number(item.purchase_count||0)}">Confirmar compra</button>`:''}
+                    ${item.purchase_status==='CONFIRMED'?`<button type="button" class="btn btn-small atm-cancel-purchase" data-id="${esc(item.id)}">Anular compra</button>`:''}
 
                     ${
                       item.has_document
@@ -450,7 +453,7 @@ export default class AtmAuthorizationView extends Component {
                         : ''
                     }
 
-                    <button
+                    ${!item.purchase_status||item.purchase_status==='DRAFT'?`<button
                       type="button"
                       class="atm-delete-document"
                       data-id="${item.id}"
@@ -459,7 +462,7 @@ export default class AtmAuthorizationView extends Component {
                       title="Eliminar oficio"
                     >
                       &times;
-                    </button>
+                    </button>`:''}
 
                     </div>
 
@@ -475,6 +478,21 @@ export default class AtmAuthorizationView extends Component {
 
       </div>
     `;
+
+    host.querySelectorAll('.atm-confirm-purchase,.atm-cancel-purchase').forEach(button=>{
+      button.addEventListener('click',async()=>{
+        const cancel=button.classList.contains('atm-cancel-purchase');
+        let reason='';
+        if(cancel){reason=window.prompt('Motivo de anulación de la compra:')?.trim();if(!reason)return;}
+        else if(!window.confirm(`¿Confirmar la compra para ${button.dataset.count} estudiantes de este oficio?`))return;
+        button.disabled=true;
+        try{
+          const result=cancel?await AdminService.cancelPermitPurchase(button.dataset.id,reason):await AdminService.confirmPermitPurchase(button.dataset.id);
+          if(result.success===false)throw new Error(result.error?.message||result.error||'No se pudo actualizar la compra.');
+          await this.loadDocuments();this.renderHistory();
+        }catch(error){button.disabled=false;host.querySelector('.atm-purchase-error')?.remove();host.insertAdjacentHTML('afterbegin',`<div class="alert alert-error atm-purchase-error" role="alert">${esc(error.message||'No se pudo actualizar la compra.')}</div>`);}
+      });
+    });
 
     host
       .querySelectorAll('.atm-download')
@@ -830,29 +848,6 @@ export default class AtmAuthorizationView extends Component {
             </select>
           </label>
 
-          <div class="atm-permit-cycle-field">
-            <strong>
-              Ciclos disponibles
-            </strong>
-
-            <div class="atm-cycle-dropdown">
-              <button
-                type="button"
-                class="atm-cycle-toggle"
-                id="atm-permit-cycle-toggle"
-              >
-                Seleccionar cursos
-              </button>
-
-              <div
-                id="atm-permit-cycle"
-                class="atm-permit-cycle-list"
-              >
-                Cargando ciclos...
-              </div>
-            </div>
-          </div>
-
           <label>
             Numero de autorizacion ANT
 
@@ -864,26 +859,24 @@ export default class AtmAuthorizationView extends Component {
           </label>
 
           <label>
-            Inicio del curso
+            Matrícula desde
 
             <input
               type="date"
               name="courseStart"
               id="atm-permit-course-start"
               required
-              readonly
             >
           </label>
 
           <label>
-            Fin del curso
+            Matrícula hasta
 
             <input
               type="date"
               name="courseEnd"
               id="atm-permit-course-end"
               required
-              readonly
             >
           </label>
 
@@ -894,9 +887,9 @@ export default class AtmAuthorizationView extends Component {
               type="number"
               name="studentCount"
               id="atm-permit-student-count"
+              readonly
               min="1"
               required
-              readonly
             >
           </label>
 
@@ -921,7 +914,7 @@ export default class AtmAuthorizationView extends Component {
         </div>
 
         <div id="atm-permit-course-status" class="atm-course-status atm-course-status-compact">
-          Buscando ciclos disponibles...
+          Selecciona las fechas de matrícula.
         </div>
 
         <div class="atm-permit-summary" id="atm-permit-summary"></div>
@@ -945,9 +938,6 @@ export default class AtmAuthorizationView extends Component {
             Descargar cédulas ZIP
           </button>
 
-          <span>
-            El Excel y el ZIP incluyen a todos los estudiantes matriculados en los ciclos seleccionados.
-          </span>
         </div>
 
       </div>
@@ -955,214 +945,62 @@ export default class AtmAuthorizationView extends Component {
   }
 
   bindPermitCourseSelection() {
-    const form = document.getElementById('atm-office-form');
-    const branchSelect = form?.querySelector('[name="branchId"]');
-
-    branchSelect?.addEventListener('change', () => this.loadPermitCourses());
-
-    document
-      .getElementById('atm-permit-course-type')
-      ?.addEventListener('change', () => {
-        this.renderPermitCourseOptions();
-        this.applySelectedPermitCourse();
+    const form=document.getElementById('atm-office-form');
+    for(const selector of ['[name="branchId"]','#atm-permit-course-type','#atm-permit-course-start','#atm-permit-course-end']) {
+      form?.querySelector(selector)?.addEventListener('change',()=>this.loadPermitCourses());
+    }
+    for(const [id,method] of [['atm-download-permit-excel','exportPermitStudents'],['atm-download-permit-identifications','exportPermitStudentIdentifications']]) {
+      document.getElementById(id)?.addEventListener('click',async event=>{
+        const button=event.currentTarget;button.disabled=true;
+        try {download(await AdminService[method](this.permitDateFilters()));}
+        catch(error){document.getElementById('atm-permit-course-status').textContent=error.message||'No se pudo descargar el archivo.';}
+        finally{button.disabled=!this.permitEligibleCount;}
       });
-
-    document
-      .getElementById('atm-permit-cycle')
-      ?.addEventListener('change', () => this.applySelectedPermitCourse());
-
-    document
-      .getElementById('atm-permit-cycle-toggle')
-      ?.addEventListener('click', () => {
-        document
-          .querySelector('.atm-cycle-dropdown')
-          ?.classList.toggle('is-open');
-      });
-
-    document
-      .getElementById('atm-download-permit-excel')
-      ?.addEventListener('click', async () => {
-        const selected = this.selectedPermitCourses();
-        if (!selected.length) return;
-
-        download(
-          await AdminService.exportPermitStudents({
-            branchId: this.currentPermitBranchId(),
-            cycleIds: selected.map((item) => item.id).join(','),
-            courseType: selected[0].courseType,
-            courseStart: selected.reduce((min, item) => !min || item.courseStart < min ? item.courseStart : min, ''),
-            courseEnd: selected.reduce((max, item) => !max || item.courseEnd > max ? item.courseEnd : max, ''),
-          })
-        );
-      });
-
-    document
-      .getElementById('atm-download-permit-identifications')
-      ?.addEventListener('click', async () => {
-        const selected = this.selectedPermitCourses();
-        if (!selected.length) return;
-        download(
-          await AdminService.exportPermitStudentIdentifications({
-            branchId: this.currentPermitBranchId(),
-            cycleIds: selected.map((item) => item.id).join(','),
-            courseType: selected[0].courseType,
-            courseStart: selected.reduce((min, item) => !min || item.courseStart < min ? item.courseStart : min, ''),
-            courseEnd: selected.reduce((max, item) => !max || item.courseEnd > max ? item.courseEnd : max, ''),
-          })
-        );
-      });
+    }
   }
 
   currentPermitBranchId() {
-    return document
-      .getElementById('atm-office-form')
-      ?.querySelector('[name="branchId"]')
-      ?.value || '';
+    return document.getElementById('atm-office-form')?.querySelector('[name="branchId"]')?.value || '';
   }
 
-  selectedPermitCourse() {
-    return this.selectedPermitCourses()[0] || null;
-  }
-
-  selectedPermitCourses() {
-    const host = document.getElementById('atm-permit-cycle');
-    const ids = [...(host?.querySelectorAll('input[type="checkbox"]:checked') || [])]
-      .map((field) => field.value)
-      .filter(Boolean);
-    return this.permitCourses.filter((item) => ids.includes(String(item.id)));
-  }
-
-  selectedPermitCourseType() {
-    return document.getElementById('atm-permit-course-type')?.value || 'MOTO';
-  }
-
-  filteredPermitCourses() {
-    const type = this.selectedPermitCourseType();
-    return this.permitCourses.filter((item) => item.courseType === type);
-  }
-
-  renderPermitCourseOptions() {
-    const host = document.getElementById('atm-permit-cycle');
-    const status = document.getElementById('atm-permit-course-status');
-    if (!host) return;
-
-    const type = this.selectedPermitCourseType();
-    const label = type === 'AUTO' ? 'automovil' : 'moto';
-    const courses = this.filteredPermitCourses();
-
-    if (!this.permitCourses.length) {
-      host.innerHTML = '<p class="muted">No hay ciclos disponibles</p>';
-      if (status) status.textContent = 'No hay ciclos disponibles para permiso.';
-      return;
-    }
-
-    if (!courses.length) {
-      host.innerHTML = `<p class="muted">No hay ciclos de ${label}</p>`;
-      if (status) status.textContent = `No hay ciclos de ${label} con estudiantes matriculados.`;
-      return;
-    }
-
-    host.innerHTML = `
-      ${courses.map((course) => `
-        <label class="atm-permit-cycle-option">
-          <input
-            type="checkbox"
-            name="cycleIds"
-            value="${esc(course.id)}"
-          >
-
-          <span>
-            <b>${esc(course.code)}</b>
-            <small>${esc(course.courseName)}</small>
-          </span>
-        </label>
-      `).join('')}
-    `;
-
-    if (status) {
-      status.textContent = `${courses.length} proximo(s) de ${label} listos para permiso. Marca uno o varios ciclos.`;
-    }
+  permitDateFilters() {
+    return {branchId:this.currentPermitBranchId(),
+      courseType:document.getElementById('atm-permit-course-type')?.value,
+      courseStart:document.getElementById('atm-permit-course-start')?.value,
+      courseEnd:document.getElementById('atm-permit-course-end')?.value};
   }
 
   async loadPermitCourses() {
-    const host = document.getElementById('atm-permit-cycle');
-    const status = document.getElementById('atm-permit-course-status');
-    const branchId = this.currentPermitBranchId();
-
-    if (!host) return;
-
-    host.innerHTML = 'Cargando ciclos...';
-    if (status) status.textContent = 'Buscando próximos ciclos con estudiantes matriculados...';
-
-    if (!branchId) {
-      this.permitCourses = [];
-      host.innerHTML = '<p class="muted">Selecciona una sucursal primero...</p>';
-      if (status) status.textContent = 'Selecciona una sucursal para consultar sus ciclos.';
-      this.applySelectedPermitCourse();
+    const requestId=this.permitRequestId=(this.permitRequestId||0)+1;
+    const filters=this.permitDateFilters();
+    const status=document.getElementById('atm-permit-course-status');
+    const count=document.getElementById('atm-permit-student-count');
+    const submit=document.getElementById('atm-office-form')?.querySelector('[type="submit"]');
+    this.permitEligibleCount=0;
+    if(count)count.value='';
+    if(submit)submit.disabled=true;
+    for(const id of ['atm-download-permit-excel','atm-download-permit-identifications']) {
+      const button=document.getElementById(id);if(button)button.disabled=true;
+    }
+    if(!filters.branchId||!filters.courseStart||!filters.courseEnd||filters.courseStart>filters.courseEnd) {
+      if(status)status.textContent='Selecciona sucursal y un rango válido de fechas de matrícula.';
       return;
     }
-
+    if(status)status.textContent='Consultando estudiantes...';
     try {
-      this.permitCourses = (
-        await AdminService.permitCourseOptions({ branchId })
-      ).data || [];
-
-      if (!this.permitCourses.length) {
-        host.innerHTML = '<p class="muted">No hay ciclos disponibles</p>';
-        if (status) status.textContent = 'No hay próximos cursos con estudiantes matriculados.';
-        this.applySelectedPermitCourse();
-        return;
+      const result=await AdminService.permitCourseOptions(filters);
+      if(requestId!==this.permitRequestId||!count?.isConnected)return;
+      if(result.success===false)throw new Error(result.error?.message||result.error||'No se pudo consultar el listado.');
+      this.permitEligibleCount=Number(result.data?.studentCount||0);
+      count.value=this.permitEligibleCount;
+      if(status)status.textContent=this.permitEligibleCount
+        ? this.permitEligibleCount+' estudiantes con pago completo.'
+        : 'No hay estudiantes con pago completo en este período de inscripción.';
+      if(submit)submit.disabled=!this.permitEligibleCount;
+      for(const id of ['atm-download-permit-excel','atm-download-permit-identifications']) {
+        const button=document.getElementById(id);if(button)button.disabled=!this.permitEligibleCount;
       }
-
-      this.renderPermitCourseOptions();
-    } catch (error) {
-      this.permitCourses = [];
-      host.innerHTML = '<p class="muted">Error al cargar ciclos</p>';
-      if (status) status.textContent = error.message || 'No fue posible consultar los ciclos.';
-    }
-
-    this.applySelectedPermitCourse();
-  }
-
-  applySelectedPermitCourse() {
-    const selected = this.selectedPermitCourses();
-    const first = selected[0] || null;
-    const courseStart = selected.reduce((min, item) => !min || item.courseStart < min ? item.courseStart : min, '');
-    const courseEnd = selected.reduce((max, item) => !max || item.courseEnd > max ? item.courseEnd : max, '');
-    const enrolledStudents = selected.reduce((total, item) => total + Number(item.enrolledStudents || 0), 0);
-    const setValue = (id, value) => {
-      const field = document.getElementById(id);
-      if (field) field.value = value || '';
-    };
-
-    setValue('atm-permit-course-start', courseStart);
-    setValue('atm-permit-course-end', courseEnd);
-    setValue('atm-permit-student-count', enrolledStudents || '');
-
-    const summary = document.getElementById('atm-permit-summary');
-    if (summary) {
-      summary.innerHTML = selected.length
-        ? `
-          <strong>${selected.length} ciclo(s) seleccionado(s)</strong>
-          <span>${esc(first.branchName)} - ${esc(first.courseName)}</span>
-          <span>${enrolledStudents} estudiante(s) matriculado(s)</span>
-          <span>${esc(selected.map((item) => item.code).join(', '))}</span>
-          <span>${date(courseStart)} al ${date(courseEnd)}</span>
-        `
-        : '';
-    }
-
-    const toggle = document.getElementById('atm-permit-cycle-toggle');
-    if (toggle) {
-      toggle.textContent = selected.length
-        ? `${selected.length} curso(s) seleccionado(s)`
-        : 'Seleccionar cursos';
-    }
-
-    const excelButton = document.getElementById('atm-download-permit-excel');
-    if (excelButton) excelButton.disabled = !selected.length;
-    const identificationsButton = document.getElementById('atm-download-permit-identifications');
-    if (identificationsButton) identificationsButton.disabled = !selected.length;
+    }catch(error){if(requestId===this.permitRequestId&&status)status.textContent=error.message||'No se pudo consultar el listado.';}
   }
 
   addCourseRow() {
@@ -1391,13 +1229,9 @@ export default class AtmAuthorizationView extends Component {
         )
       );
     } else {
-      const selected =
-        this.selectedPermitCourses();
-
       payload.course =
         Object.fromEntries(
           [
-            'cycleId',
             'courseType',
             'antAuthorization',
             'courseStart',
@@ -1411,14 +1245,6 @@ export default class AtmAuthorizationView extends Component {
           ])
         );
 
-      if (selected.length) {
-        payload.course.cycleIds = selected.map((item) => item.id);
-        payload.course.cycleId = selected[0].id;
-        payload.course.courseType = selected[0].courseType;
-        payload.course.courseStart = selected.reduce((min, item) => !min || item.courseStart < min ? item.courseStart : min, '');
-        payload.course.courseEnd = selected.reduce((max, item) => !max || item.courseEnd > max ? item.courseEnd : max, '');
-        payload.course.studentCount = selected.reduce((total, item) => total + Number(item.enrolledStudents || 0), 0);
-      }
     }
 
     button.disabled = true;

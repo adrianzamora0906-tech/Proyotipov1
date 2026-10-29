@@ -47,6 +47,8 @@ export default class AdminService {
   static deleteAtmAuthorization(id) {
     return apiClient.delete(`/admin/atm-authorizations/${id}`);
   }
+  static confirmPermitPurchase(id) {return apiClient.post(`/admin/atm-authorizations/${encodeURIComponent(id)}/purchase/confirm`,{});}
+  static cancelPermitPurchase(id,reason) {return apiClient.post(`/admin/atm-authorizations/${encodeURIComponent(id)}/purchase/cancel`,{reason});}
   static courseReports(params = {}) {
     return apiClient.get(`/admin/reports/courses${query(params)}`);
   }
@@ -108,6 +110,9 @@ export default class AdminService {
   }
   static branches(params = {}) {
     return apiClient.get(`/admin/branches${query(params)}`);
+  }
+  static branchSalesPoint(params={}) {
+    return apiClient.get(`/admin/branches/sales-point${query(params)}`);
   }
   static branchLocations() {
     return apiClient.get("/admin/branches/locations/catalog");

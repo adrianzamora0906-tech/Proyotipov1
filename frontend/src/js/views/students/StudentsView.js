@@ -16,6 +16,7 @@ import DocumentService from '../../services/DocumentService.js';
 import NotificationService from '../../services/NotificationService.js';
 import Validator from '../../helpers/Validator.js';
 import DateHelper from '../../helpers/DateHelper.js';
+import { isHalloweenPromotionActive } from '../../helpers/HalloweenPromotion.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
 import ApiService from '../../core/api/apiService.js';
@@ -33,6 +34,7 @@ class StudentsView extends Component {
     const isBranchAdmin = (currentUser?.roles || []).includes('BRANCH_ADMIN');
     const currentPage = Math.max(Number(queryParams.get('page')) || 1, 1);
     const searchQuery = queryParams.get('search') || queryParams.get('q') || '';
+    const identificationSearch = /^\d{10}$/.test(searchQuery.trim());
     const selectedRegistrationType = queryParams.get('registration_type') || 'REGULAR';
     this.registrationType = selectedRegistrationType;
     const listParams = {};
@@ -42,11 +44,11 @@ class StudentsView extends Component {
     else if (!queryParams.get('branch_id')) listParams.scope = 'all';
     if (queryParams.get('branch_id')) listParams.branch_id = queryParams.get('branch_id');
     if (searchQuery) listParams.search = searchQuery;
-    const selectedStatus = queryParams.has('status') ? queryParams.get('status') : (isBranchAdmin ? 'active' : '');
+    const selectedStatus = identificationSearch ? '' : queryParams.has('status') ? queryParams.get('status') : (isBranchAdmin ? 'active' : '');
     const statusFilterOptions = [
       ['', 'Todos los estados'],
       ['active', 'Matriculados o en curso'],
-      ['payment_pending', 'Con pago pendiente'],
+      ['payment_pending', 'Con deuda pendiente'],
       ['documents_pending', 'Con documentos pendientes'],
       ['pendiente_pago', 'Pendiente pago'],
       ['pago_parcial', 'Pago parcial'],
@@ -74,7 +76,7 @@ class StudentsView extends Component {
     const summaryStudentsPromise = isRegistrationPage ? Promise.resolve([]) : StudentService.getAllStudents(summaryParams);
     const studentsPromise = !isRegistrationPage && listParams.status
       ? StudentService.getAllStudents(listParams)
-      : summaryStudentsPromise.then(items => items.filter(student => student.registrationType === selectedRegistrationType));
+      : summaryStudentsPromise.then(items => identificationSearch ? items : items.filter(student => student.registrationType === selectedRegistrationType));
     const [students, branches, reservations, summaryStudents, summaryReservations, disabledStudents] = await Promise.all([
       studentsPromise,
       StudentService.getBranches(),
@@ -108,7 +110,7 @@ class StudentsView extends Component {
       const secondCurrent = String(second.id) === String(currentBranchRecord?.id) ? 0 : 1;
       return firstCurrent - secondCurrent || String(first.name || '').localeCompare(String(second.name || ''), 'es');
     });
-    const activeStudentFilter = !queryParams.get('branch_id') && queryParams.get('scope') !== 'created'
+    const activeStudentFilter = queryParams.get('scope') === 'authored' ? 'authored' : !queryParams.get('branch_id') && queryParams.get('scope') !== 'created'
       ? 'all'
       : queryParams.get('scope') === 'created'
         ? 'created'
@@ -166,9 +168,10 @@ class StudentsView extends Component {
 
         <form class="student-filter-bar" id="student-filter-form">
           <label>Buscar<input class="form-input" name="search" value="${searchQuery}" placeholder="Buscar por nombre o cédula..."></label>
-          <label>Sucursal<select class="form-select" name="studentScope">
+          <label>Sucursal de venta<select class="form-select" name="studentScope">
             ${cantonBranches.map(branch => `<option value="branch:${branch.id}" ${activeStudentFilter === `branch:${branch.id}` ? 'selected' : ''}>${branch.name}</option>`).join('')}
             <option value="all" ${activeStudentFilter === 'all' ? 'selected' : ''}>Todas las sucursales del cantón</option>
+            <option value="authored" ${activeStudentFilter === 'authored' ? 'selected' : ''}>Creados por mí</option>
             <option value="created" ${activeStudentFilter === 'created' ? 'selected' : ''}>Creados o modificados por mí</option>
           </select></label>
           <label>Estado<select class="form-select" name="status">
@@ -265,6 +268,7 @@ class StudentsView extends Component {
       const next = new URLSearchParams();
       if (data.studentScope === 'all') next.set('scope', 'all');
       else if (data.studentScope === 'created') next.set('scope', 'created');
+      else if (data.studentScope === 'authored') next.set('scope', 'authored');
       else if (data.studentScope?.startsWith('branch:')) next.set('branch_id', data.studentScope.slice(7));
       for (const key of ['search', 'status', 'course_type', 'province', 'city', 'created_date']) {
         if (data[key]) next.set(key, data[key]);
@@ -313,17 +317,30 @@ class StudentsView extends Component {
     const params = {};
     if (formData.studentScope === 'all') params.scope = 'all';
     else if (formData.studentScope === 'created') params.scope = 'created';
+    else if (formData.studentScope === 'authored') params.scope = 'authored';
     else if (formData.studentScope?.startsWith('branch:')) params.branch_id = formData.studentScope.slice(7);
     for (const key of ['search', 'status', 'course_type', 'province', 'city', 'created_date']) {
       if (formData[key]) params[key] = formData[key];
     }
     if (this.registrationType) params.registration_type = this.registrationType;
+    if (/^\d{10}$/.test(String(params.search || '').trim())) {
+      delete params.status;
+      delete params.registration_type;
+    }
     return params;
   }
 
   async refreshStudentTable(params, requestedPage = 1, prefetched = {}) {
+    if (/^\d{10}$/.test(String(params.search || '').trim())) {
+      params = { ...params };
+      delete params.status;
+      delete params.registration_type;
+      const status = document.querySelector('#student-filter-form [name="status"]');
+      if (status) status.value = '';
+    }
     const container = document.getElementById('students-list-content');
     if (!container) return;
+    const requestId = this.studentListRequestId = (this.studentListRequestId || 0) + 1;
     container.setAttribute('aria-busy', 'true');
     container.style.opacity = '0.55';
 
@@ -343,6 +360,7 @@ class StudentsView extends Component {
         params.status ? StudentService.getActiveReservations(summaryParams) : Promise.resolve(null),
         this.getDisabledStudents(summaryParams).catch(() => null),
       ]);
+      if (requestId !== this.studentListRequestId) return;
       this.disabledStudentCount = disabledStudents?.length ?? null;
       const currentBranch = authService.getCurrentUser()?.branch || '';
       const orderedStudents = [...students].sort((first, second) => {
@@ -406,6 +424,7 @@ class StudentsView extends Component {
         const next = new URLSearchParams();
         if (data.studentScope === 'all') next.set('scope', 'all');
         else if (data.studentScope === 'created') next.set('scope', 'created');
+        else if (data.studentScope === 'authored') next.set('scope', 'authored');
         else if (data.studentScope?.startsWith('branch:')) next.set('branch_id', data.studentScope.slice(7));
         for (const key of ['search', 'status', 'course_type', 'province', 'city', 'created_date']) if (data[key]) next.set(key, data[key]);
         if (this.registrationType) next.set('registration_type', this.registrationType);
@@ -416,11 +435,14 @@ class StudentsView extends Component {
       this.bindSummaryCardEvents(document.getElementById('student-filter-form'));
       this.bindRegistrationTabEvents(document.getElementById('student-filter-form'));
     } catch (error) {
+      if (requestId !== this.studentListRequestId) return;
       console.error('No se pudo filtrar el listado de estudiantes:', error);
       container.innerHTML = '<div class="card-body"><div class="alert alert-danger">No se pudo actualizar la tabla. Inténtalo nuevamente.</div></div>';
     } finally {
-      container.removeAttribute('aria-busy');
-      container.style.opacity = '';
+      if (requestId === this.studentListRequestId) {
+        container.removeAttribute('aria-busy');
+        container.style.opacity = '';
+      }
     }
   }
 
@@ -806,12 +828,15 @@ class StudentsView extends Component {
                   <p style="color: #b42318; font-size: 13px; margin: 0 0 8px;">Si aplica una promoción, selecciónala en el campo de abajo.</p>
                   <label class="form-label" for="student-referrer-search">Referido por <small>(opcional)</small></label>
                   <div class="staff-referral-search">
-                    <input type="search" class="form-input" id="student-referrer-search" autocomplete="off" placeholder="Buscar personal, Polic&iacute;a o universidad...">
+                    <input type="search" class="form-input" id="student-referrer-search" autocomplete="off" placeholder="Buscar personal, combo, Polic&iacute;a o universidad...">
                     <input type="hidden" name="referredByUserId" id="student-referrer-id">
                     <input type="hidden" name="discountBenefit" id="student-discount-benefit">
                     <div class="staff-referral-results" id="student-referrer-results" hidden></div>
                   </div>
                   <div class="staff-referral-selected" id="student-referrer-selected" hidden></div>
+                  <label id="student-combo-size-field" hidden>Personas que se inscriben juntas
+                    <input type="number" class="form-input" name="comboSize" id="student-combo-size" min="2" max="100" step="1" value="2" disabled>
+                  </label>
                 </div>
                 ${observationsField('renewal-observations-field')}
               </section>
@@ -1758,9 +1783,15 @@ class StudentsView extends Component {
     const benefit = form?.querySelector('[name="discountBenefit"]')?.value || '';
     const benefitPrices = {
       UNIVERSITY_STUDENT: { moto: 117, carro: 180 },
+      HALLOWEEN: { moto: 114.99, carro: 164.99 },
       POLICE: { moto: 110, carro: 170 },
+      COMBO: { moto: 115, carro: 180 },
     };
     const benefitFinalPrice = benefitPrices[benefit]?.[catalogType];
+    const comboField=document.getElementById('student-combo-size-field');
+    const comboInput=document.getElementById('student-combo-size');
+    if(comboField)comboField.hidden=benefit!=='COMBO';
+    if(comboInput){comboInput.disabled=benefit!=='COMBO';comboInput.required=benefit==='COMBO';}
     const hasApplicableBenefit = Number.isFinite(benefitFinalPrice);
     const minimumFinalAmount = isCarCourse && !hasApplicableBenefit ? 175 : 0;
     const maximumDiscount = Math.max(price - minimumFinalAmount, 0);
@@ -1783,7 +1814,7 @@ class StudentsView extends Component {
       summary.textContent = 'Este convenio solo aplica a los cursos de Moto y Carro.';
       return;
     }
-    const benefitLabel = benefit === 'POLICE' ? 'Policía' : 'Estudiante universitario';
+    const benefitLabel = benefit === 'COMBO' ? 'Combo' : benefit === 'POLICE' ? 'Policía' : 'Estudiante universitario';
     summary.innerHTML = `Valor del curso: <strong>$${price.toFixed(2)}</strong> · Descuento: <strong>$${Math.min(discount, maximumDiscount).toFixed(2)}</strong> · Total final: <strong>$${Math.max(price - discount, minimumFinalAmount).toFixed(2)}</strong>${hasApplicableBenefit ? ` · Convenio: <strong>${benefitLabel}</strong>` : (isCarCourse ? ' · Mínimo permitido: <strong>$175.00</strong>' : '')}`;
   }
 
@@ -2105,7 +2136,7 @@ class StudentsView extends Component {
       ? cycle.officialStartDate : cycle.startDate;
     const displayEndDate = String(cycle.officialEndDate || cycle.endDate) > String(cycle.endDate)
       ? cycle.officialEndDate : cycle.endDate;
-    const days = cycle.calendarDates?.length ? cycle.calendarDates.map(date => ({
+    const days = Array.isArray(cycle.calendarDates) ? cycle.calendarDates.map(date => ({
       date, name: new Date(`${date}T12:00:00`).toLocaleDateString('es', { weekday: 'long' }), label: date.slice(5),
     })) : this.getCourseBusinessDays(displayStartDate, displayEndDate, courseKey, modality);
     const selectedExternalInstructor = (this.modalBranchInstructors || []).some(instructor =>
@@ -2792,6 +2823,7 @@ class StudentsView extends Component {
         available: slot.available,
         occupied: slot.occupied,
         availabilityByDate: slot.occupancyByDate || {},
+        calendarDates: Array.isArray(slot.dates) ? slot.dates : Array.isArray(cycle.dates) ? cycle.dates : Object.keys(slot.occupancyByDate || {}).sort(),
         instructors: cycle.instructors || [],
       };
     }));
@@ -3265,6 +3297,7 @@ class StudentsView extends Component {
         phone: student.phone, address: student.address, bloodType: student.blood_type, nationality: student.nationality,
         pickupBranchId: student.pickup_branch_id, disabilityPercentage: student.disability_percentage,
         referredByUserId: student.referred_by_user_id, discountBenefit: student.discount_benefit,
+        comboSize: student.combo_size || 2,
       };
       Object.entries(values).forEach(([name, value]) => {
         const input = form.querySelector(`[name="${name}"]`);
@@ -3713,8 +3746,10 @@ class StudentsView extends Component {
         ? [
             { id: 'benefit:POLICE', name: 'Policía', role_name: 'Precio especial', branch_name: 'Moto $110 · Carro $170', discount_benefit: 'POLICE' },
             { id: 'benefit:UNIVERSITY_STUDENT', name: 'Estudiante universitario', role_name: 'Precio especial', branch_name: 'Moto $117 · Carro $180', discount_benefit: 'UNIVERSITY_STUDENT' },
-          ].filter(item => item.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(normalizedQuery)
-            || (item.discount_benefit === 'UNIVERSITY_STUDENT' && 'universidad'.includes(normalizedQuery)))
+            { id: 'benefit:HALLOWEEN', name: 'Promo Halloween', role_name: '28 al 31 de octubre de 2026', branch_name: 'Moto $114.99 · Carro $164.99', discount_benefit: 'HALLOWEEN' },
+            { id: 'benefit:COMBO', name: 'Combo (2 o más personas)', role_name: 'Inscripción conjunta', branch_name: 'Moto $115 · Carro $180', discount_benefit: 'COMBO' },
+          ].filter(item => (item.discount_benefit !== 'HALLOWEEN' || isHalloweenPromotionActive()) && (item.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(normalizedQuery)
+            || (item.discount_benefit === 'UNIVERSITY_STUDENT' && 'universidad'.includes(normalizedQuery))))
         : [];
       this.referralStaffResults = [...benefitReferrals, ...staff];
       this.renderReferralStaffResults(this.referralStaffResults);
@@ -4508,13 +4543,10 @@ class StudentsView extends Component {
       if (selectedDates.length >= requiredClasses) {
         dates.push(...selectedDates.slice(0, requiredClasses));
       } else {
-        const cursor = new Date(`${first.date}T12:00:00`);
-        let guard = 0;
-        while (dates.length < requiredClasses && guard < 60) {
-          if (cursor.getDay() >= 1 && cursor.getDay() <= 5) dates.push(cursor.toISOString().slice(0, 10));
-          cursor.setDate(cursor.getDate() + 1);
-          guard += 1;
-        }
+        const serverDates=[...new Set([...calendar.querySelectorAll('.schedule-option')].map(option=>{
+          try{return JSON.parse(option.dataset.schedule||'{}');}catch{return {};}
+        }).filter(item=>item.cycleId===first.cycleId&&item.time===first.time&&item.date>=first.date).map(item=>item.date))].sort();
+        dates.push(...serverDates.slice(0,requiredClasses));
       }
       plan = dates.map((date, index) => ({
         ...first,
@@ -4532,6 +4564,8 @@ class StudentsView extends Component {
     if (scheduleIdInput) scheduleIdInput.value = plan[0]?.id || '';
     if (schedulePlanInput) schedulePlanInput.value = JSON.stringify({
       rotation: this.isRotationEnabled(calendar),
+      preferredInstructorId: this.getCalendarInstructorButton(calendar)?.dataset.courseInstructorId
+        || this.scheduleInstructorFilterId || document.getElementById('preferred-instructor-select')?.value || null,
       practicalMode: document.getElementById('selected-practical-mode')?.value || 'classes',
       selections: plan,
     });
@@ -4545,20 +4579,23 @@ class StudentsView extends Component {
     }
     this.updateReferredInstructorBlockPreview(calendar);
     this.updateInstructorAssignmentPreview(calendar, plan);
-    this.updateScheduleSelectionSummary(plan);
+    this.updateScheduleSelectionSummary(plan, calendar);
     holdScheduleSelection(plan, this.getCalendarInstructorButton(calendar)?.dataset.courseInstructorId
       || this.scheduleInstructorFilterId || document.getElementById('preferred-instructor-select')?.value);
   }
 
-  updateScheduleSelectionSummary(plan = []) {
+  updateScheduleSelectionSummary(plan = [], selectedCalendar = null) {
     document.querySelectorAll('.enrollment-calendar').forEach(calendar => this.updateMobileTimePicker(calendar));
     const summary = document.getElementById('schedule-selection-summary');
     if (!summary) return;
     const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';
     const instructor = document.getElementById('preferred-instructor-select');
-    const instructorName = instructor?.value
+    const calendar = selectedCalendar || [...document.querySelectorAll('.enrollment-calendar')]
+      .find(item => item.dataset.cycleId === plan[0]?.cycleId && item.style.display !== 'none');
+    const selectedInstructor = this.getCalendarInstructorButton(calendar);
+    const instructorName = selectedInstructor?.textContent?.trim() || (instructor?.value
       ? instructor.options[instructor.selectedIndex]?.textContent?.trim()
-      : '';
+      : '');
     let title = 'Aún no has elegido un horario';
     if (plan.length) {
       title = examOnly
@@ -4996,7 +5033,8 @@ class StudentsView extends Component {
       return;
     }
     const selectedBranchId = form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || null;
-    const availableSchedules = await this.getSchedulesForModal(selectedBranchId, preferredInstructorId, practicalStartDate || null);
+    const selectedPracticalCycleId = schedulePlan.selections[0]?.cycleId || activeCalendar?.dataset.cycleId || null;
+    const availableSchedules = await this.getSchedulesForModal(selectedBranchId, preferredInstructorId, practicalStartDate || null, selectedPracticalCycleId);
     if (examOnly && !preferredInstructorId) {
       const scheduleError = document.getElementById('schedule-error');
       if (scheduleError) scheduleError.textContent = 'Selecciona el instructor para Solo examen.';
@@ -5148,6 +5186,7 @@ class StudentsView extends Component {
       branch: formData.get('branch'),
       referredByUserId: formData.get('referredByUserId') || null,
       discountBenefit: discountBenefit || null,
+      comboSize: discountBenefit==='COMBO'?Number(formData.get('comboSize')):null,
       reservationId: this.activatingReservation?.id || null,
       discount: discountAmount,
       notes: registrationNotes,
@@ -5301,6 +5340,7 @@ class StudentsView extends Component {
       notes: form.querySelector('.regular-enrollment-observations-field [name="notes"]')?.value.trim() || null,
     };
     if (context.canFinance) personal.discountBenefit = formData.get('discountBenefit') || null;
+    if (context.canFinance) personal.comboSize=personal.discountBenefit==='COMBO'?Number(formData.get('comboSize')):null;
     const typeF = form.elements.course_id?.selectedOptions?.[0]?.dataset?.catalogType === 'tipo-f';
     if (form.elements.disabilityPercentage && !form.elements.disabilityPercentage.disabled
       && (typeF || student.disability_percentage != null)) {
@@ -5316,7 +5356,12 @@ class StudentsView extends Component {
       const original = context.assignments.map(item => `${item.cycleId}|${item.date}|${item.time.replace(/\s/g, '')}`).sort();
       const selected = (plan.selections || []).map(item => `${item.cycleId}|${item.date}|${String(item.time).replace(/\s/g, '')}`).sort();
       const oldInstructor = context.assignments[0]?.instructorId || context.exam?.instructor_id;
-      const newInstructor = form.elements.preferredInstructorId?.value || oldInstructor;
+      const selectedCalendar = [...form.querySelectorAll('.enrollment-calendar')]
+        .find(calendar => calendar.style.display !== 'none'
+          && calendar.dataset.cycleId === plan.selections?.[0]?.cycleId);
+      const newInstructor = this.getCalendarInstructorButton(selectedCalendar)?.dataset.courseInstructorId
+        || plan.preferredInstructorId || this.scheduleInstructorFilterId
+        || form.elements.preferredInstructorId?.value || oldInstructor;
       const newCourse = form.elements.course_id?.value || enrollment.course_id;
       const oldTheory = enrollment.theory_modality === 'presencial_intensivo'
         ? String(enrollment.theory_start_time || '').startsWith('13') ? 'presencial_intensivo_13' : 'presencial_intensivo_08'
@@ -6028,8 +6073,8 @@ class StudentsView extends Component {
   renderStudentRows(students) {
     let previousBranch = null;
     return students.map(student => {
-      const registrationBranch = student.registeredByBranchName || 'Sucursal no registrada';
-      const registrationCity = student.registeredByCityName || 'Ciudad no registrada';
+      const registrationBranch = student.salesBranchName || student.registeredByBranchName || 'Sucursal no registrada';
+      const registrationCity = student.salesBranchCity || student.registeredByCityName || 'Ciudad no registrada';
       const groupTitle = this.groupBy === 'instructor'
         ? (student.instructorName || 'Sin instructor') !== previousBranch
           ? `<div class="student-branch-group">Instructor: ${student.instructorName || 'Sin instructor'}</div>`
@@ -6072,10 +6117,9 @@ class StudentsView extends Component {
 
   renderStudentSummary(students, reservations = [], activeStatus = '') {
     const enrolledStatuses = new Set(['matriculado', 'en_curso', 'active', 'activo']);
-    const paymentStatuses = new Set(['pendiente_pago', 'pago_parcial', 'pending_payment']);
     const documentStatuses = new Set(['pendiente_documentacion', 'pendiente_documentos', 'pendiente_doc', 'pending_documents']);
     const enrolled = students.filter(student => enrolledStatuses.has(String(student.status || '').toLowerCase())).length;
-    const pendingPayment = students.filter(student => paymentStatuses.has(String(student.status || '').toLowerCase())).length;
+    const pendingPayment = students.filter(student => student.hasCollectibleDebt === true).length;
     const pendingDocuments = students.filter(student => documentStatuses.has(String(student.status || '').toLowerCase())).length;
 
     return `
@@ -6089,7 +6133,7 @@ class StudentsView extends Component {
       </button>
       <button type="button" class="student-summary-card student-summary-card--payment ${activeStatus === 'payment_pending' ? 'is-active' : ''}" data-status="payment_pending" aria-pressed="${activeStatus === 'payment_pending'}">
         <span class="student-summary-icon">$</span>
-        <div><strong>${pendingPayment}</strong><span>Con pago pendiente</span></div>
+        <div><strong>${pendingPayment}</strong><span>Con deuda pendiente</span></div>
       </button>
       <button type="button" class="student-summary-card student-summary-card--documents ${activeStatus === 'documents_pending' ? 'is-active' : ''}" data-status="documents_pending" aria-pressed="${activeStatus === 'documents_pending'}">
         <span class="student-summary-icon">D</span>
@@ -6122,14 +6166,6 @@ class StudentsView extends Component {
 
       try {
         this.refreshInProgress = true;
-        const reservationParams = { ...(this.listParams || {}) };
-        delete reservationParams.status;
-        const [students, reservations] = await Promise.all([
-          StudentService.getAllStudents(this.listParams || {}),
-          StudentService.getActiveReservations(reservationParams),
-        ]);
-        const nextSnapshot = this.createSnapshot(students);
-        const nextReservationsSnapshot = this.createReservationsSnapshot(reservations);
         {
           const form = document.getElementById('student-filter-form');
           if (form) {
@@ -6137,7 +6173,6 @@ class StudentsView extends Component {
             await this.refreshStudentTable(
               this.getStudentListParams(Object.fromEntries(new FormData(form))),
               page,
-              { students, reservations },
             );
           }
         }
@@ -6191,6 +6226,7 @@ class StudentsView extends Component {
 
   getStatusLabel(status) {
     const labels = {
+      inhabilitado: 'Inhabilitado',
       pendiente_documentacion: 'Pendiente Doc.',
       pendiente_pago: 'Pendiente Pago',
       pago_parcial: 'Pago Parcial',
@@ -6204,6 +6240,7 @@ class StudentsView extends Component {
 
   getStatusBadgeClass(status) {
     const classes = {
+      inhabilitado: 'badge-danger',
       pendiente_documentacion: 'badge-warning',
       pendiente_pago: 'badge-danger',
       pago_parcial: 'badge-warning',

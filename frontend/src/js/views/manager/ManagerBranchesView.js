@@ -78,6 +78,13 @@ export default class ManagerBranchesView extends Component {
     this.refreshButton = document.getElementById('manager-branches-refresh');
     this.comparisonLevelSelect = document.getElementById('manager-branches-comparison-level');
     this.staffModal = document.getElementById('branch-staff-modal');
+    const openPoint=event=>{
+      const point=event.target.closest?.('[data-sales-point]');
+      if(!point||event.type==='keydown'&&!['Enter',' '].includes(event.key))return;
+      event.preventDefault();this.openSalesPoint(point);
+    };
+    document.getElementById('manager-branches-charts-content')?.addEventListener('click',openPoint);
+    document.getElementById('manager-branches-charts-content')?.addEventListener('keydown',openPoint);
 
     this.refreshButton?.addEventListener('click', () => {
       this.courseTypeSelect.value = '';
@@ -121,6 +128,7 @@ export default class ManagerBranchesView extends Component {
   async load() {
     this.refreshButton.disabled = true;
     const filters = {
+      metricScope: 'sales',
       courseType: this.courseTypeSelect?.value || undefined,
       status: this.statusSelect?.value || undefined,
       province: this.provinceSelect?.value || undefined,
@@ -178,10 +186,10 @@ export default class ManagerBranchesView extends Component {
     }, { enrollments: 0, income: 0, students_with_payment: 0, fully_paid_enrollments: 0, pending_balance: 0 });
     totals.students_with_payment = branches.reduce((total, branch) => total + Number(branch.students_with_payment || 0), 0);
     const cards = [
-      ['enrollments', 'Matriculados', number(totals.enrollments), 'Inscripciones del periodo', 'total'],
+      ['enrollments', 'Ventas', number(totals.enrollments), 'Por sucursal de venta e inscripcion', 'total'],
       ['income', 'Ingresos cobrados', money(totals.income), 'Cobros realizados', 'active'],
       ['students_with_payment', 'Personas con algún pago', number(totals.students_with_payment), 'Realizaron al menos un abono', 'staff'],
-      ['fully_paid_enrollments', 'Matrículas totalmente pagadas', number(totals.fully_paid_enrollments), 'Sin saldo pendiente', 'courses'],
+      ['fully_paid_enrollments', 'Ventas totalmente pagadas', number(totals.fully_paid_enrollments), 'Sin saldo pendiente', 'courses'],
       ['pending_balance', 'Saldos pendientes', money(totals.pending_balance), 'Generados en el periodo', 'inactive'],
     ];
     const container = document.getElementById('manager-branches-kpis');
@@ -212,7 +220,7 @@ export default class ManagerBranchesView extends Component {
               <th>Administrador</th>
               <th>Personal</th>
               <th>Estudiantes</th>
-              <th>Matrículas</th>
+              <th>Ventas del periodo</th>
               <th>Proceso de cobro</th>
               <th>Estado</th>
               <th>Personal</th>
@@ -227,7 +235,7 @@ export default class ManagerBranchesView extends Component {
                 <td>${esc(branch.administrator_name || 'Sin asignar')}</td>
                 <td>${number(branch.staff_count)}</td>
                 <td>${number(branch.active_students)}</td>
-                <td>${number(branch.active_enrollments)}</td>
+                <td>${number((branch.daily_enrollments || []).reduce((total, day) => total + Number(day.enrollments || 0), 0))}</td>
                 <td>${esc(branch.workflow_name || 'Sin workflow')}</td>
                 <td>${this.statusLabel(branch)}</td>
                 <td><button type="button" class="branch-staff-button" data-branch-staff="${branch.id}">Ver rendimiento</button></td>
@@ -244,27 +252,26 @@ export default class ManagerBranchesView extends Component {
     const branch = (this.chartBranches || []).find(item => item.id === branchId);
     if (!branch || !this.staffModal) return;
     const people = branch.staff_performance || [];
-    const secretaries = people.filter(person => person.role === 'SECRETARY');
-    const cashiers = people.filter(person => person.role === 'CASHIER');
-    const registered = secretaries.reduce((total, person) => total + Number(person.registered_students || 0), 0);
-    const confirmed = secretaries.reduce((total, person) => total + Number(person.confirmed_enrollments || 0), 0);
+    const daily = branch.daily_enrollments || [];
+    const registered = daily.reduce((total, day) => total + Number(day.enrollments || 0), 0);
+    const confirmed = daily.reduce((total, day) => total + Number(day.fully_paid_enrollments || 0), 0);
     const studentsWithPayment = Number(branch.students_with_payment || 0);
-    const collected = cashiers.reduce((total, person) => total + Number(person.collected_amount || 0), 0);
-    const topSecretary = [...secretaries].sort((a, b) => Number(b.registered_students) - Number(a.registered_students))[0];
+    const collected = daily.reduce((total, day) => total + Number(day.income || 0), 0);
+    const topSeller = [...people].filter(person => Number(person.registered_students) > 0).sort((a, b) => Number(b.registered_students) - Number(a.registered_students))[0];
     document.getElementById('branch-staff-title').textContent = `Personal · ${branch.name}`;
     document.getElementById('branch-staff-period').textContent = `Resultados del ${this.dateFromInput.value} al ${this.dateToInput.value}`;
-    const roleLabel = role => ({ BRANCH_ADMIN: 'Administrador', SECRETARY: 'Secretaría', CASHIER: 'Caja' }[role] || role);
+    const roleLabel = role => ({ ADMIN_SYSTEM: 'Administrador del sistema', BRANCH_ADMIN: 'Administrador', SECRETARY: 'Secretaría', CASHIER: 'Caja' }[role] || role);
     const dateLabel = value => value ? new Date(value).toLocaleDateString('es-EC', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Sin actividad';
     document.getElementById('branch-staff-content').innerHTML = `
       <div class="branch-staff-summary">
-        <article><strong>${number(registered)}</strong><span>Estudiantes registrados</span></article>
+        <article><strong>${number(registered)}</strong><span>Ventas del periodo</span></article>
         <article><strong>${number(studentsWithPayment)}</strong><span>Personas con algún pago</span></article>
-        <article><strong>${number(confirmed)}</strong><span>Matrículas totalmente pagadas</span></article>
+        <article><strong>${number(confirmed)}</strong><span>Ventas totalmente pagadas</span></article>
         <article><strong>${money(collected)}</strong><span>Cobrado por caja</span></article>
-        <article><strong>${esc(topSecretary?.name || 'Sin registros')}</strong><span>Mayor registro del periodo</span></article>
+        <article><strong>${esc(topSeller?.name || 'Sin ventas')}</strong><span>Mayor venta del periodo</span></article>
       </div>
-      ${people.length ? `<div class="dashboard-table-wrap branch-staff-table"><table><thead><tr><th>Personal</th><th>Rol</th><th>Registrados</th><th>Totalmente pagadas</th><th>Transacciones</th><th>Total cobrado</th><th>Última actividad</th></tr></thead><tbody>${people.map(person => `<tr><td><strong>${esc(person.name)}</strong></td><td><span class="branch-staff-role branch-staff-role--${person.role.toLowerCase()}">${roleLabel(person.role)}</span></td><td>${person.role === 'SECRETARY' ? number(person.registered_students) : '—'}</td><td>${person.role === 'SECRETARY' ? number(person.confirmed_enrollments) : '—'}</td><td>${person.role === 'CASHIER' ? number(person.payments_count) : '—'}</td><td>${person.role === 'CASHIER' ? money(person.collected_amount) : '—'}</td><td>${dateLabel(person.last_activity)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="dashboard-empty">Esta sucursal todavía no tiene personal asignado.</p>'}
-      <p class="branch-staff-note">Una persona con algún pago puede mantener saldo pendiente. “Totalmente pagadas” cuenta únicamente matrículas sin deuda; “Transacciones” cuenta los cobros o abonos procesados por caja.</p>
+      ${people.length ? `<div class="dashboard-table-wrap branch-staff-table"><table><thead><tr><th>Personal</th><th>Rol</th><th>Ventas</th><th>Totalmente pagadas</th><th>Transacciones</th><th>Total cobrado</th><th>Última actividad</th></tr></thead><tbody>${people.map(person => `<tr><td><strong>${esc(person.name)}</strong></td><td><span class="branch-staff-role branch-staff-role--${person.role.toLowerCase()}">${roleLabel(person.role)}</span></td><td>${number(person.registered_students)}</td><td>${number(person.confirmed_enrollments)}</td><td>${number(person.payments_count)}</td><td>${money(person.collected_amount)}</td><td>${dateLabel(person.last_activity)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="dashboard-empty">Esta sucursal todavía no tiene personal asignado.</p>'}
+      <p class="branch-staff-note">Ventas por sucursal de venta y fecha de inscripción, atribuidas al vendedor registrado. “Totalmente pagadas” cuenta ventas sin saldo; “Transacciones” identifica a quien recibió el cobro o abono.</p>
     `;
     this.staffModal.classList.add('active');
     this.staffModal.setAttribute('aria-hidden', 'false');
@@ -283,11 +290,12 @@ export default class ManagerBranchesView extends Component {
     }
 
     const comparisonItems = this.buildComparisonItems(branches);
+    this.salesPointItems=comparisonItems;
     const metrics = {
-      enrollments: { label: 'Matriculados', title: 'Estudiantes matriculados por día', unit: 'matriculados', money: false },
+      enrollments: { label: 'Ventas', title: 'Ventas por fecha de inscripción', unit: 'ventas', money: false },
       income: { label: 'Ingresos cobrados', title: 'Ingresos cobrados por día', unit: 'cobrados', money: true },
       students_with_payment: { label: 'Personas con algún pago', title: 'Personas que realizaron pagos por día', unit: 'personas con pago', money: false },
-      fully_paid_enrollments: { label: 'Matrículas totalmente pagadas', title: 'Matrículas pagadas completamente por día', unit: 'matrículas pagadas', money: false },
+      fully_paid_enrollments: { label: 'Ventas totalmente pagadas', title: 'Ventas totalmente pagadas por día de inscripción', unit: 'ventas pagadas', money: false },
       pending_balance: { label: 'Saldos pendientes', title: 'Saldos pendientes generados por día', unit: 'pendientes', money: true },
     };
     const metric = metrics[this.selectedMetric] || metrics.enrollments;
@@ -318,7 +326,7 @@ export default class ManagerBranchesView extends Component {
       const color = palette[itemIndex % palette.length];
       const values = dates.map((_, index) => Number(item.daily_enrollments?.[index]?.[this.selectedMetric] || 0));
       const points = values.map((value, index) => `${xFor(index)},${yFor(value)}`).join(' ');
-      const dots = values.map((value, index) => `<circle cx="${xFor(index)}" cy="${yFor(value)}" r="5" fill="${color}" class="branch-line-point"><title>${esc(item.name)}: ${formatValue(value)} ${metric.unit} el ${shortDate(dates[index])}</title></circle>`).join('');
+      const dots = values.map((value, index) => `<circle cx="${xFor(index)}" cy="${yFor(value)}" r="5" fill="${color}" class="branch-line-point" ${this.selectedMetric==='enrollments'&&permissionService.can('REPORT_VIEW')?`data-sales-point="${itemIndex}" data-date="${esc(dates[index])}" tabindex="0" role="button" style="cursor:pointer" aria-label="Ver ${number(value)} ventas de ${esc(item.name)} del ${esc(dates[index])}"`:''}><title>${esc(item.name)}: ${formatValue(value)} ${metric.unit} el ${shortDate(dates[index])}</title></circle>`).join('');
       return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" class="branch-line-series"/>${dots}`;
     }).join('');
 
@@ -345,7 +353,7 @@ export default class ManagerBranchesView extends Component {
           <div><h3>${metric.title}</h3><p>${comparingProvinces ? 'Totales consolidados de todas las sucursales de cada provincia.' : (selectedCity ? `Comparación entre las sucursales de ${esc(selectedCity)}.` : 'Comparación entre las sucursales visibles.')}</p></div>
           <div class="branch-daily-legend">${legend}</div>
         </div>
-        <div class="branch-line-chart-wrap"><svg class="branch-line-chart" style="min-width:${chartWidth}px" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-label="Comparación diaria de estudiantes matriculados por sucursal">${grid}<line x1="${margins.left}" y1="${margins.top}" x2="${margins.left}" y2="${margins.top + plotHeight}" class="branch-line-axis"/><line x1="${margins.left}" y1="${margins.top + plotHeight}" x2="${chartWidth - margins.right}" y2="${margins.top + plotHeight}" class="branch-line-axis"/>${series}${dateLabels}</svg></div>
+        <div class="branch-line-chart-wrap"><svg class="branch-line-chart" style="min-width:${chartWidth}px" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-label="Comparación diaria de ventas por sucursal">${grid}<line x1="${margins.left}" y1="${margins.top}" x2="${margins.left}" y2="${margins.top + plotHeight}" class="branch-line-axis"/><line x1="${margins.left}" y1="${margins.top + plotHeight}" x2="${chartWidth - margins.right}" y2="${margins.top + plotHeight}" class="branch-line-axis"/>${series}${dateLabels}</svg></div>
         <p class="branch-daily-note">Cada color representa una ${comparisonName}. Pasa el cursor sobre un punto para consultar el valor exacto.</p>
       </article>
       <article class="branch-donut-card">
@@ -368,6 +376,32 @@ export default class ManagerBranchesView extends Component {
     `;
   }
 
+  async openSalesPoint(point) {
+    const item=this.salesPointItems?.[Number(point.dataset.salesPoint)];
+    if(!item)return;
+    this.closeSalesPoint?.();
+    const modal=document.createElement('div');modal.id='branch-sales-point-modal';modal.className='modal-overlay active';
+    modal.innerHTML=`<section class="modal branch-staff-modal" role="dialog" aria-modal="true" aria-labelledby="branch-sales-point-title"><div class="modal-header"><div><h2 id="branch-sales-point-title">Ventas · ${esc(item.name)}</h2><p>${esc(point.dataset.date)}</p></div><button type="button" class="modal-close" data-close aria-label="Cerrar">&times;</button></div><div class="modal-body" data-results aria-live="polite">Cargando personas...</div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-close>Cerrar</button></div></section>`;
+    document.body.append(modal);
+    const close=()=>{modal.remove();document.removeEventListener('keydown',onKey);point.isConnected&&point.focus();};
+    this.closeSalesPoint=close;
+    const onKey=e=>{if(e.key==='Escape')close();if(e.key==='Tab'){const buttons=[...modal.querySelectorAll('button:not([disabled])')];if(e.shiftKey&&document.activeElement===buttons[0]){e.preventDefault();buttons.at(-1).focus();}else if(!e.shiftKey&&document.activeElement===buttons.at(-1)){e.preventDefault();buttons[0].focus();}}};
+    modal.querySelectorAll('[data-close]').forEach(button=>button.onclick=close);
+    modal.onclick=e=>{if(e.target===modal)close();};document.addEventListener('keydown',onKey);modal.querySelector('[data-close]').focus();
+    const filters={date:point.dataset.date,branchIds:(item.branchIds||[item.id]).join(','),courseType:this.courseTypeSelect?.value||''};
+    const rows=[];
+    const load=async(page=1)=>{
+      const content=modal.querySelector('[data-results]');
+      try{
+        const {data}=await AdminService.branchSalesPoint({...filters,page});if(!modal.isConnected)return;
+        rows.push(...data.items);
+        content.innerHTML=`<p><strong>${number(data.total)} ventas</strong></p>${rows.length?`<ol>${rows.map(row=>`<li style="padding:.65rem 0;border-bottom:1px solid #e4e7ec"><strong>${esc(row.name)}</strong><div>${esc(row.course)} · ${esc(row.branch)}</div></li>`).join('')}</ol>`:'<p>No hay personas inscritas para esta fecha y sucursal.</p>'}${data.hasMore?'<button type="button" class="btn btn-secondary" data-more>Ver más</button>':''}`;
+        content.querySelector('[data-more]')?.addEventListener('click',event=>{event.currentTarget.disabled=true;load(page+1);});
+      }catch(error){if(modal.isConnected){content.textContent=error.message||'No se pudo cargar la lista.';const retry=document.createElement('button');retry.className='btn btn-secondary';retry.textContent='Reintentar';retry.onclick=()=>load(page);content.append(retry);}}
+    };
+    await load();
+  }
+
   buildComparisonItems(branches = []) {
     if (this.comparisonLevel !== 'province') return branches;
 
@@ -375,8 +409,9 @@ export default class ManagerBranchesView extends Component {
     const grouped = new Map();
     branches.forEach(branch => {
       const province = branch.province || 'Sin provincia';
-      if (!grouped.has(province)) grouped.set(province, { name: province, dailyByDate: new Map() });
+      if (!grouped.has(province)) grouped.set(province, { name: province, branchIds:[],dailyByDate: new Map() });
       const group = grouped.get(province);
+      group.branchIds.push(branch.id);
       (branch.daily_enrollments || []).forEach(day => {
         if (!group.dailyByDate.has(day.date)) group.dailyByDate.set(day.date, { date: day.date });
         const targetDay = group.dailyByDate.get(day.date);
@@ -386,6 +421,7 @@ export default class ManagerBranchesView extends Component {
 
     return [...grouped.values()].map(group => ({
       name: group.name,
+      branchIds:group.branchIds,
       daily_enrollments: [...group.dailyByDate.values()].sort((a, b) => String(a.date).localeCompare(String(b.date))),
     }));
   }

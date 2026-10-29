@@ -668,7 +668,7 @@ class StudentProfileView extends Component {
                   <div class="financial-item"><span>Transferencias pendientes de aprobaci&oacute;n</span><strong class="financial-value">$${pendingVerification.toFixed(2)}</strong></div>
                   <div class="financial-item"><span>Saldo contable</span><strong class="financial-value">$${pendingBalance.toFixed(2)}</strong></div>
                   <div class="financial-item"><span>Saldo si se aprueban</span><strong class="financial-value">$${Math.max(0,pendingBalance-pendingVerification).toFixed(2)}</strong></div>
-                </div><div class="mt-4">${pendingTransfers.map(transfer=>`<p><strong>$${Number(transfer.amount).toFixed(2)}</strong> &middot; ${transfer.status==='AWAITING_APPROVAL'?'Pendiente de aprobaci&oacute;n':'Pendiente de verificaci&oacute;n'}${transfer.reference ? ` &middot; Referencia: ${escapeHtml(transfer.reference)}` : ''} <button type="button" class="btn btn-small btn-secondary" data-transfer-constancy="${escapeHtml(transfer.id)}">Ver constancia</button></p>`).join('')}</div>` : ''}
+                </div><div class="mt-4">${pendingTransfers.map(transfer=>`<p><strong>$${Number(transfer.amount).toFixed(2)}</strong> &middot; ${transfer.status==='AWAITING_APPROVAL'?'Pendiente de aprobaci&oacute;n':'Pendiente de verificaci&oacute;n'}${transfer.reference ? ` &middot; Referencia: ${escapeHtml(transfer.reference)}` : ''} &middot; Registrada por: ${escapeHtml(transfer.created_by_name || 'No registrado')} <button type="button" class="btn btn-small btn-secondary" data-transfer-constancy="${escapeHtml(transfer.id)}">Ver constancia</button></p>`).join('')}</div>` : ''}
 
                 ${this.paymentEnrollments.length>1 ? `<div class="cash-table-wrap mt-4"><table class="table"><thead><tr><th>Curso</th><th>Pagado</th><th>Saldo</th></tr></thead><tbody>${this.paymentEnrollments.map(enrollment=>`<tr><td>${escapeHtml(enrollment.course)}</td><td>$${Number(enrollment.paid).toFixed(2)}</td><td>$${Number(enrollment.balance).toFixed(2)}</td></tr>`).join('')}</tbody></table></div>` : ''}
                 ${pendingBalance > 0 && canProcessPayments ? `
@@ -691,6 +691,8 @@ class StudentProfileView extends Component {
                           <div class="payment-concept">${escapeHtml(payment.concept || 'Pago registrado')}</div>
                           ${payment.course_name ? `<div class="payment-date">${escapeHtml(payment.course_name)}</div>` : ''}
                           ${this.renderPaymentMethod(payment)}
+                          <div class="payment-date">Cobrado por: ${escapeHtml(payment.received_by_name || 'No registrado')}</div>
+                          ${String(payment.status || '').toUpperCase()==='VOIDED' ? `<div class="payment-date">Anulado por: ${escapeHtml(payment.voided_by_name || 'No registrado')}</div>` : ''}
                           <div class="payment-date">${DateHelper.format(payment.created_at || payment.date, 'DD/MM/YYYY HH:MM')}</div>
                         </div>
                         <div style="display:flex; align-items:center; gap:.75rem;">

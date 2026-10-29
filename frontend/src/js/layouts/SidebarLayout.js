@@ -10,6 +10,7 @@ class SidebarLayout {
   static async render(content) {
     const user = authService.getCurrentUser();
     const currentPath = window.location.pathname;
+    const currentAdminPath = currentPath === '/admin-system/settings' && new URLSearchParams(window.location.search).get('tab') === 'holidays' ? currentPath + '?tab=holidays' : currentPath;
     const currentTheorySection = new URLSearchParams(window.location.search).get('section') || 'dashboard';
     const role = String(user?.role || '').trim().toLowerCase();
     const isInstructor = role === 'instructor';
@@ -64,11 +65,12 @@ class SidebarLayout {
                 ['/admin-system','Inicio'],['/admin-system/branches','Sucursales'],
                 ['/admin-system/security','Seguridad y Accesos'],
                 ['/admin-system/reports','Reportes'],['/admin-system/resources','Recursos'],['/admin-system/referrals','Referidos'],
-                ['/admin-system/audit','Auditoría'],['/admin-system/settings','Configuración']
+                ['/admin-system/audit','Auditoría'],['/admin-system/settings','Configuración'],
+                ['/admin-system/settings?tab=holidays','Feriados']
               ].map(([href, label]) => `
-                <a href="${href}" class="nav-item ${currentPath === href ? 'active' : ''}" title="${label}" ${currentPath === href ? 'aria-current="page"' : ''}>
+                <a href="${href}" class="nav-item ${currentAdminPath === href ? 'active' : ''}" title="${label}" ${currentAdminPath === href ? 'aria-current="page"' : ''}>
                   <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    ${adminIcons[href]}
+                    ${adminIcons[href.split('?')[0]]}
                   </svg>
                   <span class="nav-text">${label}</span>
                 </a>`).join('')}

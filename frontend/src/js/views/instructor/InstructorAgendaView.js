@@ -188,7 +188,7 @@ class InstructorAgendaView extends Component {
           <label><span id="agenda-students-filter-label">Curso</span><select id="agenda-students-filter" class="form-select"><option value="">Todos los cursos</option>${courses.map(course => `<option value="${escapeHtml(course)}">${escapeHtml(course)}</option>`).join('')}</select></label>
         </div>
         <div class="agenda-students-results"><span id="agenda-students-total">${students.length} estudiantes</span></div>
-        <div class="agenda-students-list" id="agenda-students-list">${this.renderStudentCards(students)}</div>
+        <div class="agenda-students-list" id="agenda-students-list">${this.renderStudentGroups(students)}</div>
       </section>
     </div>`;
   }
@@ -211,6 +211,15 @@ class InstructorAgendaView extends Component {
         </div>
       </section>
     </div>`;
+  }
+
+  renderStudentGroups(students) {
+    const category=item=>item.formationCategory||(item.isAdditionalPractice?'additional':item.isExamOnly||item.appointmentType==='EXAM_ONLY'?'intensive':'normal');
+    return [['normal','Formación normal'],['intensive','Formación intensiva'],['additional','Horas prácticas adicionales']].map(([key,label])=>{
+      const entries=students.filter(item=>category(item)===key);
+      const count=new Set(entries.map(item=>item.studentId||item.enrollmentId||item.additionalPracticeId)).size;
+      return `<section class="agenda-students-group" data-formation="${key}"><h3>${label}<span class="badge badge-primary">${count}</span></h3>${entries.length?this.renderStudentCards(entries):'<p class="instructor-empty">Sin estudiantes con estos filtros.</p>'}</section>`;
+    }).join('');
   }
 
   renderStudentCards(students) {
@@ -331,7 +340,7 @@ class InstructorAgendaView extends Component {
         : this.agendaStudents.filter(item => studentMode.value === 'month'
           ? (item.sessionMonths || []).includes(selected)
           : item.course === selected);
-      document.getElementById('agenda-students-list').innerHTML = this.renderStudentCards(filtered);
+      document.getElementById('agenda-students-list').innerHTML = this.renderStudentGroups(filtered);
       const period = studentMode.value === 'month' && selected ? ` · ${monthLabel(selected)}` : '';
       document.getElementById('agenda-students-total').textContent = `${filtered.length} ${filtered.length === 1 ? 'estudiante' : 'estudiantes'}${period}`;
     };

@@ -745,3 +745,5 @@
   .agenda-session{grid-template-columns:58px minmax(0,1fr)}
   .agenda-session>.badge,.agenda-session__actions{grid-column:2}
 }
+
+.agenda-students-group{display:grid;gap:.55rem;min-width:0}.agenda-students-group h3{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin:.4rem 0;font-size:.95rem;color:#344054}

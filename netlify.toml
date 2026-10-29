@@ -21,4 +21,10 @@
   for = "/src/*"
   [headers.values]
     X-Content-Type-Options = "nosniff"
+    Cache-Control = "no-cache, must-revalidate"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
 

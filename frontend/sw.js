@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v113-cash-report-payment-actors';
+const CACHE_NAME = 'sportmancar-offline-v114-cash-report-promotions';
 const APP_SHELL = [
   '/',
   '/index.html',

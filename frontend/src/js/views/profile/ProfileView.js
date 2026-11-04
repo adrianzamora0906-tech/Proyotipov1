@@ -84,6 +84,7 @@ class ProfileView extends Component {
     const emailRequired = administrative && !['instructor','INSTRUCTOR'].includes(authService.getCurrentUser()?.role);
     let emailChallenge = null, passwordChallenge = null;
     let emailVerified = false;
+    let passwordCode = '';
     const validChallenge = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
     const requireSuccess = response => {
       if (!response?.success) throw new Error(response?.error?.message || response?.error || 'No se pudo completar la verificacion');
@@ -102,10 +103,41 @@ class ProfileView extends Component {
         </button>
       </div>
     </div>`);
-    layer.innerHTML = `<div class="branch-modal-backdrop"><section class="branch-modal" style="max-height:calc(100dvh - 2rem);overflow:auto;min-width:0;box-sizing:border-box" role="dialog" aria-modal="true" aria-labelledby="password-change-title">
+    layer.innerHTML = `<style>
+      .security-modal{width:min(500px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;min-width:0;box-sizing:border-box;padding:28px!important;border-radius:8px!important;background:#fff;color:#182230;box-shadow:0 24px 80px #10182838}
+      .security-modal *{box-sizing:border-box;min-width:0;letter-spacing:0}
+      .security-modal [hidden]{display:none!important}
+      .security-modal .security-heading{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+      .security-modal .security-emblem{display:grid;place-items:center;width:44px;height:44px;flex:none;background:#eeebff;color:#5144d8;border-radius:8px}
+      .security-modal h2{font-size:21px;line-height:1.3;margin:0!important}
+      .security-modal>p{font-size:14px;line-height:1.6;color:#667085;margin:0 0 24px}
+      .security-modal .security-progress{display:flex;gap:8px;padding:0 0 22px;margin:0;list-style:none}
+      .security-modal .security-progress li{flex:1;border-top:3px solid #e4e7ec;padding-top:8px;color:#667085;font-size:12px;font-weight:600}
+      .security-modal .security-progress li.is-current{border-color:#5847eb;color:#5144d8}
+      .security-modal .security-progress li.is-done{border-color:#169c7b;color:#087c60}
+      .security-modal [data-security-step],.security-modal #security-email-editor,.security-modal #security-email-codes,.security-modal #security-old-code-group{display:grid;gap:14px}
+      .security-modal .form-input{width:100%;height:46px;border:1px solid #ccd3df;border-radius:6px;background:#fff;color:#182230;padding:10px 12px;font-size:14px}
+      .security-modal .form-input:focus{outline:2px solid #d9d3ff;outline-offset:2px;border-color:#6754ed}
+      .security-modal .login-password-field{position:relative}.security-modal .login-password-field input{padding-right:52px}
+      .security-modal label{font-size:13px;font-weight:600;color:#344054}
+      .security-modal .btn{min-height:44px;border-radius:6px;padding:10px 16px;font-size:14px;font-weight:600;white-space:normal;overflow-wrap:anywhere;cursor:pointer}
+      .security-modal .btn-primary{background:#5746e9;border:1px solid #5746e9;color:white}
+      .security-modal .btn-secondary{background:#f8f9fc;border:1px solid #d0d5dd;color:#344054}
+      .security-modal .btn:disabled{opacity:.55;cursor:wait}
+      .security-modal #security-email-state{font-size:13px;line-height:1.5;color:#087c60;overflow-wrap:anywhere}
+      .security-modal .security-code{font-size:23px;font-weight:600;text-align:center;text-transform:uppercase;font-family:monospace}
+      .security-modal #profile-password-status{font-size:13px;line-height:1.5;color:#b42318}
+      .security-modal #profile-password-status:empty{display:none}
+      .security-modal .branch-modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:12px;padding-top:18px;border-top:1px solid #eaecf0}
+      .security-modal .security-note{margin:0;font-size:12px;line-height:1.6;color:#667085}
+      @media(max-width:480px){.security-modal{padding:22px!important}.security-modal h2{font-size:19px}.security-modal .branch-modal-actions .btn{flex:1}}
+    </style><div class="branch-modal-backdrop"><section class="branch-modal security-modal" role="dialog" aria-modal="true" aria-labelledby="password-change-title">
+      <div class="security-heading"><span class="security-emblem"><i data-lucide="shield-check" aria-hidden="true"></i></span><div>
       <h2 id="password-change-title">${forced ? 'Actualiza tu contraseña' : 'Cambiar contraseña'}</h2>
-      <p>${forced ? 'Por seguridad debes definir una nueva contraseña antes de continuar usando el sistema.' : 'Confirma tu contraseña actual y escribe una nueva.'}</p>
-      <form id="profile-password-form" class="form" style="display:grid;gap:.8rem;">
+      </div></div>
+      <p id="security-description">Confirma tu clave actual para proteger tu cuenta.</p>
+      <ol class="security-progress" aria-label="Progreso"><li data-progress="current" class="is-current" aria-current="step">1. Identidad</li>${emailRequired?'<li data-progress="email">2. Correo</li>':''}<li data-progress="new">${emailRequired?'3':'2'}. Nueva clave</li></ol>
+      <form id="profile-password-form" class="form" novalidate style="display:grid;gap:.8rem;">
         <div data-security-step="current">${passwordFields[0]}<button type="button" class="btn btn-primary" id="security-current-next">Continuar</button></div>
         ${emailRequired ? `<div data-security-step="email" hidden>
           <button type="button" class="btn btn-secondary" id="security-use-email" hidden>Usar este correo</button>
@@ -115,7 +147,7 @@ class ProfileView extends Component {
           <button type="button" class="btn btn-secondary" id="verify-email-send">Enviar verificacion de correo</button>
           </div>
           <div id="security-email-codes" hidden>
-          <label for="security-email-code">Codigo del correo nuevo</label><input class="form-input" id="security-email-code" maxlength="6" autocomplete="one-time-code">
+          <label for="security-email-code">Codigo de verificacion</label><input class="form-input security-code" id="security-email-code" maxlength="6" autocomplete="one-time-code">
           <div id="security-old-code-group" hidden>
           <label for="security-old-code">Codigo del correo anterior, si se reemplaza</label><input class="form-input" id="security-old-code" maxlength="6" autocomplete="off">
           </div>
@@ -126,9 +158,9 @@ class ProfileView extends Component {
         <div data-security-step="code" hidden>
         <button type="button" class="btn btn-secondary" id="verify-password-send">Enviar codigo para cambiar clave</button>
         <label for="security-password-code">Codigo para cambiar la clave</label>
-        <input class="form-input" id="security-password-code" maxlength="6" autocomplete="one-time-code" required>
+        <input class="form-input security-code" id="security-password-code" maxlength="6" autocomplete="one-time-code" required>
         <button type="button" class="btn btn-primary" id="security-check-code">Validar codigo</button></div>` : ''}
-        <div data-security-step="new" hidden>${passwordFields.slice(1).join('')}</div>
+        <div data-security-step="new" hidden>${passwordFields.slice(1).join('')}<p class="security-note">Usa al menos 8 caracteres, con mayuscula, minuscula, numero y simbolo.</p></div>
         <div id="profile-password-status" class="form-error" aria-live="polite"></div>
         <div class="branch-modal-actions">${forced ? '' : '<button type="button" class="btn btn-secondary" id="cancel-password-change">Cancelar</button>'}<button type="submit" class="btn btn-primary" hidden>Actualizar contraseña</button></div>
       </form>
@@ -140,6 +172,11 @@ class ProfileView extends Component {
       layer.querySelector('#profile-password-status').textContent='';
       layer.querySelector('[role="dialog"]').scrollTop=0;
       layer.querySelector('#password-change-title').textContent=({current:'Confirma tu clave actual',email:'Correo de seguridad',code:'Verifica el codigo',new:'Define tu nueva clave'})[step];
+      layer.querySelector('#security-description').textContent=({current:'Confirma tu clave actual para proteger tu cuenta.',email:'Elige el correo donde recibiras tu codigo de seguridad.',code:'Escribe el codigo que recibiste en tu correo.',new:'Tu identidad esta confirmada. Elige una clave segura.'})[step];
+      const progressStep=step==='code'?'email':step;
+      const progress=[...layer.querySelectorAll('[data-progress]')];const index=progress.findIndex(node=>node.dataset.progress===progressStep);
+      progress.forEach((node,i)=>{node.classList.toggle('is-current',i===index);node.classList.toggle('is-done',i<index);if(i===index)node.setAttribute('aria-current','step');else node.removeAttribute('aria-current');});
+      layer.querySelector(`[data-security-step="${step}"] input:not([hidden])`)?.focus();
     };
     const currentPassword=()=>layer.querySelector('[name="currentPassword"]').value;
     const run=async(button,operation)=>{
@@ -156,11 +193,12 @@ class ProfileView extends Component {
       saveButton.disabled=true;
       layer.querySelector('#security-email').value=authService.getCurrentUser()?.email || '';
       layer.querySelector('#security-use-email').addEventListener('click',()=>{
-        if(emailVerified)showStep('code');else layer.querySelector('#verify-email-send').click();
+        if(emailVerified){showStep('code');layer.querySelector('#verify-password-send').click();}else layer.querySelector('#verify-email-send').click();
       });
       layer.querySelector('#security-change-email').addEventListener('click',()=>{layer.querySelector('#security-email-editor').hidden=false;});
       layer.querySelector('#security-check-code').addEventListener('click',event=>run(event.currentTarget,async()=>{
         requireSuccess(await apiClient.post('/auth/verification/password-code',{challengeId:passwordChallenge,code:layer.querySelector('#security-password-code').value,currentPassword:currentPassword()}));
+        passwordCode=layer.querySelector('#security-password-code').value;
         showStep('new');saveButton.disabled=false;
       }));
       layer.querySelector('#verify-email-send').addEventListener('click',event=>run(event.currentTarget,async()=>{
@@ -177,14 +215,16 @@ class ProfileView extends Component {
       }));
       layer.querySelector('#verify-email-confirm').addEventListener('click',event=>run(event.currentTarget,async()=>{
         if(!validChallenge(emailChallenge))throw new Error('Primero solicita el codigo de verificacion del correo.');
-        requireSuccess(await apiClient.post('/auth/verification/email',{challengeId:emailChallenge,code:layer.querySelector('#security-email-code').value,previousCode:layer.querySelector('#security-old-code').value,currentPassword:currentPassword()}));
-        emailChallenge=null;passwordChallenge=null;emailVerified=true;saveButton.disabled=true;
+        const code=layer.querySelector('#security-email-code').value;
+        const result=requireSuccess(await apiClient.post('/auth/verification/email',{challengeId:emailChallenge,code,previousCode:layer.querySelector('#security-old-code').value,currentPassword:currentPassword(),continueToPassword:true}));
+        if(!validChallenge(result?.passwordChallengeId))throw new Error('No se pudo autorizar el cambio. Solicita un nuevo codigo.');
+        emailChallenge=null;passwordChallenge=result.passwordChallengeId;passwordCode=code;emailVerified=true;saveButton.disabled=false;
         layer.querySelector('#security-email-codes').hidden=true;
         layer.querySelector('#security-email-state').textContent='Correo verificado';
-        showStep('code');
+        showStep('new');
       }));
       layer.querySelector('#verify-password-send').addEventListener('click',event=>run(event.currentTarget,async()=>{
-        passwordChallenge=null;saveButton.disabled=true;
+        passwordChallenge=null;passwordCode='';saveButton.disabled=true;
         if(!emailVerified)throw new Error('Primero verifica tu correo de seguridad.');
         const response=await apiClient.post('/auth/verification/request',{purpose:'password',currentPassword:currentPassword()});
         const data=requireSuccess(response);
@@ -225,7 +265,7 @@ class ProfileView extends Component {
       if(newPassword!==confirmPassword){status.textContent='La confirmación no coincide con la nueva contraseña.';return;}
       if(currentPassword===newPassword){status.textContent='La contraseña nueva debe ser diferente de la actual.';return;}
       button.disabled=true;button.textContent='Actualizando...';
-      try{const result=await authService.updatePassword(currentPassword,newPassword,emailRequired?{challengeId:passwordChallenge,code:layer.querySelector('#security-password-code').value}:{});if(!result.success)throw new Error(result.error||'No se pudo actualizar la contraseña.');layer.innerHTML='';document.body.style.overflow='';window.history.replaceState(null,'','/profile');window.dispatchEvent(new PopStateEvent('popstate'));}
+      try{const result=await authService.updatePassword(currentPassword,newPassword,emailRequired?{challengeId:passwordChallenge,code:passwordCode}:{});if(!result.success)throw new Error(result.error||'No se pudo actualizar la contraseña.');layer.innerHTML='';document.body.style.overflow='';window.history.replaceState(null,'','/profile');window.dispatchEvent(new PopStateEvent('popstate'));}
       catch(error){status.textContent=error.message||'No se pudo actualizar la contraseña.';button.disabled=false;button.textContent='Actualizar contraseña';}
     });
   }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v117-profile-email-verification';
+const CACHE_NAME = 'sportmancar-offline-v118-single-email-verification';
 const APP_SHELL = [
   '/',
   '/index.html',

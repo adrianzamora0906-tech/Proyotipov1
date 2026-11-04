@@ -93,7 +93,7 @@ class ProfileView extends Component {
       ['currentPassword', 'Contrase\u00f1a actual', 'current-password'],
       ['newPassword', 'Nueva contrase\u00f1a', 'new-password'],
       ['confirmPassword', 'Confirmar nueva contrase\u00f1a', 'new-password'],
-    ].map(([name, label, autocomplete]) => `<div class="form-group">
+    ].map(([name, label, autocomplete]) => `<div class="form-group" style="margin:0;display:grid;gap:.35rem">
       <label class="form-label" for="profile-${name}">${label}</label>
       <div class="login-password-field">
         <input class="form-input" id="profile-${name}" type="password" name="${name}" autocomplete="${autocomplete}" ${name === 'currentPassword' ? '' : 'minlength="8"'} required>
@@ -101,51 +101,87 @@ class ProfileView extends Component {
           <span class="password-face" aria-hidden="true"><span class="password-face-eyes"><span></span><span></span></span><span class="password-face-smile"></span><span class="password-hand password-hand-left"><i data-lucide="hand"></i></span><span class="password-hand password-hand-right"><i data-lucide="hand"></i></span></span>
         </button>
       </div>
-    </div>`).join('');
+    </div>`);
     layer.innerHTML = `<div class="branch-modal-backdrop"><section class="branch-modal" style="max-height:calc(100dvh - 2rem);overflow:auto;min-width:0;box-sizing:border-box" role="dialog" aria-modal="true" aria-labelledby="password-change-title">
       <h2 id="password-change-title">${forced ? 'Actualiza tu contraseña' : 'Cambiar contraseña'}</h2>
       <p>${forced ? 'Por seguridad debes definir una nueva contraseña antes de continuar usando el sistema.' : 'Confirma tu contraseña actual y escribe una nueva.'}</p>
       <form id="profile-password-form" class="form" style="display:grid;gap:.8rem;">
-        ${passwordFields}
-        ${emailRequired ? `<fieldset style="display:grid;gap:.6rem;min-width:0"><legend>Correo de seguridad</legend>
+        <div data-security-step="current">${passwordFields[0]}<button type="button" class="btn btn-primary" id="security-current-next">Continuar</button></div>
+        ${emailRequired ? `<div data-security-step="email" hidden>
+          <button type="button" class="btn btn-secondary" id="security-use-email" hidden>Usar este correo</button>
+          <button type="button" class="btn btn-secondary" id="security-change-email" hidden>Actualizar correo</button>
+          <div id="security-email-editor">
           <label for="security-email">Correo</label><input class="form-input" id="security-email" type="email" autocomplete="email">
           <button type="button" class="btn btn-secondary" id="verify-email-send">Enviar verificacion de correo</button>
+          </div>
+          <div id="security-email-codes" hidden>
           <label for="security-email-code">Codigo del correo nuevo</label><input class="form-input" id="security-email-code" maxlength="6" autocomplete="one-time-code">
+          <div id="security-old-code-group" hidden>
           <label for="security-old-code">Codigo del correo anterior, si se reemplaza</label><input class="form-input" id="security-old-code" maxlength="6" autocomplete="off">
+          </div>
           <button type="button" class="btn btn-secondary" id="verify-email-confirm">Verificar correo</button>
+          </div>
           <div id="security-email-state" role="status"></div>
-        </fieldset>
+        </div>
+        <div data-security-step="code" hidden>
+        <button type="button" class="btn btn-secondary" id="verify-password-send">Enviar codigo para cambiar clave</button>
         <label for="security-password-code">Codigo para cambiar la clave</label>
         <input class="form-input" id="security-password-code" maxlength="6" autocomplete="one-time-code" required>
-        <button type="button" class="btn btn-secondary" id="verify-password-send">Enviar codigo para cambiar clave</button>` : ''}
+        <button type="button" class="btn btn-primary" id="security-check-code">Validar codigo</button></div>` : ''}
+        <div data-security-step="new" hidden>${passwordFields.slice(1).join('')}</div>
         <div id="profile-password-status" class="form-error" aria-live="polite"></div>
-        <div class="branch-modal-actions">${forced ? '' : '<button type="button" class="btn btn-secondary" id="cancel-password-change">Cancelar</button>'}<button type="submit" class="btn btn-primary">Actualizar contraseña</button></div>
+        <div class="branch-modal-actions">${forced ? '' : '<button type="button" class="btn btn-secondary" id="cancel-password-change">Cancelar</button>'}<button type="submit" class="btn btn-primary" hidden>Actualizar contraseña</button></div>
       </form>
     </section></div>`;
     document.body.style.overflow = 'hidden';
+    const showStep=step=>{
+      layer.querySelectorAll('[data-security-step]').forEach(node=>{node.hidden=node.dataset.securityStep!==step;});
+      layer.querySelector('[type="submit"]').hidden=step!=='new';
+      layer.querySelector('#profile-password-status').textContent='';
+      layer.querySelector('[role="dialog"]').scrollTop=0;
+      layer.querySelector('#password-change-title').textContent=({current:'Confirma tu clave actual',email:'Correo de seguridad',code:'Verifica el codigo',new:'Define tu nueva clave'})[step];
+    };
+    const currentPassword=()=>layer.querySelector('[name="currentPassword"]').value;
+    const run=async(button,operation)=>{
+      const status=layer.querySelector('#profile-password-status');status.textContent='';button.disabled=true;
+      try {await operation();} catch(error){status.textContent=error.message || 'No se pudo completar la verificacion';}
+      finally {button.disabled=false;}
+    };
+    layer.querySelector('#security-current-next').addEventListener('click',event=>run(event.currentTarget,async()=>{
+      requireSuccess(await apiClient.post('/auth/verification/current-password',{currentPassword:currentPassword()}));
+      showStep(emailRequired?'email':'new');
+    }));
     if(emailRequired) {
       const saveButton=layer.querySelector('[type="submit"]');
       saveButton.disabled=true;
       layer.querySelector('#security-email').value=authService.getCurrentUser()?.email || '';
-      const currentPassword=()=>layer.querySelector('[name="currentPassword"]').value;
-      const run=async(button,operation)=>{
-        const status=layer.querySelector('#profile-password-status');status.textContent='';button.disabled=true;
-        try {await operation();} catch(error){status.textContent=error.message || 'No se pudo completar la verificacion';}
-        finally {button.disabled=false;}
-      };
+      layer.querySelector('#security-use-email').addEventListener('click',()=>{
+        if(emailVerified)showStep('code');else layer.querySelector('#verify-email-send').click();
+      });
+      layer.querySelector('#security-change-email').addEventListener('click',()=>{layer.querySelector('#security-email-editor').hidden=false;});
+      layer.querySelector('#security-check-code').addEventListener('click',event=>run(event.currentTarget,async()=>{
+        requireSuccess(await apiClient.post('/auth/verification/password-code',{challengeId:passwordChallenge,code:layer.querySelector('#security-password-code').value,currentPassword:currentPassword()}));
+        showStep('new');saveButton.disabled=false;
+      }));
       layer.querySelector('#verify-email-send').addEventListener('click',event=>run(event.currentTarget,async()=>{
         emailChallenge=null;
         const response=await apiClient.post('/auth/verification/request',{purpose:'email',email:layer.querySelector('#security-email').value,currentPassword:currentPassword()});
         const data=requireSuccess(response);
         if(!validChallenge(data?.challengeId))throw new Error('No se recibio una solicitud valida. Actualiza la pagina e intenta nuevamente.');
         emailChallenge=data.challengeId;
+        layer.querySelector('#security-use-email').hidden=true;
+        layer.querySelector('#security-change-email').hidden=true;
+        layer.querySelector('#security-email-codes').hidden=false;
+        layer.querySelector('#security-old-code-group').hidden=!data.requiresPreviousCode;
         layer.querySelector('#security-email-state').textContent=data.requiresPreviousCode?'Codigos enviados a ambos correos. Vencen en 5 minutos.':'Codigo enviado. Vence en 5 minutos.';
       }));
       layer.querySelector('#verify-email-confirm').addEventListener('click',event=>run(event.currentTarget,async()=>{
         if(!validChallenge(emailChallenge))throw new Error('Primero solicita el codigo de verificacion del correo.');
         requireSuccess(await apiClient.post('/auth/verification/email',{challengeId:emailChallenge,code:layer.querySelector('#security-email-code').value,previousCode:layer.querySelector('#security-old-code').value,currentPassword:currentPassword()}));
         emailChallenge=null;passwordChallenge=null;emailVerified=true;saveButton.disabled=true;
+        layer.querySelector('#security-email-codes').hidden=true;
         layer.querySelector('#security-email-state').textContent='Correo verificado';
+        showStep('code');
       }));
       layer.querySelector('#verify-password-send').addEventListener('click',event=>run(event.currentTarget,async()=>{
         passwordChallenge=null;saveButton.disabled=true;
@@ -153,13 +189,17 @@ class ProfileView extends Component {
         const response=await apiClient.post('/auth/verification/request',{purpose:'password',currentPassword:currentPassword()});
         const data=requireSuccess(response);
         if(!validChallenge(data?.challengeId))throw new Error('No se recibio una solicitud valida. Actualiza la pagina e intenta nuevamente.');
-        passwordChallenge=data.challengeId;saveButton.disabled=false;
+        passwordChallenge=data.challengeId;
         layer.querySelector('#profile-password-status').textContent='Codigo enviado a tu correo verificado. Vence en 5 minutos.';
       }));
       apiClient.get('/auth/verification').then(response=>{
         const data=requireSuccess(response);
         layer.querySelector('#security-email').value=data.email || '';
         emailVerified=Boolean(data.verified);
+        layer.querySelector('#security-use-email').hidden=!data.email;
+        layer.querySelector('#security-use-email').textContent=data.email?`Usar ${data.email}`:'Usar este correo';
+        layer.querySelector('#security-change-email').hidden=!data.email;
+        layer.querySelector('#security-email-editor').hidden=Boolean(data.email);
         layer.querySelector('#security-email-state').textContent=emailVerified?'Correo verificado':'Debes verificar tu correo';
       }).catch(error=>{layer.querySelector('#profile-password-status').textContent=error.message;});
     }

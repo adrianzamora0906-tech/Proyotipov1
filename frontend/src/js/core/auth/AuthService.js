@@ -65,7 +65,7 @@ class AuthService {
   hasRole(role){const user=this.getCurrentUser();return user?.roles?.includes(role)||user?.role===role;}
   can(permission){return this.getCurrentUser()?.permissions?.includes(permission)||false;}
   async updateProfile(updates){const result=await ApiService.updateProfile(updates);const current=this.getCurrentUser();sessionStorage.setItem(this.sessionKey,JSON.stringify({...current,...updates}));return result.user;}
-  async updatePassword(currentPassword,newPassword){const result=await ApiService.updatePassword(currentPassword,newPassword);if(result.success){const current=this.getCurrentUser();sessionStorage.setItem(this.sessionKey,JSON.stringify({...current,mustChangePassword:false}));}return result;}
+  async updatePassword(currentPassword,newPassword,verification={}){const result=await ApiService.updatePassword(currentPassword,newPassword,verification);if(result.success){const current=this.getCurrentUser();sessionStorage.setItem(this.sessionKey,JSON.stringify({...current,mustChangePassword:false}));}return result;}
   getAllUsers(){return[];}
 }
 export const authService=new AuthService();export default AuthService;

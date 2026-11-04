@@ -3,6 +3,7 @@
  * Clase base para todos los componentes
  */
 
+import { sanitizeHtml } from '../helpers/SafeHtml.js';
 class Component {
   constructor(props = {}) {
     this.props = props;
@@ -32,7 +33,7 @@ class Component {
     this.render().then(html => {
       const container = document.getElementById(this.containerId);
       if (container) {
-        container.innerHTML = html;
+        container.innerHTML = sanitizeHtml(html);
         this.mount();
       }
     });

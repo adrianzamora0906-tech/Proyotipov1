@@ -3,6 +3,7 @@
  * Sistema de enrutamiento SPA (Single Page Application)
  */
 
+import { sanitizeHtml } from '../../helpers/SafeHtml.js';
 class Router {
   constructor() {
     this.routes = new Map();
@@ -136,7 +137,7 @@ class Router {
       this.container.setAttribute('aria-busy', 'true');
       try {
         const html = await component.render();
-        this.container.innerHTML = html;
+        this.container.innerHTML = sanitizeHtml(html);
         await component.mount();
       } finally {
         this.container.removeAttribute('aria-busy');

@@ -2,14 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const source = readFileSync(new URL('../src/js/core/api/ApiClient.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../src/js/core/api/ApiClient.js', import.meta.url), 'utf8')
+  .replace("'./TransportSecurity.js'", JSON.stringify(new URL('../src/js/core/api/TransportSecurity.js', import.meta.url).href));
 const primary = 'https://primary.example/api';
 const backup = 'https://backup.example/api';
 
 test('respaldo de API: lecturas, autenticacion, escrituras y cancelacion', async () => {
   globalThis.window = {
     __SPORTMANCAR_CONFIG__: { API_BASE_URL: primary, API_FALLBACK_URL: backup },
-    location: { origin: 'https://erp.example', hostname: 'erp.example' },
+    location: { origin: 'https://erp.example', hostname: 'erp.example', protocol: 'https:' },
     setTimeout, clearTimeout, dispatchEvent() {},
   };
   const { default: ApiClient } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);

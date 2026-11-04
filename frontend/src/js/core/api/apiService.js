@@ -25,8 +25,8 @@ class ApiService {
     return apiClient.put('/auth/profile', data);
   }
 
-  static async updatePassword(currentPassword, newPassword) {
-    return apiClient.put('/auth/password', { currentPassword, newPassword });
+  static async updatePassword(currentPassword, newPassword, verification = {}) {
+    return apiClient.put('/auth/password', { currentPassword, newPassword, ...verification });
   }
 
   // ── STUDENTS ──
@@ -211,6 +211,7 @@ class ApiService {
   }
 
   static async registerPayment(data) {
+    data.operationKey ||= crypto.randomUUID();
     return apiClient.post('/payments/register', data);
   }
 

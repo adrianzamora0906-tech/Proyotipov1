@@ -5,6 +5,7 @@
 import Component from '../../components/Component.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
 import { authService } from '../../core/auth/AuthService.js';
+import { apiClient } from '../../core/api/ApiClient.js';
 
 class ProfileView extends Component {
   async render() {
@@ -79,6 +80,9 @@ class ProfileView extends Component {
   openPasswordModal(forced = false) {
     const layer = document.getElementById('password-change-layer');
     if (!layer) return;
+    const administrative = ['admin','secretaria','secretaria_sucursal','caja','instructor','ADMIN_SYSTEM','GENERAL_MANAGER','BRANCH_ADMIN','SECRETARY','CASHIER','INSTRUCTOR'].includes(authService.getCurrentUser()?.role);
+    const emailRequired = administrative && !['instructor','INSTRUCTOR'].includes(authService.getCurrentUser()?.role);
+    let emailChallenge = null, passwordChallenge = null;
     const passwordFields = [
       ['currentPassword', 'Contrase\u00f1a actual', 'current-password'],
       ['newPassword', 'Nueva contrase\u00f1a', 'new-password'],
@@ -92,16 +96,55 @@ class ProfileView extends Component {
         </button>
       </div>
     </div>`).join('');
-    layer.innerHTML = `<div class="branch-modal-backdrop"><section class="branch-modal" role="dialog" aria-modal="true" aria-labelledby="password-change-title">
+    layer.innerHTML = `<div class="branch-modal-backdrop"><section class="branch-modal" style="max-height:calc(100dvh - 2rem);overflow:auto;min-width:0;box-sizing:border-box" role="dialog" aria-modal="true" aria-labelledby="password-change-title">
       <h2 id="password-change-title">${forced ? 'Actualiza tu contraseña' : 'Cambiar contraseña'}</h2>
       <p>${forced ? 'Por seguridad debes definir una nueva contraseña antes de continuar usando el sistema.' : 'Confirma tu contraseña actual y escribe una nueva.'}</p>
       <form id="profile-password-form" class="form" style="display:grid;gap:.8rem;">
         ${passwordFields}
+        ${emailRequired ? `<fieldset style="display:grid;gap:.6rem;min-width:0"><legend>Correo de seguridad</legend>
+          <label for="security-email">Correo</label><input class="form-input" id="security-email" type="email" autocomplete="email">
+          <button type="button" class="btn btn-secondary" id="verify-email-send">Enviar verificacion de correo</button>
+          <label for="security-email-code">Codigo del correo nuevo</label><input class="form-input" id="security-email-code" maxlength="6" autocomplete="one-time-code">
+          <label for="security-old-code">Codigo del correo anterior, si se reemplaza</label><input class="form-input" id="security-old-code" maxlength="6" autocomplete="off">
+          <button type="button" class="btn btn-secondary" id="verify-email-confirm">Verificar correo</button>
+          <div id="security-email-state" role="status"></div>
+        </fieldset>
+        <label for="security-password-code">Codigo para cambiar la clave</label>
+        <input class="form-input" id="security-password-code" maxlength="6" autocomplete="one-time-code" required>
+        <button type="button" class="btn btn-secondary" id="verify-password-send">Enviar codigo para cambiar clave</button>` : ''}
         <div id="profile-password-status" class="form-error" aria-live="polite"></div>
         <div class="branch-modal-actions">${forced ? '' : '<button type="button" class="btn btn-secondary" id="cancel-password-change">Cancelar</button>'}<button type="submit" class="btn btn-primary">Actualizar contraseña</button></div>
       </form>
     </section></div>`;
     document.body.style.overflow = 'hidden';
+    if(emailRequired) {
+      layer.querySelector('#security-email').value=authService.getCurrentUser()?.email || '';
+      const currentPassword=()=>layer.querySelector('[name="currentPassword"]').value;
+      const run=async(button,operation)=>{
+        const status=layer.querySelector('#profile-password-status');status.textContent='';button.disabled=true;
+        try {await operation();} catch(error){status.textContent=error.message || 'No se pudo completar la verificacion';}
+        finally {button.disabled=false;}
+      };
+      layer.querySelector('#verify-email-send').addEventListener('click',event=>run(event.currentTarget,async()=>{
+        const response=await apiClient.post('/auth/verification/request',{purpose:'email',email:layer.querySelector('#security-email').value,currentPassword:currentPassword()});
+        emailChallenge=response.data.challengeId;
+        layer.querySelector('#security-email-state').textContent=response.data.requiresPreviousCode?'Codigos enviados a ambos correos. Vencen en 5 minutos.':'Codigo enviado. Vence en 5 minutos.';
+      }));
+      layer.querySelector('#verify-email-confirm').addEventListener('click',event=>run(event.currentTarget,async()=>{
+        await apiClient.post('/auth/verification/email',{challengeId:emailChallenge,code:layer.querySelector('#security-email-code').value,previousCode:layer.querySelector('#security-old-code').value,currentPassword:currentPassword()});
+        emailChallenge=null;passwordChallenge=null;
+        layer.querySelector('#security-email-state').textContent='Correo verificado';
+      }));
+      layer.querySelector('#verify-password-send').addEventListener('click',event=>run(event.currentTarget,async()=>{
+        const response=await apiClient.post('/auth/verification/request',{purpose:'password',currentPassword:currentPassword()});
+        passwordChallenge=response.data.challengeId;
+        layer.querySelector('#profile-password-status').textContent='Codigo enviado a tu correo verificado. Vence en 5 minutos.';
+      }));
+      apiClient.get('/auth/verification').then(response=>{
+        layer.querySelector('#security-email').value=response.data.email || '';
+        layer.querySelector('#security-email-state').textContent=response.data.verified?'Correo verificado':'Debes verificar tu correo';
+      }).catch(error=>{layer.querySelector('#profile-password-status').textContent=error.message;});
+    }
     window.lucide?.createIcons();
     layer.querySelectorAll('[data-password-toggle]').forEach(button => button.addEventListener('click', () => {
       const input = document.getElementById(button.getAttribute('aria-controls'));
@@ -119,10 +162,11 @@ class ProfileView extends Component {
       const form=event.currentTarget,status=form.querySelector('#profile-password-status'),button=form.querySelector('[type="submit"]');
       const data=new FormData(form),currentPassword=String(data.get('currentPassword')||''),newPassword=String(data.get('newPassword')||''),confirmPassword=String(data.get('confirmPassword')||'');
       status.textContent='';
+      if(administrative && (newPassword.length<8 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword) || !/[^A-Za-z0-9\s]/.test(newPassword) || new TextEncoder().encode(newPassword).length>72)){status.textContent='Usa al menos 8 caracteres con mayuscula, minuscula, numero y simbolo (maximo 72 bytes).';return;}
       if(newPassword!==confirmPassword){status.textContent='La confirmación no coincide con la nueva contraseña.';return;}
       if(currentPassword===newPassword){status.textContent='La contraseña nueva debe ser diferente de la actual.';return;}
       button.disabled=true;button.textContent='Actualizando...';
-      try{const result=await authService.updatePassword(currentPassword,newPassword);if(!result.success)throw new Error(result.error||'No se pudo actualizar la contraseña.');layer.innerHTML='';document.body.style.overflow='';window.history.replaceState(null,'','/profile');window.dispatchEvent(new PopStateEvent('popstate'));}
+      try{const result=await authService.updatePassword(currentPassword,newPassword,emailRequired?{challengeId:passwordChallenge,code:layer.querySelector('#security-password-code').value}:{});if(!result.success)throw new Error(result.error||'No se pudo actualizar la contraseña.');layer.innerHTML='';document.body.style.overflow='';window.history.replaceState(null,'','/profile');window.dispatchEvent(new PopStateEvent('popstate'));}
       catch(error){status.textContent=error.message||'No se pudo actualizar la contraseña.';button.disabled=false;button.textContent='Actualizar contraseña';}
     });
   }

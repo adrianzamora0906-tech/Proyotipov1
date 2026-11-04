@@ -15,7 +15,7 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=manos-restauradas-20261014";
 import DashboardView from "./views/dashboard/DashboardView.js?v=actualizacion-parcial-20261014";
-import StudentsView from "./views/students/StudentsView.js?v=promo-halloween-vigencia-20261028";
+import StudentsView from "./views/students/StudentsView.js?v=fecha-hora-reserva-20261030";
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=responsables-cobro-20261028";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=estudiantes-orden-hora-20261015";
@@ -24,7 +24,7 @@ import NotificationsView from "./views/notifications/NotificationsView.js";
 import HistoryView from "./views/history/HistoryView.js";
 import ProfileView from "./views/profile/ProfileView.js?v=carita-clave-20261016";
 // Cash module views
-import CashDashboardView from "./views/cash/CashDashboardView.js?v=ventas-promociones-20261029";
+import CashDashboardView from "./views/cash/CashDashboardView.js?v=ventas-simple-20261030";
 import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";
 import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=segunda-matricula-20261015";
 import CashHistoryView from "./views/cash/CashHistoryView.js";

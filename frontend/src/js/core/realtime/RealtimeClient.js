@@ -1,4 +1,5 @@
 import { apiClient } from '../api/ApiClient.js';
+import { secureRealtimeUrl } from '../api/TransportSecurity.js';
 
 class RealtimeClient {
   constructor() { this.attempts = 0; this.started = false; this.connected = false; }
@@ -26,10 +27,9 @@ class RealtimeClient {
     if (this.socket) return;
     const token = apiClient.getToken();
     if (!token || !navigator.onLine) return;
-    const url = new URL(apiClient.getBaseUrls()[0]);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    url.pathname = `${url.pathname.replace(/\/$/,'')}/realtime`;
-    url.search = '';
+    let url;
+    try { url = secureRealtimeUrl(apiClient.getBaseUrls()[0]); }
+    catch (error) { console.error(error.message); return; }
     const socket = new WebSocket(url);
     this.socket = socket;
     this.token = token;

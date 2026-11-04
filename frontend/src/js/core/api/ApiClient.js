@@ -1,4 +1,5 @@
-const CONFIGURED_API_BASE = window.__SPORTMANCAR_CONFIG__?.API_BASE_URL || 'http://localhost:5000/api';
+import { secureApiUrl } from './TransportSecurity.js';
+const CONFIGURED_API_BASE = window.__SPORTMANCAR_CONFIG__?.API_BASE_URL || (['localhost', '127.0.0.1'].includes(window.location.hostname) ? 'http://localhost:5000/api' : '/api');
 const REQUEST_TIMEOUT_MS = 30000;
 
 const resolveApiBase = value => {
@@ -24,7 +25,7 @@ class ApiClient {
     let configuredIsLocal = false;
     try { configuredIsLocal = ['localhost', '127.0.0.1'].includes(new URL(configured, window.location.origin).hostname); } catch {}
     if (!configuredIsLocal || ['localhost', '127.0.0.1'].includes(window.location.hostname)) urls.add(configured);
-    return [...urls];
+    return [...urls].map(value => secureApiUrl(value));
   }
 
   async fetchWithFallback(endpoint, options = {}) {
@@ -48,7 +49,7 @@ class ApiClient {
       const timeout = endpoint === '/health' && this.getBaseUrls().length > 1 ? 5000 : REQUEST_TIMEOUT_MS;
       const timeoutId = window.setTimeout(() => controller.abort('request-timeout'), timeout);
       try {
-        const response = await fetch(`${base}${endpoint}`, { ...options, signal: controller.signal });
+        const response = await fetch(`${base}${endpoint}`, { ...options, signal: controller.signal, redirect: 'error' });
         if (canRetrySafely && [502, 503, 504, 530].includes(response.status)) {
           lastError = new Error('El servidor no esta disponible');
           continue;
@@ -123,6 +124,9 @@ class ApiClient {
     if (!response.ok) return false;
     const data = (await response.json()).data;
     if (!data?.token || !data?.refreshToken) return false;
+    let activeSession;
+    try { activeSession = JSON.parse(sessionStorage.getItem('erp_session') || 'null'); } catch { return false; }
+    if (activeSession?.refreshToken !== session.refreshToken) return false;
     this.setToken(data.token);
     const currentRoles = Array.isArray(session.roles) ? session.roles : [];
     const currentPermissions = Array.isArray(session.permissions) ? session.permissions : [];

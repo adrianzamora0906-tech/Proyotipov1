@@ -3,13 +3,27 @@ import assert from 'node:assert/strict';
 
 globalThis.window = {
   __SPORTMANCAR_CONFIG__: {},
-  location: { hostname: 'localhost', origin: 'http://localhost', pathname: '/' },
+  location: { hostname: 'localhost', origin: 'http://localhost', protocol: 'http:', pathname: '/' },
   setTimeout,
   clearTimeout,
   dispatchEvent() {},
 };
 
 const { default: ApiClient } = await import('../src/js/core/api/ApiClient.js');
+
+test('una renovacion tardia no revive una sesion cerrada', async () => {
+  const values = new Map([['erp_session', JSON.stringify({ apiToken: 'old', refreshToken: 'refresh-old' })]]);
+  global.sessionStorage = { getItem: key => values.get(key) || null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
+  const client = new ApiClient();
+  client.fetchWithFallback = async () => {
+    sessionStorage.removeItem('erp_session');
+    sessionStorage.removeItem('erp_api_token');
+    return new Response(JSON.stringify({ data: { token: 'late-token', refreshToken: 'late-refresh' } }));
+  };
+  assert.equal(await client.performRefresh(), false);
+  assert.equal(sessionStorage.getItem('erp_api_token'), null);
+  assert.equal(sessionStorage.getItem('erp_session'), null);
+});
 
 test('consultas 401 simultáneas comparten una sola renovación de token', async () => {
   const values = new Map();

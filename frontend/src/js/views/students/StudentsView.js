@@ -2484,6 +2484,7 @@ class StudentsView extends Component {
         ...(instructorId && this.useInstructorFirstAvailability ? { full_schedule: 'true' } : {}),
         ...(practicalStartDate ? { practical_start_date: practicalStartDate } : {}),
         ...(practicalCycleId ? { practical_cycle_id: practicalCycleId } : {}),
+        ...(this.activatingReservation?.id ? { reservation_id: this.activatingReservation.id } : {}),
       };
       const results = await Promise.allSettled([
         ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'carro', modality: 'normal' }),
@@ -5043,6 +5044,8 @@ class StudentsView extends Component {
       return;
     }
     const selectedCellsAreAvailable = examOnly ? schedulePlan.selections.length === 1 : this.activatingReservation
+      && String(preferredInstructorId) === String(this.activatingReservation.instructor_id)
+      && schedulePlan.selections.every(selection => String(selection.cycleId) === String(this.activatingReservation.cycle_id))
       ? schedulePlan.selections.length > 0 && schedulePlan.selections.every(selection => String(selection.cycleId) === String(this.activatingReservation.cycle_id))
       : schedulePlan.selections.length > 0
       && schedulePlan.selections.every(selection => {
@@ -6077,29 +6080,39 @@ class StudentsView extends Component {
       const registrationCity = student.salesBranchCity || student.registeredByCityName || 'Ciudad no registrada';
       const groupTitle = this.groupBy === 'instructor'
         ? (student.instructorName || 'Sin instructor') !== previousBranch
-          ? `<div class="student-branch-group">Instructor: ${student.instructorName || 'Sin instructor'}</div>`
+          ? `<div class="student-branch-group">Instructor: ${escapeHtml(student.instructorName || 'Sin instructor')}</div>`
           : ''
         : registrationBranch !== previousBranch
           ? `<div class="student-branch-group">${escapeHtml(registrationCity)} · ${escapeHtml(registrationBranch)}</div>`
           : '';
       previousBranch = this.groupBy === 'instructor' ? (student.instructorName || 'Sin instructor') : registrationBranch;
       return `${groupTitle}
-        <div class="table-row clickable-row" data-student-id="${student.id}" style="cursor:pointer;">
-          <div class="table-cell"><div class="student-name"><div class="avatar" style="width: 32px; height: 32px; font-size: 0.75rem;">${this.getInitials(student.firstName + ' ' + student.lastName)}</div><div><div class="font-weight-600">${student.firstName} ${student.lastName}</div><div class="text-sm text-gray-500">${student.email || 'N/A'}</div></div></div></div>
-          <div class="table-cell">${StringHelper.normalizeCedula(student.cedula)}</div>
-          <div class="table-cell">${student.createdByName || 'No registrado'}</div>
+        <div class="table-row clickable-row" data-student-id="${escapeHtml(student.id)}" style="cursor:pointer;">
+          <div class="table-cell"><div class="student-name"><div class="avatar" style="width: 32px; height: 32px; font-size: 0.75rem;">${escapeHtml(this.getInitials(student.firstName + ' ' + student.lastName))}</div><div><div class="font-weight-600">${escapeHtml(student.firstName)} ${escapeHtml(student.lastName)}</div><div class="text-sm text-gray-500">${escapeHtml(student.email || 'N/A')}</div></div></div></div>
+          <div class="table-cell">${escapeHtml(StringHelper.normalizeCedula(student.cedula))}</div>
+          <div class="table-cell">${escapeHtml(student.createdByName || 'No registrado')}</div>
           <div class="table-cell">${escapeHtml(registrationBranch)}</div>
-          <div class="table-cell">${student.instructorName || 'Sin instructor'}</div>
+          <div class="table-cell">${escapeHtml(student.instructorName || 'Sin instructor')}</div>
           <div class="table-cell">${DateHelper.format(student.createdAt, 'DD/MM/YYYY')}</div>
           <div class="table-cell"><span class="badge ${this.getStatusBadgeClass(student.status)}">${this.getStatusLabel(student.status)}</span></div>
         </div>`;
     }).join('');
   }
 
+  formatReservationCreatedAt(value) {
+    if (!value) return 'Sin registro';
+    const timestamp = new Date(value);
+    if (Number.isNaN(timestamp.getTime())) return 'Sin registro';
+    return new Intl.DateTimeFormat('es-EC', {
+      timeZone: 'America/Guayaquil', day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(timestamp);
+  }
+
   renderReservationRows(reservations = []) {
     return reservations.map(reservation => `
       <div class="table-row student-reservation-table-row">
-        <div class="table-cell"><div class="student-name"><div class="avatar" style="width:32px;height:32px;font-size:.75rem;">${this.getInitials(reservation.name || 'CR')}</div><div><div class="font-weight-600">${escapeHtml(reservation.name || 'Nombre pendiente')}</div><div class="text-sm text-gray-500">Reservado por: ${escapeHtml(reservation.created_by_name || 'Sin registro')}</div></div></div></div>
+        <div class="table-cell"><div class="student-name"><div class="avatar" style="width:32px;height:32px;font-size:.75rem;">${this.getInitials(reservation.name || 'CR')}</div><div><div class="font-weight-600">${escapeHtml(reservation.name || 'Nombre pendiente')}</div><div class="text-sm text-gray-500">Reservado por: ${escapeHtml(reservation.created_by_name || 'Sin registro')}</div><div class="text-sm text-gray-500">${escapeHtml(this.formatReservationCreatedAt(reservation.created_at))}</div></div></div></div>
         <div class="table-cell">${escapeHtml(reservation.identification || 'Cédula pendiente')}${reservation.phone ? `<br>${escapeHtml(reservation.phone)}` : ''}</div>
         <div class="table-cell">${escapeHtml(reservation.instructor_name || 'Sin instructor')}</div>
         <div class="table-cell"><div><strong>${escapeHtml(reservation.course_name || 'Curso pendiente')}</strong><div class="text-sm text-gray-500">${escapeHtml(reservation.cycle_code || '')}</div></div></div>

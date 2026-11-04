@@ -83,6 +83,12 @@ class ProfileView extends Component {
     const administrative = ['admin','secretaria','secretaria_sucursal','caja','instructor','ADMIN_SYSTEM','GENERAL_MANAGER','BRANCH_ADMIN','SECRETARY','CASHIER','INSTRUCTOR'].includes(authService.getCurrentUser()?.role);
     const emailRequired = administrative && !['instructor','INSTRUCTOR'].includes(authService.getCurrentUser()?.role);
     let emailChallenge = null, passwordChallenge = null;
+    let emailVerified = false;
+    const validChallenge = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    const requireSuccess = response => {
+      if (!response?.success) throw new Error(response?.error?.message || response?.error || 'No se pudo completar la verificacion');
+      return response.data;
+    };
     const passwordFields = [
       ['currentPassword', 'Contrase\u00f1a actual', 'current-password'],
       ['newPassword', 'Nueva contrase\u00f1a', 'new-password'],
@@ -118,6 +124,8 @@ class ProfileView extends Component {
     </section></div>`;
     document.body.style.overflow = 'hidden';
     if(emailRequired) {
+      const saveButton=layer.querySelector('[type="submit"]');
+      saveButton.disabled=true;
       layer.querySelector('#security-email').value=authService.getCurrentUser()?.email || '';
       const currentPassword=()=>layer.querySelector('[name="currentPassword"]').value;
       const run=async(button,operation)=>{
@@ -126,23 +134,33 @@ class ProfileView extends Component {
         finally {button.disabled=false;}
       };
       layer.querySelector('#verify-email-send').addEventListener('click',event=>run(event.currentTarget,async()=>{
+        emailChallenge=null;
         const response=await apiClient.post('/auth/verification/request',{purpose:'email',email:layer.querySelector('#security-email').value,currentPassword:currentPassword()});
-        emailChallenge=response.data.challengeId;
-        layer.querySelector('#security-email-state').textContent=response.data.requiresPreviousCode?'Codigos enviados a ambos correos. Vencen en 5 minutos.':'Codigo enviado. Vence en 5 minutos.';
+        const data=requireSuccess(response);
+        if(!validChallenge(data?.challengeId))throw new Error('No se recibio una solicitud valida. Actualiza la pagina e intenta nuevamente.');
+        emailChallenge=data.challengeId;
+        layer.querySelector('#security-email-state').textContent=data.requiresPreviousCode?'Codigos enviados a ambos correos. Vencen en 5 minutos.':'Codigo enviado. Vence en 5 minutos.';
       }));
       layer.querySelector('#verify-email-confirm').addEventListener('click',event=>run(event.currentTarget,async()=>{
-        await apiClient.post('/auth/verification/email',{challengeId:emailChallenge,code:layer.querySelector('#security-email-code').value,previousCode:layer.querySelector('#security-old-code').value,currentPassword:currentPassword()});
-        emailChallenge=null;passwordChallenge=null;
+        if(!validChallenge(emailChallenge))throw new Error('Primero solicita el codigo de verificacion del correo.');
+        requireSuccess(await apiClient.post('/auth/verification/email',{challengeId:emailChallenge,code:layer.querySelector('#security-email-code').value,previousCode:layer.querySelector('#security-old-code').value,currentPassword:currentPassword()}));
+        emailChallenge=null;passwordChallenge=null;emailVerified=true;saveButton.disabled=true;
         layer.querySelector('#security-email-state').textContent='Correo verificado';
       }));
       layer.querySelector('#verify-password-send').addEventListener('click',event=>run(event.currentTarget,async()=>{
+        passwordChallenge=null;saveButton.disabled=true;
+        if(!emailVerified)throw new Error('Primero verifica tu correo de seguridad.');
         const response=await apiClient.post('/auth/verification/request',{purpose:'password',currentPassword:currentPassword()});
-        passwordChallenge=response.data.challengeId;
+        const data=requireSuccess(response);
+        if(!validChallenge(data?.challengeId))throw new Error('No se recibio una solicitud valida. Actualiza la pagina e intenta nuevamente.');
+        passwordChallenge=data.challengeId;saveButton.disabled=false;
         layer.querySelector('#profile-password-status').textContent='Codigo enviado a tu correo verificado. Vence en 5 minutos.';
       }));
       apiClient.get('/auth/verification').then(response=>{
-        layer.querySelector('#security-email').value=response.data.email || '';
-        layer.querySelector('#security-email-state').textContent=response.data.verified?'Correo verificado':'Debes verificar tu correo';
+        const data=requireSuccess(response);
+        layer.querySelector('#security-email').value=data.email || '';
+        emailVerified=Boolean(data.verified);
+        layer.querySelector('#security-email-state').textContent=emailVerified?'Correo verificado':'Debes verificar tu correo';
       }).catch(error=>{layer.querySelector('#profile-password-status').textContent=error.message;});
     }
     window.lucide?.createIcons();
@@ -162,6 +180,7 @@ class ProfileView extends Component {
       const form=event.currentTarget,status=form.querySelector('#profile-password-status'),button=form.querySelector('[type="submit"]');
       const data=new FormData(form),currentPassword=String(data.get('currentPassword')||''),newPassword=String(data.get('newPassword')||''),confirmPassword=String(data.get('confirmPassword')||'');
       status.textContent='';
+      if(emailRequired && (!emailVerified || !validChallenge(passwordChallenge))){status.textContent='Verifica tu correo y solicita el codigo para cambiar la clave antes de guardar.';return;}
       if(administrative && (newPassword.length<8 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword) || !/[^A-Za-z0-9\s]/.test(newPassword) || new TextEncoder().encode(newPassword).length>72)){status.textContent='Usa al menos 8 caracteres con mayuscula, minuscula, numero y simbolo (maximo 72 bytes).';return;}
       if(newPassword!==confirmPassword){status.textContent='La confirmación no coincide con la nueva contraseña.';return;}
       if(currentPassword===newPassword){status.textContent='La contraseña nueva debe ser diferente de la actual.';return;}

@@ -34,7 +34,7 @@ class ScheduleView extends Component {
     let loadError = '';
 
     try {
-      const result = await InstructorAssignmentService.getInstructors();
+      const result = await InstructorAssignmentService.getInstructors({ include_available_hours: 'false' });
       instructors = result.success ? result.data : [];
     } catch (error) {
       loadError = error.data?.error?.message || error.message || 'No se pudieron cargar los instructores.';
@@ -155,9 +155,10 @@ class ScheduleView extends Component {
   }
 
   renderInstructorCard(instructor) {
-    const availableHours = Number.isFinite(Number(instructor.availableHours))
+    const hasAvailableHours = instructor.availableHours != null;
+    const availableHours = hasAvailableHours && Number.isFinite(Number(instructor.availableHours))
       ? `${Number(instructor.availableHours)} ${Number(instructor.availableHours) === 1 ? 'hora' : 'horas'}`
-      : '0 horas';
+      : 'Ver horario semanal';
     const specialty = this.normalizeCardText(instructor.specialty || 'Instructor practico');
     return `
       <button type="button" class="instructor-card ${this.scheduleEditMode ? 'instructor-card-editable' : ''}" draggable="${this.scheduleEditMode ? 'true' : 'false'}" data-instructor-id="${instructor.id}">
@@ -165,7 +166,7 @@ class ScheduleView extends Component {
         <div class="instructor-card-body">
           <h3>${instructor.name}</h3>
           <p>${specialty}</p>
-          <span class="badge badge-primary">${this.calendarModality === 'intensivo' ? 'Fin de semana' : `${availableHours} disponibles`}</span>
+          <span class="badge badge-primary">${this.calendarModality === 'intensivo' ? 'Fin de semana' : hasAvailableHours ? `${availableHours} disponibles` : availableHours}</span>
           <small class="instructor-performance-hint">${this.calendarModality === 'intensivo' ? 'Ver horario de fin de semana' : 'Ver horario semanal'}</small>
         </div>
       </button>

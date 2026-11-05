@@ -78,10 +78,17 @@ class StudentsView extends Component {
     const reservationsPromise = !isRegistrationPage && showingReservations
       ? StudentService.getActiveReservations({ ...listParams, paginated: true, page: currentPage })
       : Promise.resolve([]);
-    const [studentPage, branches, reservationPage] = await Promise.all([
+    const summaryPromise = !isRegistrationPage
+      ? StudentService.getStudentListSummary(listParams).catch(error => {
+        console.warn('No se pudo cargar el resumen completo de estudiantes:', error.message);
+        return null;
+      })
+      : Promise.resolve(null);
+    const [studentPage, branches, reservationPage, listSummary] = await Promise.all([
       studentsPromise,
       StudentService.getBranches(),
       reservationsPromise,
+      summaryPromise,
     ]);
     const students = Array.isArray(studentPage) ? studentPage : (studentPage?.students || []);
     const totalStudents = Array.isArray(studentPage) ? students.length : (studentPage?.total ?? students.length);
@@ -89,15 +96,15 @@ class StudentsView extends Component {
     const reservations = Array.isArray(reservationPage) ? reservationPage : (reservationPage?.reservations || []);
     const totalReservations = Array.isArray(reservationPage) ? reservations.length : (reservationPage?.total ?? reservations.length);
     const totalPages = Math.max(Math.ceil((showingReservations ? totalReservations : totalStudents) / 10), 1);
-    const summaryCounts = showingReservations ? [] : students.map(student => ({
+    const pageSummaryCounts = showingReservations ? [] : students.map(student => ({
       status: student.status,
       registration_type: student.registrationType || student.registration_type || 'REGULAR',
       active: Boolean(student.hasActiveEnrollment || student.active || ['matriculado', 'en_curso', 'activo'].includes(String(student.status || '').toLowerCase())),
       has_collectible_debt: Boolean(student.hasCollectibleDebt ?? student.has_collectible_debt),
       count: 1,
     }));
-    this.disabledStudentCount = this.getCountByStatus(summaryCounts, 'inhabilitado');
-    const summaryModel = { counts: summaryCounts, reservations: reservations.length };
+    const summaryModel = listSummary || { counts: pageSummaryCounts, reservations: totalReservations };
+    this.disabledStudentCount = this.getCountByStatus(summaryModel.counts, 'inhabilitado');
     this.visibleReservations = reservations;
     const currentBranch = currentUser?.branch || '';
     const currentBranchId = currentUser?.branch_id || '';
@@ -346,9 +353,14 @@ class StudentsView extends Component {
         ? prefetched.reservations ? Promise.resolve(prefetched.reservations)
           : StudentService.getActiveReservations({ ...params, paginated: true, page: requestedPage })
         : Promise.resolve([]);
-      const [studentPage, reservationPage] = await Promise.all([
+      const summaryPromise = StudentService.getStudentListSummary(params).catch(error => {
+        console.warn('No se pudo actualizar el resumen completo de estudiantes:', error.message);
+        return null;
+      });
+      const [studentPage, reservationPage, listSummary] = await Promise.all([
         studentsPromise,
         reservationsPromise,
+        summaryPromise,
       ]);
       if (requestId !== this.studentListRequestId) return;
       const students = Array.isArray(studentPage) ? studentPage : (studentPage?.students || []);
@@ -357,15 +369,15 @@ class StudentsView extends Component {
       const reservations = Array.isArray(reservationPage) ? reservationPage : (reservationPage?.reservations || []);
       const totalReservations = Array.isArray(reservationPage) ? reservations.length : (reservationPage?.total ?? reservations.length);
       const totalPages = Math.max(Math.ceil((showingReservations ? totalReservations : totalStudents) / 10), 1);
-      const summaryCounts = showingReservations ? [] : students.map(student => ({
+      const pageSummaryCounts = showingReservations ? [] : students.map(student => ({
         status: student.status,
         registration_type: student.registrationType || student.registration_type || 'REGULAR',
         active: Boolean(student.hasActiveEnrollment || student.active || ['matriculado', 'en_curso', 'activo'].includes(String(student.status || '').toLowerCase())),
         has_collectible_debt: Boolean(student.hasCollectibleDebt ?? student.has_collectible_debt),
         count: 1,
       }));
-      const summaryModel = { counts: summaryCounts, reservations: reservations.length };
-      this.disabledStudentCount = this.getCountByStatus(summaryCounts, 'inhabilitado');
+      const summaryModel = listSummary || { counts: pageSummaryCounts, reservations: totalReservations };
+      this.disabledStudentCount = this.getCountByStatus(summaryModel.counts, 'inhabilitado');
       const orderedStudents = students;
       this.visibleReservations = reservations;
       const displayedRecords = showingReservations ? reservations : orderedStudents;
@@ -6134,12 +6146,15 @@ class StudentsView extends Component {
   renderStudentSummary(students, reservations = [], activeStatus = '') {
     const enrolledStatuses = new Set(['matriculado', 'en_curso', 'active', 'activo']);
     const documentStatuses = new Set(['pendiente_documentacion', 'pendiente_documentos', 'pendiente_doc', 'pending_documents']);
-    let total = students.length;
-    let enrolled = students.filter(student => enrolledStatuses.has(String(student.status || '').toLowerCase())).length;
-    let pendingPayment = students.filter(student => student.hasCollectibleDebt === true).length;
-    let pendingDocuments = students.filter(student => documentStatuses.has(String(student.status || '').toLowerCase())).length;
+    const rows = Array.isArray(students)
+      ? students
+      : Array.isArray(students?.students) ? students.students : [];
+    let total = rows.length;
+    let enrolled = rows.filter(student => enrolledStatuses.has(String(student.status || '').toLowerCase())).length;
+    let pendingPayment = rows.filter(student => student.hasCollectibleDebt === true || student.has_collectible_debt === true).length;
+    let pendingDocuments = rows.filter(student => documentStatuses.has(String(student.status || '').toLowerCase())).length;
     let reservationCount = reservations.length;
-    if (!Array.isArray(students)) {
+    if (students && !Array.isArray(students) && Array.isArray(students.counts)) {
       const counts = students.counts || [];
       const visibleCounts = counts.filter(row => String(row.status || '').toLowerCase() !== 'inhabilitado');
       total = visibleCounts.reduce((sum, row) => sum + Number(row.count || 0), 0);

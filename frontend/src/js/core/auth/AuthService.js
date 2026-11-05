@@ -4,14 +4,15 @@ import { apiClient } from '../api/ApiClient.js';
 class AuthService {
   constructor() { this.sessionKey = 'erp_session'; this.authorizationPromise = null; this.authorizationKey = null; this.authorizationCheckedAt = 0; }
   initializeUsers() { /* La identidad se administra exclusivamente en PostgreSQL. */ }
-  async login(username, password) {
+  async login(username, password, proof = {}) {
     try {
       // La pantalla de acceso inicia una autenticacion nueva. No debe reutilizar
       // tokens de una sesion anterior para intentar refrescar un login fallido.
       sessionStorage.removeItem(this.sessionKey);
       apiClient.setToken(null);
       this.authorizationPromise=null;this.authorizationKey=null;this.authorizationCheckedAt=0;
-      const result = await ApiService.login(username, password);
+      const result = await ApiService.login(username, password, proof);
+      if(result.success && result.mfaRequired)return {success:true,mfaRequired:true,...result.data};
       if (!result.success || !result.user) return { success:false, message:'Credenciales inválidas' };
       const user=result.user;const session={userId:user.id,username:user.username,name:user.name,email:user.email,
         role:user.role,roles:user.roles||[],branch:user.branch,branch_id:user.branch_id,avatar:user.avatar,

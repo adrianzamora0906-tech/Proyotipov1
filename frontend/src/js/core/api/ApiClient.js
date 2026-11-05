@@ -182,7 +182,7 @@ class ApiClient {
   async put(endpoint, body = {}) { return this.request('PUT', endpoint, body); }
   async patch(endpoint, body = {}) { return this.request('PATCH', endpoint, body); }
   async delete(endpoint) { return this.request('DELETE', endpoint); }
-  async login(username, password) { const result = await this.post('/auth/login', { username, password }); if (result.success && result.user?.token) this.setToken(result.user.token); return result; }
+  async login(username, password, proof = {}) { const result = await this.post('/auth/login', { username, password, ...proof }); if (result.success && result.user?.token) this.setToken(result.user.token); return result; }
   logout() { this.setToken(null); }
   isAuthenticated() { return Boolean(this.getToken()); }
 }

@@ -265,9 +265,35 @@ class ProfileView extends Component {
       if(newPassword!==confirmPassword){status.textContent='La confirmación no coincide con la nueva contraseña.';return;}
       if(currentPassword===newPassword){status.textContent='La contraseña nueva debe ser diferente de la actual.';return;}
       button.disabled=true;button.textContent='Actualizando...';
-      try{const result=await authService.updatePassword(currentPassword,newPassword,emailRequired?{challengeId:passwordChallenge,code:passwordCode}:{});if(!result.success)throw new Error(result.error||'No se pudo actualizar la contraseña.');layer.innerHTML='';document.body.style.overflow='';window.history.replaceState(null,'','/profile');window.dispatchEvent(new PopStateEvent('popstate'));}
+      try{
+        const result=await authService.updatePassword(currentPassword,newPassword,emailRequired?{challengeId:passwordChallenge,code:passwordCode}:{});
+        if(!result.success)throw new Error(result.error?.message||result.error||'No se pudo actualizar la contraseña.');
+        this.showPasswordSuccess(layer,result.requiresLogin);
+      }
       catch(error){status.textContent=error.message||'No se pudo actualizar la contraseña.';button.disabled=false;button.textContent='Actualizar contraseña';}
     });
+  }
+
+  showPasswordSuccess(layer,requiresLogin=false) {
+    const dialog=layer.querySelector('[role="dialog"]');
+    dialog.setAttribute('aria-describedby','password-success-message');
+    dialog.innerHTML=`<div class="security-heading">
+      <span class="security-emblem" style="background:#e1f6ee;color:#087c60" aria-hidden="true"><i data-lucide="circle-check"></i></span>
+      <h2 id="password-change-title">Contraseña actualizada</h2>
+    </div>
+    <p id="password-success-message">Tu contraseña se cambió correctamente.</p>
+    <div class="branch-modal-actions"><button type="button" class="btn btn-primary" id="password-success-close">Aceptar</button></div>`;
+    dialog.scrollTop=0;
+    window.lucide?.createIcons();
+    const close=async()=>{
+      if(requiresLogin)await authService.logout();
+      layer.innerHTML='';document.body.style.overflow='';
+      window.history.replaceState(null,'',requiresLogin?'/login':'/profile');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    };
+    const button=layer.querySelector('#password-success-close');
+    button.addEventListener('click',close,{once:true});
+    button.focus();
   }
 }
 

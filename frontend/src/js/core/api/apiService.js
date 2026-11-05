@@ -13,8 +13,8 @@ class ApiService {
     return apiClient.put(`/course-cycles/${encodeURIComponent(cycleId)}/weekend-group/${encodeURIComponent(instructorId)}`, data);
   }
   // ── AUTH ──
-  static async login(username, password) {
-    return apiClient.login(username, password);
+  static async login(username, password, proof = {}) {
+    return apiClient.login(username, password, proof);
   }
 
   static async getMe() {

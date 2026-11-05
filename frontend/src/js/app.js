@@ -22,7 +22,7 @@ import ScheduleView from "./views/schedule/ScheduleView.js?v=estudiantes-orden-h
 import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";
 import NotificationsView from "./views/notifications/NotificationsView.js";
 import HistoryView from "./views/history/HistoryView.js";
-import ProfileView from "./views/profile/ProfileView.js?v=carita-clave-20261016";
+import ProfileView from "./views/profile/ProfileView.js?v=verificacion-unica-20261104";
 // Cash module views
 import CashDashboardView from "./views/cash/CashDashboardView.js?v=ventas-simple-20261030";
 import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";

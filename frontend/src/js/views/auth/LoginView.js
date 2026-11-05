@@ -38,12 +38,21 @@ class LoginView extends Component {
               <div class="form-error" id="password-error"></div>
             </div>
 
+            <dialog id="login-code-group" class="login-mfa-modal" aria-labelledby="login-mfa-title" hidden>
+              <h2 id="login-mfa-title">Verifica tu acceso</h2>
+              <label class="form-label" for="login-code">Codigo de acceso</label>
+              <input id="login-code" class="form-input" maxlength="6" autocomplete="one-time-code">
+              <div role="status">Codigo enviado a tu correo. Valido por 5 minutos.</div>
+              <p id="login-code-error" class="form-error" role="alert"></p>
+              <button type="submit" class="btn btn-primary btn-block" id="login-code-submit">Verificar e ingresar</button>
+              <button type="button" class="btn btn-secondary" id="login-code-restart">Volver a iniciar / reenviar</button>
+            </dialog>
             <div id="general-error" class="alert alert-error" style="display: none;">
               <div class="alert-icon">⚠️</div>
               <div class="alert-content" id="error-message"></div>
             </div>
 
-            <button type="submit" class="btn btn-primary btn-large btn-block">
+            <button type="submit" id="login-submit" class="btn btn-primary btn-large btn-block">
               Iniciar Sesión
             </button>
 
@@ -54,6 +63,15 @@ class LoginView extends Component {
   }
 
   async mount() {
+    this.loginChallenge=null;
+    const resetCode=()=>{
+      this.loginChallenge=null;document.getElementById('login-code-group').close();document.getElementById('login-code-group').hidden=true;
+      document.getElementById('username').readOnly=false;document.getElementById('password').readOnly=false;
+      document.getElementById('login-code').value='';
+      document.getElementById('login-submit').textContent='Iniciar sesion';
+    };
+    document.getElementById('login-code-restart')?.addEventListener('click',resetCode);
+    document.getElementById('login-code-group')?.addEventListener('cancel',event=>{event.preventDefault();resetCode();});
     window.lucide?.createIcons();
     document.getElementById('toggle-password')?.addEventListener('click', event => {
       const input = document.getElementById('password');
@@ -96,22 +114,30 @@ class LoginView extends Component {
     }
 
     // Deshabilitar botón mientras se procesa
-    const btn = form.querySelector('button[type="submit"]');
+    const btn = e.submitter || document.getElementById('login-submit');
     btn.disabled = true;
     btn.textContent = 'Iniciando sesión...';
 
     try {
       // Intentar login (ahora async por API)
-      const result = await authService.login(username, password);
+      const result = await authService.login(username, password,this.loginChallenge?{challengeId:this.loginChallenge,code:document.getElementById('login-code').value}:{});
+      if(result.mfaRequired){
+        this.loginChallenge=result.challengeId;document.getElementById('login-code-group').hidden=false;
+        if(!document.getElementById('login-code-group').open)document.getElementById('login-code-group').showModal();
+        document.getElementById('username').readOnly=true;document.getElementById('password').readOnly=true;
+        btn.disabled=false;btn.textContent='Verificar e ingresar';document.getElementById('login-code').focus();return;
+      }
 
       if (!result.success) {
         document.getElementById('general-error').style.display = 'flex';
         document.getElementById('error-message').textContent = result.message;
+        document.getElementById('login-code-error').textContent=result.message;
         btn.disabled = false;
         btn.textContent = 'Iniciar Sesión';
         return;
       }
 
+      document.getElementById('login-code-group').close();document.getElementById('login-code-group').hidden=true;
       // Login exitoso: navegar usando history API para evitar recargar la página
       const role = String(result.user.role || '').trim().toLowerCase();
       const target = result.user.mustChangePassword
@@ -132,6 +158,7 @@ class LoginView extends Component {
     } catch (error) {
       document.getElementById('general-error').style.display = 'flex';
       document.getElementById('error-message').textContent = error.message || 'Error al conectar con el servidor';
+      document.getElementById('login-code-error').textContent=error.message || 'No se pudo verificar el acceso';
       btn.disabled = false;
       btn.textContent = 'Iniciar Sesión';
     }

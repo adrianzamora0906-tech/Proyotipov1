@@ -5,13 +5,16 @@ const {chromium}=require('C:/Users/USUARIO/AppData/Local/npm-cache/_npx/e41f203b
  await page.setContent('<style>*{box-sizing:border-box;margin:0}body{font-family:Arial}button,input{padding:10px}</style><button id="open">Ventas / Excel</button>');
  const source=fs.readFileSync('frontend/src/js/helpers/CashSalesReportModal.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export function openCashSalesReport','window.openCashSalesReport=function');
  await page.addScriptTag({content:`window.downloads=0;const apiClient={get:async()=>({data:{totals:{sales:1,amount:164.99,paid:100,balance:64.99,withoutAccount:0},rows:[{date:'2026-10-28',identification:'0123456789',student:'ESTUDIANTE PRUEBA',course:'Clase B',branch:'Flavio',seller:'Caja',amount:164.99,paid:100,balance:64.99}]}}),downloadGet:async()=>{window.downloads++;return {blob:new Blob(['excel']),filename:'ventas.xlsx'}}};${source};document.getElementById('open').onclick=window.openCashSalesReport;`});
- await page.evaluate(()=>{const original=apiClient.get;apiClient.get=async(...args)=>{const result=await original(...args);Object.assign(result.data.rows[0],{payment_methods:'1. efectivo ($60.00)\n2. tarjeta ($40.00)',payment_registered_by:'1. Cajera A\n2. Cajera B'});return result;};});
+ await page.evaluate(()=>{const original=apiClient.get;apiClient.get=async(...args)=>{const result=await original(...args);Object.assign(result.data.rows[0],{promotion:'Promo Halloween',payment_methods:'Efectivo / Tarjeta',payment_registered_by:'1. Cajera A\n2. Cajera B'});return result;};});
  await page.locator('#open').click();assert(await page.locator('#cash-sales-export').isDisabled());
  const centered=()=>{const r=document.querySelector('dialog').getBoundingClientRect();return Math.abs(r.x+r.width/2-innerWidth/2)<2&&Math.abs(r.y+r.height/2-innerHeight/2)<2;};
  assert(await page.evaluate(centered));
  await page.getByRole('button',{name:'Vista previa'}).click();await page.waitForFunction(()=>!document.getElementById('cash-sales-export').disabled);
  assert((await page.locator('.cash-sales-results').innerText()).includes('0123456789'));
- const detail=await page.locator('.cash-sales-results').innerText();assert(detail.includes('efectivo ($60.00)'));assert(detail.includes('tarjeta ($40.00)'));assert(detail.includes('Cajera A'));assert(detail.includes('Cajera B'));
+ const detail=await page.locator('.cash-sales-results').innerText();assert(detail.includes('Efectivo / Tarjeta'));assert(!detail.includes('Cajera A'));assert(!detail.includes('ESTUDIANTE PRUEBA'));
+ assert(detail.includes('Promo Halloween'));assert.equal(await page.locator('.cash-sales-results thead th').count(),6);
+ assert.deepEqual(await page.locator('.cash-sales-results thead th').allTextContents(),['Cedula','Sucursal','Curso','Valor cancelado','Metodo de pago','Promocion']);
+ const summary=await page.locator('#cash-sales-status').innerText();assert(summary.includes('Total cancelado'));assert(!summary.includes('Saldo actual'));
  assert(await page.evaluate(()=>{const r=document.querySelector('dialog').getBoundingClientRect();return r.x>=0&&r.right<=innerWidth;}));
  assert(await page.evaluate(centered));
  await page.screenshot({path:'.tmp/cash-sales-modal-'+width+'.png',fullPage:true});

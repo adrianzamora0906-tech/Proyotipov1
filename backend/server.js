@@ -6,6 +6,8 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+const { assertProductionConfig, createOriginPolicy } = require('./config/securityPolicy');
+assertProductionConfig();
 
 const { errorHandler } = require('./middleware/errorHandler');
 const requestContext = require('./middleware/requestContext');
@@ -29,38 +31,20 @@ const referralCampaignRoutes = require('./routes/referralCampaigns');
 const PracticalSessionAutoCloseService = require('./services/PracticalSessionAutoCloseService');
 
 const app = express();
-app.set('trust proxy', 1);
+app.set('trust proxy', process.env.NODE_ENV === 'production' ? 'loopback' : 1);
+app.use(require('./middleware/secureTransport'));
 app.use(requestContext);
 
 // ════════════════════════════════════════
 // MIDDLEWARE DE SEGURIDAD
 // ════════════════════════════════════════
 app.use(helmet({ contentSecurityPolicy: false }));
-const configuredOrigins = (process.env.CORS_ORIGIN || 'http://localhost:8080')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean);
-const publicLandingOrigins = new Set([
-  'https://spormancart.netlify.app',
-  'https://sportmancar.netlify.app',
-]);
-const originAllowed = origin => Boolean(origin) && (
-  configuredOrigins.includes(origin) || publicLandingOrigins.has(origin)
-  || /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(origin)
-  || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)
-  || /^http:\/\/(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+):\d+$/.test(origin)
-);
+const originAllowed = createOriginPolicy();
 
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    if (configuredOrigins.includes(origin)) return callback(null, true);
-    if (publicLandingOrigins.has(origin)) return callback(null, true);
-    if (/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(origin)) return callback(null, true);
-    if (/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return callback(null, true);
-    if (/^http:\/\/(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+):\d+$/.test(origin)) {
-      return callback(null, true);
-    }
+    if (originAllowed(origin)) return callback(null, true);
     return callback(new Error(`Origen no permitido por CORS: ${origin}`));
   },
   credentials: true,
@@ -79,6 +63,8 @@ const limiter = rateLimit({
   message: { success: false, error: 'Demasiadas solicitudes, intenta más tarde' },
 });
 app.use(limiter);
+const networkAccess = require('./services/NetworkAccessPolicy').createNetworkAccessPolicy();
+app.use('/api', networkAccess.middleware);
 
 // ════════════════════════════════════════
 // MIDDLEWARE DE PARSING
@@ -148,10 +134,11 @@ const PORT = process.env.SERVER_PORT || 5000;
 const HOST = process.env.SERVER_HOST || '0.0.0.0';
 
 const server = http.createServer(app);
-app.realtime = new RealtimeService().attach(server,originAllowed);
+app.realtime = new RealtimeService().attach(server,originAllowed, req =>
+  networkAccess.check(require('proxy-addr')(req, app.get('trust proxy fn'))));
 require('./services/ResourceTelemetryService').notify = () => app.realtime.publish('resources');
 server.listen(PORT, HOST, () => {
-  PracticalSessionAutoCloseService.start();
+  if (!(process.env.NODE_ENV === 'development' && process.env.LOCAL_DEVELOPMENT_ONLY === 'true')) PracticalSessionAutoCloseService.start();
   console.log(`
 ╔═══════════════════════════════════════╗
 ║     🏫 SportmancarERP API v1.0.0     ║

@@ -3,8 +3,10 @@ const { createError } = require('../middleware/errorHandler');
 
 const CAPACITY = 30;
 const REGULAR_CADENCE_ANCHOR = '2026-09-21';
+const REGULAR_NOVEMBER_START = '2026-11-09';
 const INTENSIVE_MORNING_CADENCE_ANCHOR = '2026-09-26';
 const INTENSIVE_AFTERNOON_CADENCE_ANCHOR = '2026-10-03';
+const INTENSIVE_AFTERNOON_NOVEMBER_START = '2026-11-14';
 const selections = {
   presencial_regular: { modality:'presencial_regular', startTime:'18:00', endTime:'20:00', durationDays:5 },
   presencial_intensivo: { modality:'presencial_intensivo', startTime:'08:00', endTime:'12:30', durationDays:2 },
@@ -25,8 +27,11 @@ function currentOrNextWeekday(value,weekday){const date=new Date(`${iso(value)}T
 function currentWeekMonday(value){const date=new Date(`${iso(value)}T12:00:00`);const day=date.getDay();if(day===0)return nextWeekday(value,1);if(day===6)return nextWeekday(value,1);date.setDate(date.getDate()-(day-1));return iso(date);}
 function currentOrNextRegularMonday(value){
   const current=iso(value);
+  // Desde el cierre de octubre, el nuevo calendario regular inicia el 9/11.
+  const anchor=current>='2026-10-30'?REGULAR_NOVEMBER_START:REGULAR_CADENCE_ANCHOR;
+  if(current>='2026-10-30'&&current<=anchor)return anchor;
   const monday=currentWeekMonday(value);
-  const elapsedDays=Math.round((new Date(`${monday}T12:00:00`)-new Date(`${REGULAR_CADENCE_ANCHOR}T12:00:00`))/86400000);
+  const elapsedDays=Math.round((new Date(`${monday}T12:00:00`)-new Date(`${anchor}T12:00:00`))/86400000);
   const remainder=((elapsedDays%14)+14)%14;
   const start=remainder===0?monday:addDays(monday,14-remainder);
   return current<=addDays(start,1)?start:addDays(start,14);
@@ -65,7 +70,7 @@ class TheoryCourseService {
   static initialStart(option,fromDate=new Date()) {
     if(option.modality==='presencial_regular')return currentOrNextRegularMonday(fromDate);
     const anchor=option.startTime==='13:00'
-      ? INTENSIVE_AFTERNOON_CADENCE_ANCHOR
+      ? (iso(fromDate)>='2026-10-30'?INTENSIVE_AFTERNOON_NOVEMBER_START:INTENSIVE_AFTERNOON_CADENCE_ANCHOR)
       : INTENSIVE_MORNING_CADENCE_ANCHOR;
     return currentOrNextIntensiveSaturday(fromDate,anchor);
   }

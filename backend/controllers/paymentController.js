@@ -97,11 +97,12 @@ class PaymentController {
         });
       }
 
-      if (String(method).trim().toLowerCase() === 'transferencia') {
-        const transfer = await CashOperationsService.createTransfer({ cedula, enrollmentId,serviceTransactionId, amount, reference, transferDate: req.body.transferDate || new Date().toISOString().slice(0,10), bank: req.body.bank, proofUrl:req.body.proofUrl }, req.user, req.authorization, req.requestContext);
-        return res.status(202).json({ success:true, data:{ pendingTransfer:true, transfer } });
-      }
-      const result = await PaymentService.registerPayment({
+      const execute = async client => {
+       if (String(method).trim().toLowerCase() === 'transferencia') {
+        const transfer = await CashOperationsService.createTransfer({ cedula, enrollmentId,serviceTransactionId, amount, reference, transferDate: req.body.transferDate || new Date().toISOString().slice(0,10), bank: req.body.bank, proofUrl:req.body.proofUrl }, req.user, req.authorization, req.requestContext, client);
+        return { status:202, body:{ success:true, data:{ pendingTransfer:true, transfer } } };
+       }
+       const result = await PaymentService.registerPayment({
         cedula,
         amount,
         method,
@@ -115,12 +116,15 @@ class PaymentController {
         globalAccess: Boolean(req.authorization?.global),
         collectionBranchId: req.authorization?.global ? null : effectiveCollectionBranchId(req),
         requestContext: req.requestContext,
-      });
-
-      return res.status(201).json({
-        success: true,
-        data: result,
-      });
+       }, client);
+       return { status:201, body:{ success:true, data:result } };
+      };
+      const key = req.get('Idempotency-Key') || req.body.operationKey;
+      if (!key && process.env.NODE_ENV === 'production') throw require('../middleware/errorHandler').createError(428, 'Se requiere una clave de operacion para registrar el cobro');
+      const response = key
+        ? await require('../services/PaymentOperation').run(req.user.id,key,{body:req.body,branch:req.authorization?.branchId,coverage:req.authorization?.operationalCoverage?.operational_branch_id || null,global:!!req.authorization?.global},execute)
+        : await execute(undefined);
+      return res.status(response.status).json(response.body);
     } catch (error) {
       next(error);
     }

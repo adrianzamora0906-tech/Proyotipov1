@@ -68,7 +68,7 @@ class StudentSuspensionService {
         const practiceIds = snapshot.records.additional_driving_practices.filter(row => ['SCHEDULED','IN_PROGRESS'].includes(row.status)).map(row => row.id);
         restoreSlots.push(...(await client.query(`SELECT p.instructor_id,d::date schedule_date,p.daily_start_time start_time,
           (p.daily_start_time+INTERVAL '100 minutes')::time end_time FROM additional_driving_practices p
-          CROSS JOIN LATERAL generate_series(p.start_date,p.start_date+(p.number_of_days-1),INTERVAL '1 day') d
+          CROSS JOIN LATERAL unnest(additional_practice_dates(p.branch_id,p.start_date,p.number_of_days)) d
           WHERE p.id=ANY($1::uuid[])`, [practiceIds])).rows);
         const checked = new Set();
         for (const slot of restoreSlots) {
@@ -94,7 +94,7 @@ class StudentSuspensionService {
               AND b.schedule_date=$3::date AND b.schedule_date>=CURRENT_DATE AND b.start_time<$5::time AND b.end_time>$4::time
             UNION ALL SELECT 1 FROM additional_driving_practices p
             WHERE p.instructor_id=$1 AND p.student_id<>$2 AND p.status IN ('SCHEDULED','IN_PROGRESS')
-              AND $3::date>=CURRENT_DATE AND $3::date BETWEEN p.start_date AND p.start_date+(p.number_of_days-1)
+              AND $3::date>=CURRENT_DATE AND $3::date=ANY(additional_practice_dates(p.branch_id,p.start_date,p.number_of_days))
               AND p.daily_start_time<$5::time AND (p.daily_start_time+INTERVAL '100 minutes')::time>$4::time
           `, [slot.instructor_id, id, slot.schedule_date, slot.start_time, slot.end_time]);
           if (conflict.rowCount) throw createError(409, 'No se puede habilitar: uno de sus horarios ya esta ocupado. Coordina el horario antes de habilitarlo.');

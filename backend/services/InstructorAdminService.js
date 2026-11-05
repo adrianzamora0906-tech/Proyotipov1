@@ -256,7 +256,7 @@ class InstructorAdminService {
       const dates = (await client.query(`
         SELECT day::date schedule_date
         FROM generate_series($1::date,$2::date,INTERVAL '1 day') day
-        WHERE EXISTS (
+        WHERE NOT is_course_holiday($6::uuid,day::date) AND EXISTS (
           SELECT 1
           FROM instructor_availability ia
           WHERE ia.instructor_id=$3
@@ -266,7 +266,7 @@ class InstructorAdminService {
             AND ia.active=TRUE
         )
         ORDER BY day
-      `, [cycle.start_date, cycle.end_date, instructorId, startTime, endTime])).rows.map(row => toDateString(new Date(row.schedule_date)));
+      `, [cycle.start_date, cycle.end_date, instructorId, startTime, endTime,cycle.branch_id])).rows.map(row => toDateString(new Date(row.schedule_date)));
       if (!dates.length) throw createError(422, 'El curso no tiene fechas para ese horario');
       if (!dates.includes(date)) throw createError(422, 'El horario seleccionado no esta activo en esa fecha');
 
@@ -664,7 +664,7 @@ class InstructorAdminService {
     const availableHoursResult = result.rows.length ? await db.query(`
       WITH selected_cycles AS (
         SELECT DISTINCT ON (member.instructor_id)
-          member.instructor_id, cc.id AS cycle_id, cc.start_date, cc.end_date
+          member.instructor_id, cc.id AS cycle_id,cc.branch_id, cc.start_date, cc.end_date
         FROM course_cycles cc
         CROSS JOIN LATERAL (
           SELECT cci.instructor_id
@@ -707,6 +707,7 @@ class InstructorAdminService {
         JOIN instructor_availability ia
           ON ia.instructor_id = selected.instructor_id AND ia.active = TRUE
          AND ia.weekday = EXTRACT(DOW FROM dates)::int
+         AND NOT is_course_holiday(selected.branch_id,dates::date)
       )
       SELECT configured.instructor_id,
         COUNT(*) FILTER (WHERE NOT EXISTS (
@@ -847,6 +848,7 @@ class InstructorAdminService {
         : availability.rows.filter(slot => !matchesPrioritySlot(slot));
     const cyclesResult = await db.query(`
       SELECT cc.id, cc.code, cc.course_id, cc.branch_id, cc.start_date, cc.end_date, cc.vehicle_type, cc.modality,
+             cc.class_dates,cc.holiday_dates,
              CURRENT_DATE AS today
       FROM course_cycles cc
       WHERE cc.branch_id = $2
@@ -854,12 +856,17 @@ class InstructorAdminService {
         AND cc.deleted_at IS NULL
         AND cc.status <> 'cancelado'
         AND cc.modality = $3
-        AND EXISTS (
+        AND (EXISTS (
           SELECT 1 FROM course_cycle_instructors cci
           WHERE cci.cycle_id = cc.id
             AND cci.instructor_id = $1
             AND cci.active = TRUE
-        )
+        ) OR EXISTS (
+          SELECT 1 FROM instructor_group_members member
+          WHERE member.group_id=cc.group_id AND member.instructor_id=$1
+            AND member.active=TRUE AND member.ended_at IS NULL
+            AND member.joined_at::date<=cc.end_date
+        ))
       ORDER BY cc.start_date ASC,cc.end_date ASC,cc.code ASC
     `, [instructorId, effectiveBranchId, modality]);
     const cycles = cyclesResult.rows;
@@ -898,6 +905,9 @@ class InstructorAdminService {
     const queryEnd = new Date(rangeEnd);
     queryEnd.setDate(queryEnd.getDate() + 1);
     const calendarDates = [];
+    const holidayRows=await db.query('SELECT holiday_date FROM course_holidays WHERE active=TRUE AND (branch_id IS NULL OR branch_id=$1)',[nextCycle.branch_id]);
+    const excludedDates=new Set(holidayRows.rows.map(row=>toDateString(row.holiday_date)));
+    nextCycle.holiday_dates=[...(nextCycle.holiday_dates||[]),...holidayRows.rows.map(row=>row.holiday_date)];
     let calendarAvailability = branchAvailability;
     if (modality === 'intensivo') {
       const templates = await db.query(`SELECT t.day_of_week,t.start_time,t.end_time
@@ -917,6 +927,7 @@ class InstructorAdminService {
       }
     }
 
+    for(let index=calendarDates.length-1;index>=0;index--)if(excludedDates.has(toDateString(calendarDates[index])))calendarDates.splice(index,1);
     const overrides = await this.getAvailabilityOverrides(scheduleUser, instructorId, toDateString(rangeStart), toDateString(queryEnd));
     const overrideBySlot = new Map(overrides.map(item => ([
       `${item.schedule_date.toISOString?.().slice(0, 10) || String(item.schedule_date).slice(0, 10)}:${item.start_time}:${item.end_time}`,
@@ -963,7 +974,7 @@ class InstructorAdminService {
     `, [instructorId, toDateString(rangeStart), toDateString(queryEnd), scheduleBranchId]);
 
     const additionalPractices = await db.query(`
-      SELECT ap.id,ap.student_id,ap.branch_id,day_offset,
+      SELECT ap.id,ap.student_id,ap.branch_id,day_offset,practice_index,
         ap.start_date+day_offset+ap.daily_start_time scheduled_start,
         ap.start_date+day_offset+ap.daily_start_time+INTERVAL '100 minutes' scheduled_end,
         CASE WHEN ap.branch_id=$4 THEN s.first_name ELSE 'Ocupado en' END first_name,
@@ -975,13 +986,13 @@ class InstructorAdminService {
       FROM additional_driving_practices ap
       JOIN students s ON s.id=ap.student_id AND s.status<>'inhabilitado'
       JOIN branches b ON b.id=ap.branch_id
-      CROSS JOIN LATERAL generate_series(0,ap.number_of_days-1) day_offset
+      CROSS JOIN LATERAL (SELECT (d-ap.start_date)::int day_offset,(ordinality-1)::int practice_index FROM unnest(additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days)) WITH ORDINALITY AS dates(d,ordinality)) practice_dates
       WHERE ap.instructor_id=$1 AND ap.status IN ('SCHEDULED','IN_PROGRESS')
-        AND day_offset>=ap.completed_days
+        AND practice_index>=ap.completed_days
         AND ap.start_date+day_offset >= $2::date AND ap.start_date+day_offset < $3::date
     `, [instructorId, toDateString(rangeStart), toDateString(queryEnd), scheduleBranchId]);
     sessions.rows.push(...additionalPractices.rows.map(practice => ({
-      ...practice, status: 'PROGRAMADA', session_number: practice.day_offset+1,
+      ...practice, status: 'PROGRAMADA', session_number: practice.practice_index+1,
     })));
 
     const theorySchedules = await db.query(`
@@ -1291,6 +1302,8 @@ class InstructorAdminService {
         AND block.schedule_date >= $2::date
         AND block.schedule_date < ($2::date+INTERVAL '1 month')`, [scheduleBranchId, `${month}-01`,modality,vehicleType,instructorsResult.rows.map(item=>item.id)]);
     const branch = await db.query('SELECT name FROM branches WHERE id=$1', [scheduleBranchId]);
+    const monthHolidays=await db.query('SELECT holiday_date FROM course_holidays WHERE active=TRUE AND (branch_id IS NULL OR branch_id=$1)',[scheduleBranchId]);
+    const monthExcluded=new Set(monthHolidays.rows.map(row=>toDateString(row.holiday_date)));
     const minimum = new Date(); minimum.setHours(0,0,0,0); minimum.setDate(minimum.getDate()+1);
     const dateOnly=value=>value instanceof Date?value.toISOString().slice(0,10):String(value).slice(0,10);
     const assignments=assignmentsResult.rows.map(item=>({...item,schedule_date:dateOnly(item.schedule_date)}));
@@ -1301,7 +1314,7 @@ class InstructorAdminService {
         AND instructor_id=ANY($1::uuid[])
     `, [instructorsResult.rows.map(item => item.id), `${month}-01`]);
     const cursor=new Date(`${month}-01T00:00:00`),days=[];
-    while(cursor.getMonth()===Number(month.slice(5,7))-1){const date=cursor.toISOString().slice(0,10),weekday=cursor.getDay();const details=instructorsResult.rows.map(instructor=>{const slots=availabilityResult.rows.filter(slot=>String(slot.instructor_id)===String(instructor.id)&&Number(slot.day_of_week)===weekday).map(slot=>{const assignment=assignments.find(item=>String(item.instructor_id)===String(instructor.id)&&item.schedule_date===date&&item.start_time===slot.start_time&&item.end_time===slot.end_time);const override=overridesResult.rows.find(item=>String(item.instructor_id)===String(instructor.id)&&String(item.schedule_date).slice(0,10)===date&&item.start_time===slot.start_time&&item.end_time===slot.end_time);const status=override?.status==='reserved'?'reserved':override?.status==='blocked'?'occupied':assignment?'occupied':'available';return{startTime:slot.start_time,endTime:slot.end_time,status,busy:status!=='available',student:assignment?.student||null,course:assignment?.course||null,workBranch:assignment?.work_branch||null};});const busy=slots.length>0&&slots.every(slot=>slot.status!=='available');return{id:instructor.id,name:instructor.name,vehicleType:instructor.vehicle_type,homeBranchId:instructor.home_branch_id,priorityBranchId:instructor.priority_branch_id,priorityBranch:instructor.priority_branch,instructors:1,busy,slots};}).filter(item=>item.slots.length);days.push({date,total:details.length,busy:details.filter(item=>item.busy).length,available:details.filter(item=>!item.busy).length,groups:details});cursor.setDate(cursor.getDate()+1);}
+    while(cursor.getMonth()===Number(month.slice(5,7))-1){const date=cursor.toISOString().slice(0,10),weekday=cursor.getDay();if(monthExcluded.has(date)){cursor.setDate(cursor.getDate()+1);continue;}const details=instructorsResult.rows.map(instructor=>{const slots=availabilityResult.rows.filter(slot=>String(slot.instructor_id)===String(instructor.id)&&Number(slot.day_of_week)===weekday).map(slot=>{const assignment=assignments.find(item=>String(item.instructor_id)===String(instructor.id)&&item.schedule_date===date&&item.start_time===slot.start_time&&item.end_time===slot.end_time);const override=overridesResult.rows.find(item=>String(item.instructor_id)===String(instructor.id)&&String(item.schedule_date).slice(0,10)===date&&item.start_time===slot.start_time&&item.end_time===slot.end_time);const status=override?.status==='reserved'?'reserved':override?.status==='blocked'?'occupied':assignment?'occupied':'available';return{startTime:slot.start_time,endTime:slot.end_time,status,busy:status!=='available',student:assignment?.student||null,course:assignment?.course||null,workBranch:assignment?.work_branch||null};});const busy=slots.length>0&&slots.every(slot=>slot.status!=='available');return{id:instructor.id,name:instructor.name,vehicleType:instructor.vehicle_type,homeBranchId:instructor.home_branch_id,priorityBranchId:instructor.priority_branch_id,priorityBranch:instructor.priority_branch,instructors:1,busy,slots};}).filter(item=>item.slots.length);days.push({date,total:details.length,busy:details.filter(item=>item.busy).length,available:details.filter(item=>!item.busy).length,groups:details});cursor.setDate(cursor.getDate()+1);}
     return {month,modality,vehicleType,branch:branch.rows[0]?.name||'',minimumBookingDate:minimum.toISOString().slice(0,10),groups:instructorsResult.rows,days};
   }
 

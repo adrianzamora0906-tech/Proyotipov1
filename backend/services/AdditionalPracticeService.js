@@ -14,7 +14,7 @@ class AdditionalPracticeService {
     const conflicts = await db.query(`
       WITH requested AS (
         SELECT d::date AS schedule_day, $3::time start_time, ($3::time + INTERVAL '100 minutes')::time end_time
-        FROM generate_series($2::date, $2::date + 60, INTERVAL '1 day') d
+        FROM generate_series($2::date, $2::date + 90, INTERVAL '1 day') d
       ), occupied AS (
         SELECT a.schedule_date AS schedule_day FROM course_cycle_schedule_assignments a JOIN requested r ON r.schedule_day=a.schedule_date
         WHERE a.instructor_id=$1 AND a.status='activo' AND a.start_time<r.end_time AND a.end_time>r.start_time
@@ -27,7 +27,7 @@ class AdditionalPracticeService {
           AND ps.scheduled_start::time<r.end_time AND ps.scheduled_end::time>r.start_time
         UNION
         SELECT d::date AS schedule_day FROM additional_driving_practices ap
-        CROSS JOIN LATERAL generate_series(ap.start_date, ap.start_date + (ap.number_of_days - 1), INTERVAL '1 day') d
+        CROSS JOIN LATERAL unnest(additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days)) d
         JOIN requested r ON r.schedule_day=d::date
         WHERE ap.instructor_id=$1 AND ap.status IN ('SCHEDULED','IN_PROGRESS')
           AND ap.daily_start_time<r.end_time AND (ap.daily_start_time + INTERVAL '100 minutes')::time>r.start_time
@@ -36,18 +36,11 @@ class AdditionalPracticeService {
     const instructor = await db.query(`SELECT TRIM(CONCAT(u.first_name,' ',u.last_name)) name FROM instructor_profiles ip JOIN users u ON u.id=ip.user_id WHERE ip.id=$1`, [instructorId]);
     const dateKey = value => value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
     const occupiedDays = new Set(conflicts.rows.map(row => dateKey(row.schedule_day)));
-    const requestedStart = new Date(`${startDate}T00:00:00Z`);
-    const windowIsFree = candidate => {
-      for (let offset=0; offset<days; offset+=1) {
-        const day = new Date(candidate); day.setUTCDate(day.getUTCDate()+offset);
-        if (occupiedDays.has(day.toISOString().slice(0,10))) return false;
-      }
-      return true;
-    };
-    const available = windowIsFree(requestedStart);
-    const candidate = new Date(requestedStart);
-    while (!windowIsFree(candidate) && candidate < new Date(requestedStart.getTime() + 60*86400000)) candidate.setUTCDate(candidate.getUTCDate()+1);
-    const availableFrom = candidate.toISOString().slice(0,10);
+    const calendars=(await db.query(`SELECT additional_practice_dates($1,$2::date+offset_day,$3) dates FROM generate_series(0,60) offset_day`,[branchId,startDate,days])).rows.map(row=>row.dates.map(dateKey));
+    const windowIsFree = dates => dates.length===days&&dates.every(day=>!occupiedDays.has(day));
+    const available = calendars[0][0]===startDate&&windowIsFree(calendars[0]);
+    const candidate = calendars.find(windowIsFree);
+    const availableFrom = candidate?.[0]||null;
     const alternative = await db.query(`
       SELECT ip.id, TRIM(CONCAT(u.first_name,' ',u.last_name)) name
       FROM instructor_profiles ip JOIN users u ON u.id=ip.user_id
@@ -55,18 +48,18 @@ class AdditionalPracticeService {
         AND NOT EXISTS (
           SELECT 1 FROM course_cycle_schedule_assignments a
           WHERE a.instructor_id=ip.id AND a.status='activo'
-            AND a.schedule_date BETWEEN $3::date AND $3::date + ($5::int-1)
+            AND a.schedule_date=ANY(additional_practice_dates($1,$3,$5))
             AND a.start_time < ($4::time + INTERVAL '100 minutes')::time AND a.end_time>$4::time
         )
         AND NOT EXISTS (
           SELECT 1 FROM referred_instructor_schedule_blocks block
           WHERE block.instructor_id=ip.id AND block.status='activo'
-            AND block.schedule_date BETWEEN $3::date AND $3::date + ($5::int-1)
+            AND block.schedule_date=ANY(additional_practice_dates($1,$3,$5))
             AND block.start_time < ($4::time + INTERVAL '100 minutes')::time AND block.end_time>$4::time
         )
       ORDER BY name LIMIT 1
     `, [branchId, instructorId, startDate, startTime, days]);
-    return { available, available_from: availableFrom, conflict_dates: [...occupiedDays], instructor_name: instructor.rows[0]?.name, alternative_instructor: alternative.rows[0] || null };
+    return { available, available_from: availableFrom, schedule_dates:calendars[0], end_date:calendars[0].at(-1), conflict_dates: [...occupiedDays], instructor_name: instructor.rows[0]?.name, alternative_instructor: alternative.rows[0] || null };
   }
 
   static async resolveByIdentification(identification) {

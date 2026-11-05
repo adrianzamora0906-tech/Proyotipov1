@@ -42,6 +42,13 @@ const {chromium}=require('C:/Users/USUARIO/AppData/Local/npm-cache/_npx/e41f203b
       await page.evaluate(()=>{window.history.replaceState=()=>{};});
       await page.locator('[type=submit]').click();
       await page.waitForFunction(()=>window.passwordArgs);
+      await page.locator('#password-success-close').waitFor();
+      assert.equal(await page.locator('#password-change-title').textContent(),'Contraseña actualizada');
+      assert.equal(await page.locator('[name=currentPassword]').count(),0);
+      assert.equal(await page.locator('#password-success-close').evaluate(node=>node===document.activeElement),true);
+      await page.screenshot({path:`.tmp/email-verification/success-${width}.png`});
+      await page.locator('#password-success-close').click();
+      assert.equal(await page.locator('[role=dialog]').count(),0);
       assert.deepEqual(await page.evaluate(()=>window.passwordArgs[2]),{challengeId:'309e656a-a0c0-4db2-a845-f86418fc806a',code:'ABC234'});
       await page.evaluate(()=>{window.initialVerified=true;window.requests=[];new window.ProfileView().openPasswordModal(true);});
       await page.locator('[name=currentPassword]').fill('Anterior9!');

@@ -1,3 +1,4 @@
+const StudentCounts=require('./InstructorStudentCounts');
 const db = require('../config/database');
 const { createError } = require('../middleware/errorHandler');
 const { mileageEnabledSql, mileageRequiredSql } = require('./sessionMileage');
@@ -455,6 +456,7 @@ class InstructorService {
         pendingToday,
         pendingAttendance: Number(pendingAttendance.rows[0]?.count || 0) + expiredToday,
         monthlyStudents: monthlyActivity.rows[0]?.students || 0,
+        monthlyStudentCounts: await StudentCounts.monthlyCounts(instructor.id),
         monthlyCompletedSessions: monthlyActivity.rows[0]?.completed_sessions || 0,
         monthlyHours: monthlyActivity.rows[0]?.hours || 0,
         openIncidents: openIncidents.rows.length,
@@ -485,7 +487,7 @@ class InstructorService {
   static async getAdditionalPracticeScheduleRoster(instructorId) {
     return db.query(`SELECT 'practice'::text row_type,CONCAT('practice:',ap.id) cycle_id,
       'Horas practicas'::text cycle_code,'Practicas adicionales'::text course_name,
-      ap.start_date,(ap.start_date+ap.number_of_days-1) end_date,
+      ap.start_date,(additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days))[ap.number_of_days] end_date,
       s.id student_id,s.identification,CONCAT_WS(' ',s.first_name,s.last_name) student_name,
       s.phone,s.notes student_notes,ap.daily_start_time::text start_time,
       (ap.daily_start_time+INTERVAL '100 minutes')::time::text end_time,
@@ -493,7 +495,7 @@ class InstructorService {
       FROM additional_driving_practices ap
       JOIN students s ON s.id=ap.student_id AND s.status<>'inhabilitado'
       WHERE ap.instructor_id=$1 AND ap.status IN ('SCHEDULED','IN_PROGRESS')
-        AND ap.start_date+ap.number_of_days-1 >= (NOW() AT TIME ZONE 'America/Guayaquil')::date
+        AND (additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days))[ap.number_of_days] >= (NOW() AT TIME ZONE 'America/Guayaquil')::date
       ORDER BY ap.start_date,ap.daily_start_time,s.last_name,ap.id`,[instructorId]);
   }
 
@@ -623,15 +625,15 @@ class InstructorService {
         b.name branch_name,'Practicas adicionales'::text course_name,
         ap.start_date+day_offset+ap.daily_start_time scheduled_start,
         ap.start_date+day_offset+ap.daily_start_time+INTERVAL '100 minutes' scheduled_end,
-        day_offset+1 session_number,'PROGRAMADA'::text status,
+        practice_index+1 session_number,'PROGRAMADA'::text status,
         TRUE is_schedule_only,TRUE is_additional_practice
       FROM additional_driving_practices ap
       JOIN students s ON s.id=ap.student_id AND s.status<>'inhabilitado'
       JOIN branches b ON b.id=ap.branch_id
       LEFT JOIN branches pickup ON pickup.id=COALESCE(s.pickup_branch_id,s.branch_id)
-      CROSS JOIN LATERAL generate_series(0,ap.number_of_days-1) day_offset
+      CROSS JOIN LATERAL (SELECT (d-ap.start_date)::int day_offset,(ordinality-1)::int practice_index FROM unnest(additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days)) WITH ORDINALITY AS dates(d,ordinality)) practice_dates
       WHERE ap.instructor_id=$1 AND ap.status IN ('SCHEDULED','IN_PROGRESS')
-        AND day_offset>=ap.completed_days
+        AND practice_index>=ap.completed_days
         AND ap.start_date+day_offset+ap.daily_start_time BETWEEN $2::timestamp AND $3::timestamp
         ${additionalWhere}
     `, additionalParams);
@@ -714,7 +716,7 @@ class InstructorService {
     if (!ids.length) return [];
     const result = await queryable.query(`
       WITH configured_slots AS (
-        SELECT DISTINCT cc.id cycle_id,cc.start_date,cc.end_date,t.day_of_week,t.start_time,t.end_time
+        SELECT DISTINCT cc.id cycle_id,cc.branch_id,cc.start_date,cc.end_date,t.day_of_week,t.start_time,t.end_time
         FROM course_cycles cc
         JOIN branch_course_programs p ON p.branch_id=cc.branch_id AND p.course_id=cc.course_id
         JOIN branch_course_schedule_templates t ON t.program_id=p.id AND t.modality=cc.modality AND t.active=TRUE
@@ -723,7 +725,7 @@ class InstructorService {
         SELECT slot.*,day::date schedule_date
         FROM configured_slots slot
         CROSS JOIN LATERAL generate_series(slot.start_date,slot.end_date,INTERVAL '1 day') day
-        WHERE EXTRACT(DOW FROM day)=slot.day_of_week
+        WHERE EXTRACT(DOW FROM day)=slot.day_of_week AND NOT is_course_holiday(slot.branch_id,day::date)
       )
       SELECT cycle_id,start_time,end_time,array_agg(schedule_date ORDER BY schedule_date) schedule_dates
       FROM slot_dates selected
@@ -900,10 +902,11 @@ class InstructorService {
     const result = await db.query(`
       SELECT ap.id,ap.student_id,CONCAT_WS(' ',s.first_name,s.last_name) name,s.email,
         s.status academic_status,b.name branch,ap.number_of_days,ap.completed_days,
-        ap.start_date+ap.completed_days+ap.daily_start_time next_session,
+        ARRAY(SELECT DISTINCT to_char(d,'YYYY-MM') FROM unnest(additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days)) d) session_months,
+        (additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days))[ap.completed_days+1]+ap.daily_start_time next_session,
         CASE WHEN ap.completed_days>0 THEN 'completed'
           WHEN (NOW() AT TIME ZONE 'America/Guayaquil')::date BETWEEN ap.start_date
-            AND ap.start_date+ap.number_of_days-1
+            AND (additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days))[ap.number_of_days]
             AND (NOW() AT TIME ZONE 'America/Guayaquil')::time>=ap.daily_start_time
             AND (NOW() AT TIME ZONE 'America/Guayaquil')::time<ap.daily_start_time+INTERVAL '100 minutes'
           THEN 'active' ELSE 'upcoming' END stage
@@ -915,6 +918,7 @@ class InstructorService {
     `, params);
     return result.rows.filter(row => !query.stage || row.stage===query.stage).map(row => ({
       additionalPracticeId: row.id, isAdditionalPractice: true, studentId: row.student_id,
+      formationCategory: 'additional', sessionMonths: row.session_months || [],
       name: row.name, email: row.email, branch: row.branch, course: 'Practicas adicionales',
       completedSessions: row.completed_days, totalSessions: row.number_of_days,
       progress: Math.round(row.completed_days / row.number_of_days * 100),
@@ -1004,7 +1008,7 @@ class InstructorService {
               WHERE exam.enrollment_id=eia.enrollment_id AND exam.instructor_id=eia.instructor_id
                 AND exam.deleted_at IS NULL)
         )
-        SELECT e.id AS enrollment_id, e.status AS enrollment_status, s.id AS student_id,
+        SELECT e.id AS enrollment_id, e.status AS enrollment_status, s.id AS student_id, ${StudentCounts.categorySql} AS formation_category,
                s.first_name, s.last_name, s.email,
                s.status AS academic_status, b.name AS branch_name, c.name AS course_name,
                u.first_name AS instructor_first_name, u.last_name AS instructor_last_name,
@@ -1038,9 +1042,11 @@ class InstructorService {
 
       return {
         additionalPractices,
+        monthlyStudentCounts: await StudentCounts.monthlyCounts(instructor.id),
         data: result.rows.map(row => ({
           enrollmentId: row.enrollment_id,
           studentId: row.student_id,
+          formationCategory: row.formation_category,
           name: `${row.first_name} ${row.last_name}`,
           email: row.email,
           course: row.course_name,
@@ -1074,7 +1080,7 @@ class InstructorService {
     }
 
     const result = await db.query(`
-      SELECT e.id AS enrollment_id, e.status AS enrollment_status, s.id AS student_id,
+      SELECT e.id AS enrollment_id, e.status AS enrollment_status, s.id AS student_id, ${StudentCounts.categorySql} AS formation_category,
              s.first_name, s.last_name, s.email,
              s.status AS academic_status, b.name AS branch_name, c.name AS course_name,
              u.first_name AS instructor_first_name, u.last_name AS instructor_last_name,
@@ -1112,9 +1118,11 @@ class InstructorService {
 
     return {
       additionalPractices,
+        monthlyStudentCounts: await StudentCounts.monthlyCounts(instructor.id),
       data: result.rows.map(row => ({
         enrollmentId: row.enrollment_id,
         studentId: row.student_id,
+          formationCategory: row.formation_category,
         name: `${row.first_name} ${row.last_name}`,
         email: row.email,
         course: row.course_name,

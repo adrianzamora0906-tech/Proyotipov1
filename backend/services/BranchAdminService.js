@@ -118,6 +118,27 @@ function nextAllowedCourseDate(anchorValue, allowedDays, steps = 1) {
 }
 
 class BranchAdminService {
+  static async salesPoint(auth,filters={}) {
+    if(!auth?.global&&!auth?.branchId)throw createError(403,'Sucursal autorizada requerida');
+    const date=String(filters.date||'');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date)throw createError(422,'Fecha de venta invalida');
+    const ids=String(filters.branchIds||'').split(',').filter(Boolean);
+    if(!ids.length||ids.length>100||ids.some(id=>!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))throw createError(422,'Sucursales invalidas');
+    const {params,where}=this.buildScope(auth,{});
+    params.push(ids,date);where.push(`b.id=ANY($${params.length-1}::uuid[])`,`e.enrollment_date=$${params.length}::date`);
+    where.push("LOWER(e.status) NOT IN ('cancelado','inhabilitado')","s.status<>'inhabilitado'");
+    if(filters.courseType){
+      if(!['moto','carro'].includes(filters.courseType))throw createError(422,'Tipo de curso invalido');
+      params.push(filters.courseType);where.push(`LOWER(c.name) LIKE CASE WHEN $${params.length}='moto' THEN '%moto%' ELSE '%automóvil%' END`);
+    }
+    const page=Math.max(1,Math.floor(Number(filters.page)||1));
+    params.push((page-1)*100);
+    const result=await db.query(`SELECT concat_ws(' ',s.first_name,s.last_name) name,c.name course,b.name branch,COUNT(*) OVER()::int total
+      FROM enrollments e JOIN students s ON s.id=e.student_id JOIN courses c ON c.id=e.course_id JOIN branches b ON b.id=e.sales_branch_id
+      WHERE ${where.join(' AND ')} ORDER BY s.last_name,s.first_name,e.id LIMIT 100 OFFSET $${params.length}`,params);
+    return {items:result.rows.map(({total,...row})=>row),total:result.rows[0]?.total||0,page,hasMore:page*100<(result.rows[0]?.total||0)};
+  }
+
   static buildScope(auth, filters = {}) {
     const params = [];
     const where = ['1=1'];
@@ -199,6 +220,15 @@ class BranchAdminService {
     const count = await db.query(`SELECT COUNT(*)::int total FROM branches b WHERE ${where.join(' AND ')}`, countParams);
 
     const courseType = ['moto', 'carro'].includes(filters.courseType) ? filters.courseType : null;
+    // Sales presentation is opt-in; administrative/academic consumers retain
+    // their existing branch and creation-date metrics.
+    const salesMetrics = filters.metricScope === 'sales';
+    const metricBranch = salesMetrics ? 'e.sales_branch_id' : 'e.branch_id';
+    const metricDate = salesMetrics ? 'e.enrollment_date' : 'e.created_at::date';
+    const metricSeller = salesMetrics ? 'COALESCE(e.sales_user_id,e.created_by)' : 'e.created_by';
+    const metricEligibility = salesMetrics
+      ? " AND LOWER(e.status) NOT IN ('cancelado','inhabilitado') AND EXISTS(SELECT 1 FROM students sale_student WHERE sale_student.id=e.student_id AND sale_student.status<>'inhabilitado')"
+      : '';
     params.push(courseType, dateFrom, dateTo);
     const courseTypeParam = params.length - 2;
     const dateFromParam = params.length - 1;
@@ -284,13 +314,13 @@ class BranchAdminService {
         SELECT json_agg(
           json_build_object(
             'date', calendar.metric_day::date,
-            'enrollments', (SELECT COUNT(*)::int FROM enrollments e JOIN courses c ON c.id=e.course_id WHERE e.branch_id=b.id AND e.created_at::date=calendar.metric_day::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)),
-            'income', (SELECT COALESCE(SUM(pd.amount),0)::numeric FROM payment_details pd JOIN payments p ON p.id=pd.payment_id JOIN enrollments e ON e.id=p.enrollment_id JOIN courses c ON c.id=e.course_id WHERE e.branch_id=b.id AND pd.status='ACTIVE' AND pd.created_at::date=calendar.metric_day::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)),
-            'students_with_payment', (SELECT COUNT(DISTINCT e.student_id)::int FROM payment_details pd JOIN payments p ON p.id=pd.payment_id JOIN enrollments e ON e.id=p.enrollment_id JOIN courses c ON c.id=e.course_id WHERE e.branch_id=b.id AND pd.status='ACTIVE' AND pd.created_at::date=calendar.metric_day::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)),
-            'fully_paid_enrollments', (SELECT COUNT(DISTINCT e.id)::int FROM enrollments e JOIN payments p ON p.enrollment_id=e.id JOIN courses c ON c.id=e.course_id WHERE e.branch_id=b.id AND p.status<>'anulado' AND p.balance=0 AND e.created_at::date=calendar.metric_day::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)),
+            'enrollments', (SELECT COUNT(*)::int FROM enrollments e JOIN courses c ON c.id=e.course_id WHERE ${metricBranch}=b.id${metricEligibility} AND ${metricDate}=calendar.metric_day::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)),
+            'income', (SELECT COALESCE(SUM(pd.amount),0)::numeric FROM payment_details pd JOIN payments p ON p.id=pd.payment_id JOIN enrollments e ON e.id=p.enrollment_id JOIN courses c ON c.id=e.course_id WHERE ${metricBranch}=b.id${metricEligibility} AND pd.status='ACTIVE' AND pd.created_at::date=calendar.metric_day::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)),
+            'students_with_payment', (SELECT COUNT(DISTINCT e.student_id)::int FROM payment_details pd JOIN payments p ON p.id=pd.payment_id JOIN enrollments e ON e.id=p.enrollment_id JOIN courses c ON c.id=e.course_id WHERE ${metricBranch}=b.id${metricEligibility} AND pd.status='ACTIVE' AND pd.created_at::date=calendar.metric_day::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)),
+            'fully_paid_enrollments', (SELECT COUNT(DISTINCT e.id)::int FROM enrollments e JOIN payments p ON p.enrollment_id=e.id JOIN courses c ON c.id=e.course_id WHERE ${metricBranch}=b.id${metricEligibility} AND p.status<>'anulado' AND p.balance=0 AND ${metricDate}=calendar.metric_day::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)),
             'active_students', (SELECT COUNT(DISTINCT ccsa.student_id)::int FROM course_cycle_schedule_assignments ccsa JOIN course_cycles cc ON cc.id=ccsa.cycle_id WHERE cc.branch_id=b.id AND cc.active=TRUE AND cc.deleted_at IS NULL AND ccsa.status='activo' AND ccsa.schedule_date=calendar.metric_day::date AND ($${courseTypeParam}::text IS NULL OR cc.vehicle_type=$${courseTypeParam})),
             'courses_started', (SELECT COUNT(*)::int FROM course_cycles cc WHERE cc.branch_id=b.id AND cc.active=TRUE AND cc.deleted_at IS NULL AND cc.start_date=calendar.metric_day::date AND ($${courseTypeParam}::text IS NULL OR cc.vehicle_type=$${courseTypeParam})),
-            'pending_balance', (SELECT COALESCE(SUM(p.balance),0)::numeric FROM payments p JOIN enrollments e ON e.id=p.enrollment_id JOIN courses c ON c.id=e.course_id WHERE e.branch_id=b.id AND p.status<>'anulado' AND e.created_at::date=calendar.metric_day::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END))
+            'pending_balance', (SELECT COALESCE(SUM(p.balance),0)::numeric FROM payments p JOIN enrollments e ON e.id=p.enrollment_id JOIN courses c ON c.id=e.course_id WHERE ${metricBranch}=b.id${metricEligibility} AND p.status<>'anulado' AND ${metricDate}=calendar.metric_day::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END))
           )
           ORDER BY calendar.metric_day
         ) points
@@ -308,16 +338,19 @@ class BranchAdminService {
           'last_activity', person.last_activity
         ) ORDER BY person.registered_students DESC, person.collected_amount DESC, person.full_name) people
         FROM (
-          SELECT u.id, NULLIF(TRIM(CONCAT(u.first_name,' ',u.last_name)),'') full_name, r.code role_code,
-            (SELECT COUNT(DISTINCT e.student_id)::int FROM enrollments e JOIN courses c ON c.id=e.course_id WHERE e.branch_id=b.id AND e.created_by=u.id AND e.created_at::date BETWEEN $${dateFromParam}::date AND $${dateToParam}::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)) registered_students,
-            (SELECT COUNT(DISTINCT e.id)::int FROM enrollments e JOIN courses c ON c.id=e.course_id JOIN payments p ON p.enrollment_id=e.id WHERE e.branch_id=b.id AND e.created_by=u.id AND p.status<>'anulado' AND p.balance=0 AND e.created_at::date BETWEEN $${dateFromParam}::date AND $${dateToParam}::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)) confirmed_enrollments,
-            (SELECT COUNT(*)::int FROM payment_details pd JOIN payments p ON p.id=pd.payment_id JOIN enrollments e ON e.id=p.enrollment_id JOIN courses c ON c.id=e.course_id WHERE e.branch_id=b.id AND pd.received_by=u.id AND pd.status='ACTIVE' AND pd.created_at::date BETWEEN $${dateFromParam}::date AND $${dateToParam}::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)) payments_count,
-            (SELECT COALESCE(SUM(pd.amount),0)::numeric FROM payment_details pd JOIN payments p ON p.id=pd.payment_id JOIN enrollments e ON e.id=p.enrollment_id JOIN courses c ON c.id=e.course_id WHERE e.branch_id=b.id AND pd.received_by=u.id AND pd.status='ACTIVE' AND pd.created_at::date BETWEEN $${dateFromParam}::date AND $${dateToParam}::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)) collected_amount,
-            (SELECT MAX(activity_at) FROM (SELECT MAX(e.created_at) activity_at FROM enrollments e WHERE e.branch_id=b.id AND e.created_by=u.id UNION ALL SELECT MAX(pd.created_at) FROM payment_details pd JOIN payments p ON p.id=pd.payment_id JOIN enrollments e ON e.id=p.enrollment_id WHERE e.branch_id=b.id AND pd.received_by=u.id AND pd.status='ACTIVE') activity) last_activity
+          SELECT DISTINCT ON (u.id) u.id, NULLIF(TRIM(CONCAT(u.first_name,' ',u.last_name)),'') full_name, r.code role_code,
+            (SELECT COUNT(DISTINCT ${salesMetrics ? 'e.id' : 'e.student_id'})::int FROM enrollments e JOIN courses c ON c.id=e.course_id WHERE ${metricBranch}=b.id${metricEligibility} AND ${metricSeller}=u.id AND ${metricDate} BETWEEN $${dateFromParam}::date AND $${dateToParam}::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)) registered_students,
+            (SELECT COUNT(DISTINCT e.id)::int FROM enrollments e JOIN courses c ON c.id=e.course_id JOIN payments p ON p.enrollment_id=e.id WHERE ${metricBranch}=b.id${metricEligibility} AND ${metricSeller}=u.id AND p.status<>'anulado' AND p.balance=0 AND ${metricDate} BETWEEN $${dateFromParam}::date AND $${dateToParam}::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)) confirmed_enrollments,
+            (SELECT COUNT(*)::int FROM payment_details pd JOIN payments p ON p.id=pd.payment_id JOIN enrollments e ON e.id=p.enrollment_id JOIN courses c ON c.id=e.course_id WHERE ${metricBranch}=b.id${metricEligibility} AND pd.received_by=u.id AND pd.status='ACTIVE' AND pd.created_at::date BETWEEN $${dateFromParam}::date AND $${dateToParam}::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)) payments_count,
+            (SELECT COALESCE(SUM(pd.amount),0)::numeric FROM payment_details pd JOIN payments p ON p.id=pd.payment_id JOIN enrollments e ON e.id=p.enrollment_id JOIN courses c ON c.id=e.course_id WHERE ${metricBranch}=b.id${metricEligibility} AND pd.received_by=u.id AND pd.status='ACTIVE' AND pd.created_at::date BETWEEN $${dateFromParam}::date AND $${dateToParam}::date AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)) collected_amount,
+            (SELECT MAX(activity_at) FROM (SELECT MAX(e.created_at) activity_at FROM enrollments e WHERE ${metricBranch}=b.id${metricEligibility} AND ${metricSeller}=u.id UNION ALL SELECT MAX(pd.created_at) FROM payment_details pd JOIN payments p ON p.id=pd.payment_id JOIN enrollments e ON e.id=p.enrollment_id WHERE ${metricBranch}=b.id${metricEligibility} AND pd.received_by=u.id AND pd.status='ACTIVE') activity) last_activity
           FROM users u
-          JOIN user_roles ur ON ur.user_id=u.id AND ur.branch_id=b.id AND ur.active=TRUE AND (ur.valid_until IS NULL OR ur.valid_until>NOW())
-          JOIN roles r ON r.id=ur.role_id AND r.code IN ('BRANCH_ADMIN','SECRETARY','CASHIER')
-          WHERE u.branch_id=b.id AND u.active=TRUE
+          JOIN user_roles ur ON ur.user_id=u.id AND (ur.branch_id=b.id OR ${salesMetrics ? 'TRUE' : 'FALSE'}) AND ur.active=TRUE AND (ur.valid_from IS NULL OR ur.valid_from<=NOW()) AND (ur.valid_until IS NULL OR ur.valid_until>NOW())
+          JOIN roles r ON r.id=ur.role_id AND r.code IN ('BRANCH_ADMIN','SECRETARY','CASHIER'${salesMetrics ? ",'ADMIN_SYSTEM'" : ''})
+          WHERE u.active=TRUE AND (u.branch_id=b.id OR (${salesMetrics ? 'TRUE' : 'FALSE'} AND EXISTS(
+            SELECT 1 FROM enrollments e WHERE ${metricBranch}=b.id AND ${metricSeller}=u.id
+              AND ${metricDate} BETWEEN $${dateFromParam}::date AND $${dateToParam}::date ${metricEligibility})))
+          ORDER BY u.id,CASE r.code WHEN 'ADMIN_SYSTEM' THEN 0 WHEN 'BRANCH_ADMIN' THEN 1 WHEN 'SECRETARY' THEN 2 ELSE 3 END
         ) person
       ) staff_performance ON TRUE
       LEFT JOIN LATERAL (
@@ -326,7 +359,7 @@ class BranchAdminService {
         JOIN payments p ON p.id=pd.payment_id
         JOIN enrollments e ON e.id=p.enrollment_id
         JOIN courses c ON c.id=e.course_id
-        WHERE e.branch_id=b.id AND pd.status='ACTIVE'
+        WHERE ${metricBranch}=b.id${metricEligibility} AND pd.status='ACTIVE'
           AND pd.created_at::date BETWEEN $${dateFromParam}::date AND $${dateToParam}::date
           AND ($${courseTypeParam}::text IS NULL OR LOWER(c.name) LIKE CASE WHEN $${courseTypeParam}='moto' THEN '%moto%' ELSE '%automóvil%' END)
       ) payment_activity ON TRUE

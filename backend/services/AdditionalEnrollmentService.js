@@ -25,10 +25,12 @@ class AdditionalEnrollmentService {
 
   static price(course,data,allowDiscount) {
     const benefit=String(data.discountBenefit || '').trim();
+    require('./validateHalloweenPromotion')(benefit);
+    require('./validateComboSize')(benefit,data.comboSize);
     const kind=/moto|clase\s*a/i.test(course.name) ? 'moto' : /auto|clase\s*b/i.test(course.name) ? 'carro' : null;
-    const benefits={UNIVERSITY_STUDENT:{moto:117,carro:180},POLICE:{moto:110,carro:170}};
+    const benefits={UNIVERSITY_STUDENT:{moto:117,carro:180},POLICE:{moto:110,carro:170},COMBO:{moto:115,carro:180},HALLOWEEN:{moto:114.99,carro:164.99}};
     if(benefit && (!kind || !benefits[benefit]))throw createError(422,'Convenio no disponible para este curso');
-    const discount=benefit ? Number(course.price)-benefits[benefit][kind] : Number(data.discount || 0);
+    const discount=benefit ? Number((Number(course.price)-benefits[benefit][kind]).toFixed(2)) : Number(data.discount || 0);
     if(!Number.isFinite(discount) || discount<0 || Math.abs(discount*100-Math.round(discount*100))>0.000001
       || discount>Number(course.price)-(kind==='carro' && !benefit ? 175 : 0))throw createError(422,'Descuento no valido para este curso');
     if(discount>0 && !allowDiscount && !benefit)throw createError(403,'No tienes permiso para aplicar descuentos');
@@ -80,10 +82,10 @@ class AdditionalEnrollmentService {
       let registrationTransfer = null;
       if(data.registrationTransfer)registrationTransfer=await Cash.createTransfer({studentId,enrollmentId:enrollment.id,amount:data.registrationTransfer.amount,
         reference:data.registrationTransfer.reference,transferDate:new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Guayaquil'}).format(new Date())},actor,access,data.requestContext,client);
-      await client.query('INSERT INTO history(student_id,action) VALUES($1,$2)',[studentId,`Matricula adicional: ${course.name}. Se conservan los otros cursos y la cuenta de acceso.`]);
+      await client.query('INSERT INTO history(student_id,action) VALUES($1,$2)',[studentId,`Matricula adicional: ${course.name}. Se conservan los otros cursos y la cuenta de acceso.${data.discountBenefit==='COMBO'?` Combo: ${data.comboSize} personas declaradas, precio $${Number(course.price)-discount}.`:''}`]);
       await Audit.log({userId:actor.id,role:actor.role,branchId:targetBranch,action:'STUDENT_ADDITIONAL_ENROLLMENT_CREATED',module:'ESTUDIANTES',
         entityType:'ENROLLMENT',entityId:enrollment.id,description:'Matricula adicional confirmada sobre expediente existente',
-        metadata:{studentId,courseId:data.course_id,existingIdentityPreserved:true},requestContext:data.requestContext},client);
+        metadata:{studentId,courseId:data.course_id,existingIdentityPreserved:true,discountBenefit:data.discountBenefit||null,comboSize:data.discountBenefit==='COMBO'?Number(data.comboSize):null},requestContext:data.requestContext},client);
       await client.query('SELECT refresh_student_operational_status($1)',[studentId]);
       await client.query('COMMIT');
       return {...student,enrollment_id:enrollment.id,existingStudent:true,scheduleReserved:true,assignedInstructor:reservation.instructor,registration_transfer_id:registrationTransfer?.id || null};

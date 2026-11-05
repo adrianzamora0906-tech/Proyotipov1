@@ -65,6 +65,7 @@ class DocumentService {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(documentId)) throw createError(400,'Documento invalido');
     const result = await db.query('SELECT id, file_path AS file_url FROM student_documents WHERE id=$1 AND student_id=$2',[documentId,studentId]);
     if (!result.rows.length) throw createError(404,'Documento no encontrado');
+    if (result.rows[0].file_url) require('./DocumentPayload').validateDocument(result.rows[0].file_url);
     return result.rows[0];
   }
 
@@ -84,6 +85,7 @@ class DocumentService {
    * Crear documento para un estudiante
    */
   static async create(studentId, data, actor = null, requestContext = null) {
+    if (data.fileUrl) require('./DocumentPayload').validateDocument(data.fileUrl);
     if (data.cedulaIndicatesBachiller === true) {
       if (data.type !== 'certificado_bachiller') throw createError(422, 'Tipo de documento no valido para confirmar bachiller');
       const client = await db.getClient();
@@ -206,6 +208,7 @@ class DocumentService {
   }
 
   static async appendBloodCardToRegistrationPdf(studentId, data) {
+    require('./DocumentPayload').validateDocument(data.fileUrl);
     if (!data.fileUrl || !String(data.fileUrl).startsWith('data:')) {
       throw createError(422, 'Archivo del carnet requerido');
     }
@@ -346,6 +349,7 @@ class DocumentService {
   }
 
   static async getMobileUploadToken(token) {
+    if (!/^[a-f0-9]{64}$/i.test(String(token || ''))) throw createError(404, 'Enlace no encontrado');
     const result = await db.query(
       `SELECT t.token, t.student_id AS "studentId", t.document_type AS type,
         t.expires_at AS "expiresAt", t.used_at AS "usedAt",
@@ -372,6 +376,9 @@ class DocumentService {
   }
 
   static async completeMobileUpload(token, data) {
+    if (!/^[a-f0-9]{64}$/i.test(String(token || ''))) throw createError(404, 'Enlace no encontrado');
+    require('./DocumentPayload').validateDocument(data.fileUrl);
+    if (data.certificateFileUrl) require('./DocumentPayload').validateDocument(data.certificateFileUrl, { pdfOnly: true });
     const client = await db.getClient();
     try {
       await client.query('BEGIN');

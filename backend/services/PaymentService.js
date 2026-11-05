@@ -278,10 +278,12 @@ class PaymentService {
       return { total: 0, paid: 0, balance: 0 };
     }
 
-    const transfers = (await db.query(`SELECT id,enrollment_id,amount,status,reference,created_at
-      FROM transfer_payment_verifications WHERE student_id=$1 AND service_transaction_id IS NULL
-        AND ($2::uuid IS NULL OR enrollment_id=$2)
-        AND status IN ('PENDING','AWAITING_APPROVAL') ORDER BY created_at DESC`,[studentId,enrollmentId])).rows;
+    const transfers = (await db.query(`SELECT t.id,t.enrollment_id,t.amount,t.status,t.reference,t.created_at,
+      NULLIF(TRIM(CONCAT_WS(' ',creator.first_name,creator.last_name)),'') created_by_name
+      FROM transfer_payment_verifications t LEFT JOIN users creator ON creator.id=t.created_by
+      WHERE t.student_id=$1 AND t.service_transaction_id IS NULL
+        AND ($2::uuid IS NULL OR t.enrollment_id=$2)
+        AND t.status IN ('PENDING','AWAITING_APPROVAL') ORDER BY t.created_at DESC`,[studentId,enrollmentId])).rows;
     const pendingVerification = transfers.reduce((sum,transfer)=>sum+Number(transfer.amount || 0),0);
     const enrollments=enrollment.rows.map(row=>{
       const p=payment.rows.find(item=>item.enrollment_id===row.id);
@@ -310,11 +312,15 @@ class PaymentService {
   static async getStudentPayments(studentId, page = null) {
     const sql = `
       SELECT pd.*, p.total, p.final_amount, p.status as payment_status,e.id AS enrollment_id,c.name AS course_name,
+        NULLIF(TRIM(CONCAT_WS(' ',collector.first_name,collector.last_name)),'') received_by_name,
+        NULLIF(TRIM(CONCAT_WS(' ',voider.first_name,voider.last_name)),'') voided_by_name,
         EXISTS(SELECT 1 FROM payment_void_requests vr WHERE vr.payment_detail_id=pd.id AND vr.status='PENDING') void_pending
       FROM payment_details pd
       JOIN payments p ON pd.payment_id = p.id
       JOIN enrollments e ON p.enrollment_id = e.id
       JOIN courses c ON c.id=e.course_id
+      LEFT JOIN users collector ON collector.id=pd.received_by
+      LEFT JOIN users voider ON voider.id=pd.voided_by
       WHERE e.student_id = $1 AND p.status != 'anulado'
       ORDER BY pd.created_at DESC,pd.id DESC
     `;
@@ -327,6 +333,7 @@ class PaymentService {
    * Registrar un pago
    */
   static async registerPayment(data, transactionClient = null) {
+    data = { ...data, amount: require('./Money').cents(data.amount) / 100 };
     if (data.serviceTransactionId) return this.registerServicePayment(data, transactionClient);
     const client = transactionClient || await db.getClient();
     try {
@@ -380,7 +387,7 @@ class PaymentService {
 
       // Buscar enrollment activo
       const enrollmentResult = await client.query(
-        "SELECT id FROM enrollments WHERE student_id = $1 AND id = $2 AND status = 'activo' LIMIT 1",
+        "SELECT id FROM enrollments WHERE student_id = $1 AND id = $2 AND status = 'activo' LIMIT 1 FOR UPDATE",
         [student.id, student.enrollment_id]
       );
       if (enrollmentResult.rows.length === 0) {
@@ -433,7 +440,7 @@ class PaymentService {
       `, [payment.id, data.amount, data.method, data.reference || null, cardBatch, data.concept || null, userId]);
 
       // Actualizar balance del payment
-      const newBalance = Number(payment.balance) - Number(data.amount);
+      const newBalance = (require('./Money').cents(payment.balance, { allowZero: true }) - require('./Money').cents(data.amount)) / 100;
       const newStatus = newBalance <= 0 ? 'pagado' : 'parcial';
       await client.query(
         'UPDATE payments SET balance = $1, status = $2 WHERE id = $3',
@@ -490,7 +497,8 @@ class PaymentService {
         instructorAssignment = await CycleInstructorAssignmentService.assignForEnrollment(
           client,
           enrollmentId,
-          data.cashierUserId || userId
+          data.cashierUserId || userId,
+          { preserveAssignedSchedule: true }
         );
       }
 
@@ -513,6 +521,7 @@ class PaymentService {
   }
 
   static async registerServicePayment(data, transactionClient = null) {
+    data = { ...data, amount: require('./Money').cents(data.amount) / 100 };
     const client=transactionClient || await db.getClient();
     try {
       if (!transactionClient) await client.query('BEGIN');
@@ -616,12 +625,16 @@ class PaymentService {
 
       // Restaurar balance
       const payment = await client.query(
-        'SELECT * FROM payments WHERE id = $1',
+        'SELECT * FROM payments WHERE id = $1 FOR UPDATE',
         [detail.payment_id]
       );
       if (payment.rows.length === 0) throw createError(404, 'Pago no encontrado');
 
-      const restoredBalance = Number(payment.rows[0].balance) + Number(detail.amount);
+      const restoredCents = require('./Money').cents(payment.rows[0].balance, { allowZero: true }) + require('./Money').cents(detail.amount);
+      if (restoredCents > require('./Money').cents(payment.rows[0].final_amount, { allowZero: true })) {
+        throw createError(409, 'El saldo no coincide con los abonos; revisa la cuenta antes de anular');
+      }
+      const restoredBalance = restoredCents / 100;
       await client.query(
         "UPDATE payments SET balance = $1, status = CASE WHEN $2 >= final_amount THEN 'pendiente' ELSE 'parcial' END WHERE id = $3",
         [restoredBalance, restoredBalance, detail.payment_id]

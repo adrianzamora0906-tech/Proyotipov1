@@ -10,28 +10,28 @@ const enrollmentScope = `EXISTS(SELECT 1 FROM branches bx WHERE bx.id=e.branch_i
 const occupationReportCtes = `occupation_days AS (
   SELECT o.instructor_id,o.schedule_date,o.start_time,o.end_time,o.reason_type,o.reason
   FROM instructor_availability_overrides o
-  WHERE o.active=TRUE AND o.status='blocked' AND o.reason_type IS NOT NULL AND o.reason_type<>'occupied'
+  WHERE o.active=TRUE AND o.status='blocked' AND o.reason_type IS NOT NULL AND (o.reason_type<>'occupied' OR o.reason ILIKE '%polic%')
     AND o.schedule_date BETWEEN $2::timestamp::date AND $3::timestamp::date
   UNION ALL
   SELECT a.instructor_id,d.day::date,a.start_time,a.end_time,a.reason_type,a.unavailable_reason
   FROM instructor_availability a
   CROSS JOIN generate_series($2::date,$3::date,INTERVAL '1 day') d(day)
-  WHERE a.active=FALSE AND a.reason_type IS NOT NULL AND a.reason_type<>'occupied'
+  WHERE a.active=FALSE AND a.reason_type IS NOT NULL AND (a.reason_type<>'occupied' OR a.unavailable_reason ILIKE '%polic%')
     AND a.weekday=EXTRACT(ISODOW FROM d.day)::int
     AND NOT EXISTS(SELECT 1 FROM instructor_availability_overrides o
       WHERE o.instructor_id=a.instructor_id AND o.active=TRUE AND o.schedule_date=d.day::date
         AND o.start_time<a.end_time AND o.end_time>a.start_time)
 ), occupation_rows AS (
   SELECT od.instructor_id,cc.id cycle_id,cc.code cycle_code,cc.start_date,cc.end_date,
-    c.name course_name,od.reason_type,COALESCE(NULLIF(od.reason,''),
-      CASE WHEN od.reason_type='transport' THEN 'Transporte' ELSE 'Otros' END) name,
+    c.name course_name,od.reason_type,CASE WHEN od.reason ILIKE '%polic%' THEN 'OCUPADO POLICIA' ELSE COALESCE(NULLIF(od.reason,''),
+      CASE WHEN od.reason_type='transport' THEN 'Transporte' ELSE 'Otros' END) END name,
     od.start_time,od.end_time,COUNT(DISTINCT od.schedule_date)::int classes,
     STRING_AGG(DISTINCT TO_CHAR(od.schedule_date,'DD/MM/YYYY'),', ') class_dates
   FROM occupation_days od
   JOIN course_cycles cc ON od.schedule_date BETWEEN cc.start_date AND cc.end_date
     AND cc.deleted_at IS NULL AND cc.status<>'cancelado'
   JOIN courses c ON c.id=cc.course_id JOIN branches b ON b.id=cc.branch_id
-  WHERE ${scope("b")} AND (
+  WHERE ${scope("b")} AND NOT is_course_holiday(cc.branch_id,od.schedule_date) AND (
     EXISTS(SELECT 1 FROM course_cycle_schedule_assignments a WHERE a.cycle_id=cc.id AND a.instructor_id=od.instructor_id AND a.status='activo')
     OR EXISTS(SELECT 1 FROM course_cycle_instructors ci WHERE ci.cycle_id=cc.id AND ci.instructor_id=od.instructor_id AND ci.active=TRUE)
     OR EXISTS(SELECT 1 FROM instructor_group_members gm WHERE gm.group_id=cc.group_id AND gm.instructor_id=od.instructor_id AND gm.active=TRUE AND gm.ended_at IS NULL)
@@ -372,7 +372,7 @@ class ManagerDashboardService {
         ), additional_practice_days AS (
           SELECT ap.instructor_id,(ap.start_date + day_offset)::date practice_date
           FROM additional_driving_practices ap
-          CROSS JOIN LATERAL generate_series(0,ap.number_of_days-1) day_offset
+          CROSS JOIN LATERAL (SELECT (d-ap.start_date)::int day_offset,(ordinality-1)::int practice_index FROM unnest(additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days)) WITH ORDINALITY AS dates(d,ordinality)) practice_dates
           WHERE ap.status<>'CANCELLED'
             AND (ap.start_date + day_offset)::date BETWEEN $2::date AND $3::date
         ), additional_practice_load AS (

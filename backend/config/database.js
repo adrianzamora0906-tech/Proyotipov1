@@ -1,7 +1,9 @@
 const { Pool } = require('pg');
 require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
+require('./securityPolicy').assertProductionConfig();
 
 const pool = new Pool({
+  ...require('./databaseTls')(),
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT) || 5432,
   database: process.env.DB_NAME || 'sportmancar_erp',

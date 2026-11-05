@@ -23,6 +23,7 @@ Thumbs.db
 *.dump
 *.bak
 Respaldo.sql
+/private-backups/
 
 # El repositorio de despliegue publica solamente el frontend estático
 backend/

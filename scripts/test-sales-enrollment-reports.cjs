@@ -11,12 +11,16 @@ const {chromium}=require('C:/Users/USUARIO/AppData/Local/npm-cache/_npx/e41f203b
    await page.addScriptTag({content:`const Component=class {};const SidebarLayout={render:x=>x};const AdminService={};const ManagerService={};const authService={getCurrentUser:()=>({roles:['ADMIN_SYSTEM'],scope:'GLOBAL'})};${source}`});
    await page.evaluate(async()=>{
     const v=window.view=new window.ManagerReportsView();document.getElementById('app').innerHTML=await v.render();
-    v.result={summary:{sales:56,enrollments:65,today_enrollments:4,cycles:15,instructors:11,services:38},rows:[{identification:'0000000001',name:'Alumno de prueba',course:'Clase B - Automovil',branch:'Flavio Reyes',academic_branch:'Manta 2000',registered_by:'usuario',enrollment_date:'2026-10-21',status:'activo'}]};
+    v.result={summary:{sales:56,enrollments:65,today_enrollments:4,cycles:15,instructors:11,services:38},rows:[{identification:'0000000001',name:'Alumno de prueba',course:'Clase B - Automovil',branch:'Flavio Reyes',academic_branch:'Manta 2000',registered_by:'autor_reserva',completed_by:'autor_matricula',enrollment_date:'2026-10-21',status:'activo'}]};
     v.filters.type='sales';v.load=async()=>v.paint();v.scheduleFilterLoad=()=>v.load();await v.mount();v.paint();
    });
    assert.equal(await page.locator('#report-title').innerText(),'Ventas');
    assert((await page.locator('#report-table-head').innerText()).includes('Sucursal de venta'));
    assert((await page.locator('#report-table-head').innerText()).includes('Sucursal de formacion'));
+   assert((await page.locator('#report-table-head').innerText()).includes('Venta atribuida a'));
+   assert((await page.locator('#report-table-head').innerText()).includes('Matriculado por'));
+   assert((await page.locator('#report-table-body').innerText()).includes('autor_reserva'));
+   assert((await page.locator('#report-table-body').innerText()).includes('autor_matricula'));
    await page.screenshot({path:`.tmp/sales-report-${width}.png`,fullPage:true});
    assert.equal(await page.locator('[data-report-type="enrollments"]').count(),0);
    await page.locator('[data-report-type="cycles"]').click();

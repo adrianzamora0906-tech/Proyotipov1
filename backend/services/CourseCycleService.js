@@ -96,7 +96,8 @@ function businessDates(startDate, endDate) {
   return dates;
 }
 
-function cycleDates(cycle) {
+function rawCycleDates(cycle) {
+  if (Array.isArray(cycle.class_dates) && cycle.class_dates.length) return cycle.class_dates.map(toDateString);
   if (Array.isArray(cycle.schedule_templates) && cycle.schedule_templates.length) {
     const allowedDays = new Set(cycle.schedule_templates.map(slot => Number(slot.day_of_week)));
     const dates=[];const cursor=new Date(`${toDateString(cycle.start_date)}T00:00:00`),end=new Date(`${toDateString(cycle.end_date)}T00:00:00`);
@@ -112,6 +113,11 @@ function cycleDates(cycle) {
     });
   }
   return businessDates(cycle.start_date, cycle.end_date);
+}
+
+function cycleDates(cycle) {
+  const holidays=new Set((cycle.holiday_dates||[]).map(toDateString));
+  return rawCycleDates(cycle).filter(date=>!holidays.has(date));
 }
 
 function practicalCycleDates(cycle, requestedStartDate = null) {
@@ -130,9 +136,10 @@ function practicalCycleDates(cycle, requestedStartDate = null) {
   );
   const dates = [];
   const cursor = new Date(`${practicalStart}T12:00:00`);
+  const holidays = new Set((cycle.holiday_dates || []).map(toDateString));
   let guard = 0;
   while (dates.length < required && guard < 60) {
-    if (allowedDays.has(cursor.getDay())) dates.push(toDateString(cursor));
+    if (allowedDays.has(cursor.getDay()) && !holidays.has(toDateString(cursor))) dates.push(toDateString(cursor));
     cursor.setDate(cursor.getDate() + 1);
     guard += 1;
   }
@@ -737,7 +744,7 @@ class CourseCycleService {
 
     const result = await db.query(`
       SELECT cc.id, cc.code, cc.modality, cc.vehicle_type, cc.start_date, cc.end_date,
-             cc.duration_business_days, cc.capacity_per_instructor, cc.status, cc.notes,
+             cc.duration_business_days, cc.class_dates, (COALESCE(cc.holiday_dates,ARRAY[]::date[]) || ARRAY(SELECT h.holiday_date FROM course_holidays h WHERE h.active=TRUE AND (h.branch_id IS NULL OR h.branch_id=cc.branch_id))) AS holiday_dates, cc.capacity_per_instructor, cc.status, cc.notes,
              c.name AS course_name,
              b.name AS branch_name,
              ig.code AS group_code,
@@ -942,7 +949,7 @@ class CourseCycleService {
 
     const result = await db.query(`
       SELECT cc.id, cc.branch_id, cc.code, cc.modality, cc.vehicle_type, cc.start_date, cc.end_date,
-             cc.duration_business_days, cc.status, cc.capacity_per_instructor,
+             cc.duration_business_days, cc.class_dates, (COALESCE(cc.holiday_dates,ARRAY[]::date[]) || ARRAY(SELECT h.holiday_date FROM course_holidays h WHERE h.active=TRUE AND (h.branch_id IS NULL OR h.branch_id=cc.branch_id))) AS holiday_dates, cc.status, cc.capacity_per_instructor,
              cc.published_capacity,
              c.name AS course_name,
              b.name AS branch_name,
@@ -1287,6 +1294,7 @@ class CourseCycleService {
           && practicalDates[0] < toDateString(row.start_date)),
         instructorBaseStart,
         durationBusinessDays: Number(row.duration_business_days),
+        dates: displayedDates,
         status: row.status,
         group: row.group_code ? {
           code: row.group_code,
@@ -1388,6 +1396,7 @@ class CourseCycleService {
           return {
             startTime,
             endTime,
+            dates: eligibleDates,
             capacity,
             occupied,
             available,
@@ -1419,13 +1428,15 @@ class CourseCycleService {
       const weeklyStart = benitoWeeklyStartDate(option.startDate);
       const key = `${option.vehicleType}:${option.modality}:${weeklyStart}`;
       const current = weeklyOptions.get(key);
+      const requestedCycle = String(filters.practical_cycle_id || '');
+      if (current && String(current.id) === requestedCycle) return;
       const candidateDistance = Math.abs(
         new Date(`${option.startDate}T12:00:00`) - new Date(`${weeklyStart}T12:00:00`)
       );
       const currentDistance = current ? Math.abs(
         new Date(`${current.startDate}T12:00:00`) - new Date(`${weeklyStart}T12:00:00`)
       ) : Number.MAX_SAFE_INTEGER;
-      if (!current || candidateDistance < currentDistance
+      if (!current || String(option.id) === requestedCycle || candidateDistance < currentDistance
         || (candidateDistance === currentDistance && String(option.startDate) < String(current.startDate))) {
         weeklyOptions.set(key, option);
       }
@@ -1495,7 +1506,7 @@ class CourseCycleService {
 
     const cycleResult = await db.query(`
       SELECT cc.id, cc.branch_id, cc.course_id, cc.code, cc.modality, cc.vehicle_type, cc.start_date, cc.end_date,
-             cc.duration_business_days, cc.status, c.name AS course_name,
+             cc.duration_business_days, cc.class_dates, (COALESCE(cc.holiday_dates,ARRAY[]::date[]) || ARRAY(SELECT h.holiday_date FROM course_holidays h WHERE h.active=TRUE AND (h.branch_id IS NULL OR h.branch_id=cc.branch_id))) AS holiday_dates, cc.status, c.name AS course_name,
              e.theory_modality, e.theory_start_time,
              b.name AS branch_name, ig.code AS group_code, ig.name AS group_name,
              LEAST(
@@ -1579,7 +1590,7 @@ class CourseCycleService {
           FROM practical_sessions ps JOIN enrollments e ON e.id=ps.enrollment_id
           WHERE ps.instructor_id=$1 AND e.student_id<>$2 AND ps.deleted_at IS NULL AND ps.status NOT IN ('CANCELADA','REPROGRAMADA')
         UNION ALL SELECT d::date,ap.daily_start_time,(ap.daily_start_time+INTERVAL '100 minutes')::time
-          FROM additional_driving_practices ap CROSS JOIN LATERAL generate_series(ap.start_date,ap.start_date+ap.number_of_days-1,INTERVAL '1 day') d
+          FROM additional_driving_practices ap CROSS JOIN LATERAL unnest(additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days)) d
           WHERE ap.instructor_id=$1 AND ap.student_id<>$2 AND ap.status IN ('SCHEDULED','IN_PROGRESS')
       ) instructor_occupation
       GROUP BY schedule_date,start_time,end_time
@@ -1796,7 +1807,7 @@ class CourseCycleService {
                   AND ps.status NOT IN ('CANCELADA','REPROGRAMADA')
               UNION ALL SELECT d::date,ap.daily_start_time,(ap.daily_start_time+INTERVAL '100 minutes')::time
                 FROM additional_driving_practices ap CROSS JOIN LATERAL
-                  generate_series(ap.start_date,ap.start_date+(ap.number_of_days-1),INTERVAL '1 day') d
+                  unnest(additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days)) d
                 WHERE ap.instructor_id=$1 AND ap.student_id<>$5 AND ap.status IN ('SCHEDULED','IN_PROGRESS')
             ) busy WHERE schedule_date=$2::date AND start_time<$4::time AND end_time>$3::time LIMIT 1
           `, [nextInstructorId, date, startTime, endTime, studentId]);
@@ -2354,19 +2365,8 @@ class CourseCycleService {
             AND ip.deleted_at IS NULL
             AND u.active = true
             AND ib.city_id = target.city_id
-            AND (
-              EXISTS (
-                SELECT 1 FROM course_cycle_instructors cci
-                WHERE cci.cycle_id=selected_cycle.id
-                  AND cci.instructor_id=ip.id AND cci.active=TRUE
-              )
-              OR EXISTS (
-                SELECT 1 FROM instructor_group_members igm
-                WHERE igm.group_id=selected_cycle.group_id
-                  AND igm.instructor_id=ip.id
-                  AND igm.active=TRUE AND igm.ended_at IS NULL
-              )
-            )
+            -- Los referidos del mismo canton pueden atender un ciclo sin
+            -- pertenecer a su grupo, igual que en getEnrollmentOptions.
           LIMIT 1
         `, [cycleId, preferredInstructorId, cycle.branch_id]);
         if (!preferredResult.rows.length) {
@@ -2439,15 +2439,15 @@ class CourseCycleService {
           FROM instructor_availability_overrides o
           WHERE o.active=TRUE AND o.schedule_date=$1::date
             AND o.start_time<$3::time AND o.end_time>$2::time
-            AND EXISTS(SELECT 1 FROM course_cycle_instructors cci
-              WHERE cci.cycle_id=$4 AND cci.instructor_id=o.instructor_id AND cci.active=TRUE)
+            AND (o.instructor_id=$6::uuid OR EXISTS(SELECT 1 FROM course_cycle_instructors cci
+              WHERE cci.cycle_id=$4 AND cci.instructor_id=o.instructor_id AND cci.active=TRUE))
             AND NOT EXISTS(SELECT 1 FROM course_cycle_seat_reservations own_seat
-              WHERE own_seat.cycle_id=$4 AND own_seat.student_id=$5 AND own_seat.status='activo'
+              WHERE own_seat.student_id=$5 AND own_seat.status='activo'
                 AND o.reason LIKE CONCAT('RESERVA_CURSO:',own_seat.id::text,':%'))
-        `,[selection.date,startTime,endTime,cycleId,studentId]);
+        `,[selection.date,startTime,endTime,cycleId,studentId,preferredInstructor?.id || null]);
         const blockedCount = currentOverrides.rowCount;
         const selectionCapacity = Math.max(capacity - blockedCount, 0);
-        if (selectionCapacity < 1) throw createError(409, `Este cupo acaba de ser reservado para ${selection.date} ${selection.time}`);
+        if (!preferredInstructor && selectionCapacity < 1) throw createError(409, `Este cupo acaba de ser reservado para ${selection.date} ${selection.time}`);
 
         // Una sobreocupacion de otro instructor no consume los cupos libres
         // del resto. Los cruces del instructor elegido se validan por separado.
@@ -2500,7 +2500,9 @@ class CourseCycleService {
         `, [cycleId, startTime, endTime, selection.date,
           Math.max(Number(cycle.capacity_per_instructor) || 1, 1)]);
         const occupied = Number(occupiedResult.rows[0]?.occupied || 0);
-        if (occupied >= selectionCapacity) {
+        // El instructor elegido tiene su propia capacidad y cruces globales,
+        // incluso cuando atiende como referido fuera del grupo fijo.
+        if (!preferredInstructor && occupied >= selectionCapacity) {
           throw createError(409, `No hay cupos disponibles para ${selection.date} ${selection.time}`);
         }
 
@@ -2614,11 +2616,11 @@ class CourseCycleService {
       // terceros. Al activarla, liberamos solo ese bloqueo propio antes de
       // validar la asignación definitiva; todo ocurre dentro de la transacción.
       await client.query(`UPDATE instructor_availability_overrides override
-        SET active=FALSE,updated_by=$3,updated_at=NOW()
+        SET active=FALSE,updated_by=$2,updated_at=NOW()
         WHERE override.active=TRUE AND EXISTS(
           SELECT 1 FROM course_cycle_seat_reservations seat
-          WHERE seat.enrollment_id=$1 AND seat.cycle_id=$2 AND seat.status='activo'
-            AND override.reason LIKE CONCAT('RESERVA_CURSO:',seat.id::text,':%'))`,[enrollmentId,cycleId,user.id]);
+          WHERE seat.enrollment_id=$1 AND seat.status='activo'
+            AND override.reason LIKE CONCAT('RESERVA_CURSO:',seat.id::text,':%'))`,[enrollmentId,user.id]);
       const instructorAssignment = await CycleInstructorAssignmentService.assignForEnrollment(
         client,
         enrollmentId,
@@ -2641,9 +2643,17 @@ class CourseCycleService {
         }
       }
 
-      await client.query(`UPDATE course_cycle_seat_reservations
-        SET status='convertido',converted_at=NOW(),updated_at=NOW()
-        WHERE enrollment_id=$1 AND cycle_id=$2 AND status='activo'`,[enrollmentId,cycleId]);
+      const convertedReservations = await client.query(`UPDATE course_cycle_seat_reservations
+        SET status='convertido',converted_at=NOW(),converted_by=$2,updated_at=NOW()
+        WHERE enrollment_id=$1 AND status='activo'
+        RETURNING id,created_by,sales_branch_id`,[enrollmentId,user.id]);
+      for (const reservation of convertedReservations.rows) {
+        await require('./AuditService').log({userId:user.id,role:user.role,branchId:reservation.sales_branch_id,
+          action:'RESERVATION_SALE_ATTRIBUTED',module:'ESTUDIANTES',entityType:'ENROLLMENT',entityId:enrollmentId,
+          description:'Venta atribuida al autor de la reserva; quien completa la matricula se conserva por separado',
+          metadata:{studentId,reservationId:reservation.id,salesUserId:reservation.created_by,
+            salesBranchId:reservation.sales_branch_id,completedBy:user.id}},client);
+      }
 
       if (!transactionClient) await client.query('COMMIT');
       return {

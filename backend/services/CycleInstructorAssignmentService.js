@@ -296,7 +296,7 @@ class CycleInstructorAssignmentService {
     return result.rows.length;
   }
 
-  static async assignForEnrollment(client, enrollmentId, assignedBy = null) {
+  static async assignForEnrollment(client, enrollmentId, assignedBy = null, { preserveAssignedSchedule = false } = {}) {
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`cycle-instructor:${enrollmentId}`]);
 
     const contextResult = await client.query(`
@@ -325,6 +325,17 @@ class CycleInstructorAssignmentService {
       LIMIT 1
     `, [enrollmentId]);
     if (existingResult.rows.length) {
+      if (preserveAssignedSchedule) {
+        // Collecting an installment must not rebook an already assigned plan,
+        // including historical classes and plans shared by several instructors.
+        const assignedPlan = await client.query(`
+          SELECT EXISTS(SELECT 1 FROM course_cycle_schedule_assignments
+            WHERE enrollment_id=$1 AND status='activo')
+            AND NOT EXISTS(SELECT 1 FROM course_cycle_schedule_assignments
+              WHERE enrollment_id=$1 AND status='activo' AND instructor_id IS NULL) AS complete
+        `, [enrollmentId]);
+        if (assignedPlan.rows[0]?.complete) return existingResult.rows[0];
+      }
       const conflictResult = await client.query(`
         SELECT 1
         FROM course_cycle_schedule_assignments occupied

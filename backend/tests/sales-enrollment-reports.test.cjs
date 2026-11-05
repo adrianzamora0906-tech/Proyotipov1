@@ -17,6 +17,8 @@ test('Ventas usa sucursal persistida, conserva alcance y oculta importes fuera d
   const query=calls.find(x=>x.sql.includes('academic.name academic_branch'));
   assert.equal(query.args[0],'authorized');assert.equal(query.args[6],'moto');
   assert.match(query.sql,/b.id=e.sales_branch_id/);assert.match(query.sql,/academic.id=e.branch_id/);
+  assert.match(query.sql,/seller.id=COALESCE\(e.sales_user_id,e.created_by\)/);
+  assert.match(query.sql,/reservation.converted_by,e.created_by/);
   assert.match(query.sql,/INTERVAL '1 day'/);assert.match(query.sql,/LIMIT 1/);
   assert(!query.sql.includes('ru.branch_id'));
  }finally{db.query=original;}

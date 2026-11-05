@@ -405,10 +405,14 @@ class ReportService {
           `SELECT s.identification,TRIM(CONCAT(s.first_name,' ',s.last_name)) name,c.name course,b.name branch,
            academic.name academic_branch,e.sales_branch_source,e.enrollment_date,e.status,
            COALESCE(p.final_amount,0)::numeric amount,COALESCE(p.balance,0)::numeric balance,
-           COALESCE(ru.username,TRIM(CONCAT(ru.first_name,' ',ru.last_name))) registered_by
+           COALESCE(seller.username,TRIM(CONCAT(seller.first_name,' ',seller.last_name))) registered_by,
+           COALESCE(ru.username,TRIM(CONCAT(ru.first_name,' ',ru.last_name))) completed_by
            FROM enrollments e JOIN students s ON s.id=e.student_id AND s.status<>'inhabilitado'
            JOIN courses c ON c.id=e.course_id JOIN branches b ON b.id=e.sales_branch_id
-           JOIN branches academic ON academic.id=e.branch_id LEFT JOIN users ru ON ru.id=e.created_by
+           JOIN branches academic ON academic.id=e.branch_id
+           LEFT JOIN course_cycle_seat_reservations reservation ON reservation.id=e.sales_reservation_id
+           LEFT JOIN users ru ON ru.id=COALESCE(reservation.converted_by,e.created_by)
+           LEFT JOIN users seller ON seller.id=COALESCE(e.sales_user_id,e.created_by)
            LEFT JOIN LATERAL (SELECT final_amount,balance FROM payments WHERE enrollment_id=e.id AND status<>'anulado' ORDER BY created_at DESC,id DESC LIMIT 1) p ON TRUE
            WHERE e.enrollment_date >= $2::date AND e.enrollment_date < ($3::date+INTERVAL '1 day')
            AND LOWER(e.status) NOT IN ('cancelado','inhabilitado') AND ${branchScope} AND ${courseScope}
@@ -484,7 +488,7 @@ class ReportService {
         }));
     }
     const definitions = {
-      sales: { title: "VENTAS POR SUCURSAL", columns: [["identification", "CEDULA"], ["name", "ESTUDIANTE"], ["course", "CURSO"], ["branch", "SUCURSAL DE VENTA"], ["academic_branch", "SUCURSAL DE FORMACION"], ["registered_by", "INSCRITO POR"], ["enrollment_date", "INSCRIPCION", "date"], ["status", "ESTADO"], ["amount", "VALOR", "money"], ["balance", "PENDIENTE", "money"]] },
+      sales: { title: "VENTAS POR SUCURSAL", columns: [["identification", "CEDULA"], ["name", "ESTUDIANTE"], ["course", "CURSO"], ["branch", "SUCURSAL DE VENTA"], ["academic_branch", "SUCURSAL DE FORMACION"], ["registered_by", "VENTA ATRIBUIDA A"], ["completed_by", "MATRICULADO POR"], ["enrollment_date", "INSCRIPCION", "date"], ["status", "ESTADO"], ["amount", "VALOR", "money"], ["balance", "PENDIENTE", "money"]] },
       today_enrollments: { title: "REGISTRADOS HOY", columns: [["identification", "CÉDULA"], ["name", "ESTUDIANTE"], ["course", "CURSO"], ["branch", "SUCURSAL"], ["registered_by", "REGISTRADO POR"], ["enrollment_date", "FECHA DE REGISTRO", "date"], ["amount", "VALOR", "money"], ["balance", "PENDIENTE", "money"]] },
       active_students: { title: "ESTUDIANTES ACTIVOS", columns: [["identification", "CÉDULA"], ["name", "ESTUDIANTE"], ["course", "CURSO"], ["branch", "SUCURSAL"], ["registered_by", "REGISTRADO POR"], ["instructor", "INSTRUCTOR"], ["start_date", "INICIO", "date"], ["end_date", "FIN", "date"]] },
       enrollments: { title: "MATRÍCULAS REGISTRADAS", columns: [["identification", "CÉDULA"], ["name", "ESTUDIANTE"], ["course", "CURSO"], ["branch", "SUCURSAL"], ["registered_by", "REGISTRADO POR"], ["enrollment_date", "MATRÍCULA", "date"], ["status", "ESTADO"], ["amount", "VALOR", "money"], ["balance", "PENDIENTE", "money"]] },
@@ -570,12 +574,25 @@ class ReportService {
         });
         instructorSheet.getRow(4).alignment = { horizontal: "center", vertical: "middle" };
         const grouped = new Map();
-        [...(detail.data || []).filter(item => item.activity_type !== 'EXAM_ONLY'), ...(detail.occupations || [])].forEach((student) => {
+        (detail.data || []).filter(item => item.activity_type !== 'EXAM_ONLY').forEach((student) => {
           if (!grouped.has(student.cycle_id)) grouped.set(student.cycle_id, []);
           grouped.get(student.cycle_id).push(student);
         });
+        // Las ocupaciones complementan el curso de los alumnos; no crean
+        // cursos separados cuando el periodo solo contiene un bloqueo.
+        for(const occupation of detail.occupations||[]){
+          const students=grouped.get(occupation.cycle_id);
+          if(students)students.push(occupation);
+        }
         let currentRow = 6;
-        for (const students of grouped.values()) {
+        const chronologicalCourses=[...grouped.values()].sort((left,right)=>{
+          const date=value=>value ? new Date(value).getTime() : Number.MAX_SAFE_INTEGER;
+          return date(left[0].start_date)-date(right[0].start_date)
+            || date(left[0].end_date)-date(right[0].end_date)
+            || String(left[0].course_name||'').localeCompare(String(right[0].course_name||''),'es')
+            || String(left[0].cycle_id||'').localeCompare(String(right[0].cycle_id||''));
+        });
+        for (const students of chronologicalCourses) {
           const course = students[0];
           instructorSheet.mergeCells(currentRow, 1, currentRow, columns);
           const titleCell = instructorSheet.getCell(currentRow, 1);
@@ -597,6 +614,12 @@ class ReportService {
             cell.alignment = { horizontal: "center", vertical: "middle" };
           });
           currentRow += 1;
+          // Intercalar alumnos y ocupaciones por la hora real dentro del curso.
+          const startMinutes = (item) => {
+            const match = String(item.start_time || item.schedule_time || '').match(/^(\d{1,2}):(\d{2})/);
+            return match ? Number(match[1]) * 60 + Number(match[2]) : Number.MAX_SAFE_INTEGER;
+          };
+          students.sort((left, right) => startMinutes(left) - startMinutes(right));
           students.forEach((student, studentIndex) => {
             const values = student.is_occupation
               ? ["OCUPACION", `${student.name} (${student.schedule_time})`, "", student.classes, "", "", ""]

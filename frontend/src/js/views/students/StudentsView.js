@@ -70,9 +70,6 @@ class StudentsView extends Component {
     this.groupBy = queryParams.get('group') || '';
     this.listParams = { ...listParams };
 
-    const summaryParams = { ...listParams };
-    delete summaryParams.status;
-    delete summaryParams.registration_type;
     const showingReservations = selectedStatus === 'reservado';
     const paginatedListParams = { ...listParams, paginated: true, page: currentPage, group: this.groupBy };
     const studentsPromise = !isRegistrationPage && !showingReservations
@@ -81,11 +78,10 @@ class StudentsView extends Component {
     const reservationsPromise = !isRegistrationPage && showingReservations
       ? StudentService.getActiveReservations({ ...listParams, paginated: true, page: currentPage })
       : Promise.resolve([]);
-    const [studentPage, branches, reservationPage, summaryData] = await Promise.all([
+    const [studentPage, branches, reservationPage] = await Promise.all([
       studentsPromise,
       StudentService.getBranches(),
       reservationsPromise,
-      isRegistrationPage ? Promise.resolve(null) : StudentService.getStudentListSummary(summaryParams).catch(() => null),
     ]);
     const students = Array.isArray(studentPage) ? studentPage : (studentPage?.students || []);
     const totalStudents = Array.isArray(studentPage) ? students.length : (studentPage?.total ?? students.length);
@@ -93,9 +89,15 @@ class StudentsView extends Component {
     const reservations = Array.isArray(reservationPage) ? reservationPage : (reservationPage?.reservations || []);
     const totalReservations = Array.isArray(reservationPage) ? reservations.length : (reservationPage?.total ?? reservations.length);
     const totalPages = Math.max(Math.ceil((showingReservations ? totalReservations : totalStudents) / 10), 1);
-    const summaryCounts = summaryData?.counts || [];
+    const summaryCounts = showingReservations ? [] : students.map(student => ({
+      status: student.status,
+      registration_type: student.registrationType || student.registration_type || 'REGULAR',
+      active: Boolean(student.hasActiveEnrollment || student.active || ['matriculado', 'en_curso', 'activo'].includes(String(student.status || '').toLowerCase())),
+      has_collectible_debt: Boolean(student.hasCollectibleDebt ?? student.has_collectible_debt),
+      count: 1,
+    }));
     this.disabledStudentCount = this.getCountByStatus(summaryCounts, 'inhabilitado');
-    const summaryModel = { counts: summaryCounts, reservations: summaryData?.reservations ?? reservations.length };
+    const summaryModel = { counts: summaryCounts, reservations: reservations.length };
     this.visibleReservations = reservations;
     const currentBranch = currentUser?.branch || '';
     const currentBranchId = currentUser?.branch_id || '';
@@ -335,9 +337,6 @@ class StudentsView extends Component {
     container.style.opacity = '0.55';
 
     try {
-      const summaryParams = { ...params };
-      delete summaryParams.status;
-      delete summaryParams.registration_type;
       const paginatedParams = { ...params, paginated: true, page: requestedPage, group: this.groupBy };
       const showingReservations = params.status === 'reservado';
       const studentsPromise = showingReservations ? Promise.resolve({ students: [], total: 0, page: requestedPage })
@@ -347,10 +346,9 @@ class StudentsView extends Component {
         ? prefetched.reservations ? Promise.resolve(prefetched.reservations)
           : StudentService.getActiveReservations({ ...params, paginated: true, page: requestedPage })
         : Promise.resolve([]);
-      const [studentPage, reservationPage, summaryData] = await Promise.all([
+      const [studentPage, reservationPage] = await Promise.all([
         studentsPromise,
         reservationsPromise,
-        StudentService.getStudentListSummary(summaryParams).catch(() => null),
       ]);
       if (requestId !== this.studentListRequestId) return;
       const students = Array.isArray(studentPage) ? studentPage : (studentPage?.students || []);
@@ -359,8 +357,14 @@ class StudentsView extends Component {
       const reservations = Array.isArray(reservationPage) ? reservationPage : (reservationPage?.reservations || []);
       const totalReservations = Array.isArray(reservationPage) ? reservations.length : (reservationPage?.total ?? reservations.length);
       const totalPages = Math.max(Math.ceil((showingReservations ? totalReservations : totalStudents) / 10), 1);
-      const summaryCounts = summaryData?.counts || [];
-      const summaryModel = { counts: summaryCounts, reservations: summaryData?.reservations ?? reservations.length };
+      const summaryCounts = showingReservations ? [] : students.map(student => ({
+        status: student.status,
+        registration_type: student.registrationType || student.registration_type || 'REGULAR',
+        active: Boolean(student.hasActiveEnrollment || student.active || ['matriculado', 'en_curso', 'activo'].includes(String(student.status || '').toLowerCase())),
+        has_collectible_debt: Boolean(student.hasCollectibleDebt ?? student.has_collectible_debt),
+        count: 1,
+      }));
+      const summaryModel = { counts: summaryCounts, reservations: reservations.length };
       this.disabledStudentCount = this.getCountByStatus(summaryCounts, 'inhabilitado');
       const orderedStudents = students;
       this.visibleReservations = reservations;

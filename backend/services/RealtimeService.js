@@ -20,14 +20,21 @@ class RealtimeService {
     this.stopped = false;
   }
 
-  attach(server, originAllowed) {
+  attach(server, originAllowed, checkNetwork = async () => null) {
     this.wss = new WebSocketServer({ noServer: true, maxPayload: 8192, perMessageDeflate: false });
-    this.upgrade = (req, socket, head) => {
+    this.upgrade = async (req, socket, head) => {
       if (req.url !== '/api/realtime' || !originAllowed(req.headers.origin) || !this.ready) {
         socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
         return;
       }
-      this.wss.handleUpgrade(req, socket, head, ws => this.accept(ws));
+      try {
+        const rejection = await checkNetwork(req);
+        if (rejection) {
+          socket.end(`HTTP/1.1 ${rejection.status} Forbidden\r\nConnection: close\r\n\r\n`);
+          return;
+        }
+        if (!socket.destroyed) this.wss.handleUpgrade(req, socket, head, ws => this.accept(ws));
+      } catch { socket.destroy(); }
     };
     server.on('upgrade', this.upgrade);
     this.server = server;

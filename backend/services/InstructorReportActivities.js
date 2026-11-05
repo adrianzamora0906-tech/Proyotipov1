@@ -58,18 +58,18 @@ module.exports = `activity_events AS (
   UNION ALL
   SELECT s.id,s.identification,TRIM(CONCAT(s.first_name,' ',s.last_name)),s.email,s.phone,
     NULL::uuid,'Horas practicas'::text,ap.id,NULL::text,
-    ap.start_date,ap.start_date+ap.number_of_days-1,'ADDITIONAL_PRACTICE'::text,
+    ap.start_date,(additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days))[ap.number_of_days],'ADDITIONAL_PRACTICE'::text,
     ap.daily_start_time,(ap.daily_start_time+INTERVAL '100 minutes')::time,
     TO_CHAR(ap.daily_start_time,'HH24:MI') || ' - ' || TO_CHAR(ap.daily_start_time+INTERVAL '100 minutes','HH24:MI'),
     COUNT(*)::int,0::int,
-    COUNT(*) FILTER(WHERE day_offset<ap.completed_days)::int,
+    COUNT(*) FILTER(WHERE practice_index<ap.completed_days)::int,
     STRING_AGG(TO_CHAR(ap.start_date+day_offset,'DD/MM/YYYY'),', ' ORDER BY day_offset),
-    ROUND((COUNT(*) FILTER(WHERE day_offset<ap.completed_days)*100.0/60)::numeric,2),
+    ROUND((COUNT(*) FILTER(WHERE practice_index<ap.completed_days)*100.0/60)::numeric,2),
     ROUND((COUNT(*)*100.0/60)::numeric,2)
   FROM additional_driving_practices ap
   JOIN students s ON s.id=ap.student_id AND s.status<>'inhabilitado'
   JOIN branches b ON b.id=ap.branch_id
-  CROSS JOIN LATERAL generate_series(0,ap.number_of_days-1) day_offset
+  CROSS JOIN LATERAL (SELECT (d-ap.start_date)::int day_offset,(ordinality-1)::int practice_index FROM unnest(additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days)) WITH ORDINALITY AS dates(d,ordinality)) practice_dates
   WHERE ap.instructor_id=$6 AND ap.status IN ('SCHEDULED','IN_PROGRESS','COMPLETED')
     AND ap.start_date+day_offset BETWEEN $2::date AND $3::date
     AND ($1::uuid IS NULL OR b.id=$1) AND ($4::text IS NULL OR b.province=$4) AND ($5::text IS NULL OR b.city=$5)

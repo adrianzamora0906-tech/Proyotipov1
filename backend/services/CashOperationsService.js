@@ -75,6 +75,7 @@ class CashOperationsService {
   }
 
   static async createTransfer(data, actor, authorization, requestContext, client = db) {
+    data = { ...data, amount: require('./Money').cents(data.amount) / 100 };
     if(client===db) {
       const transaction=await db.getClient();
       try {await transaction.query('BEGIN');const result=await this.createTransfer({...data},actor,authorization,requestContext,transaction);
@@ -94,7 +95,7 @@ class CashOperationsService {
             NULLIF(LOWER(TRIM(COALESCE(NULLIF(b.province,''),bc.province,''))), '') IS NOT NULL
             AND LOWER(TRIM(COALESCE(NULLIF(b.province,''),bc.province,'')))
               =LOWER(TRIM(COALESCE(NULLIF(collector.province,''),cc.province,'')))
-          ))`, [data.serviceTransactionId,data.cedula,Boolean(authorization?.global),branchId])).rows[0];
+          )) FOR UPDATE OF st`, [data.serviceTransactionId,data.cedula,Boolean(authorization?.global),branchId])).rows[0];
       if (!service) throw createError(404, 'Servicio pendiente no encontrado o fuera del alcance de cobro');
       data.studentId = service.student_id;
       branchId = service.branch_id;

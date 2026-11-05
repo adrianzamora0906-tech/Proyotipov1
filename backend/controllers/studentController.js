@@ -21,6 +21,9 @@ async function getStudentScope(req, useDefaultBranch = true) {
   const location = await db.query('SELECT city_id FROM branches WHERE id = $1', [branchId]);
   if (!location.rows.length) throw require('../middleware/errorHandler').createError(403, 'Sucursal de la sesión no disponible');
   const cityId = location.rows[0]?.city_id || null;
+  if (req.query.scope === 'authored') {
+    return { authored_only: true, created_by: req.user.id };
+  }
   if (req.query.scope === 'created') {
     return { created_only: true, created_by: req.user.id };
   }
@@ -38,6 +41,18 @@ async function getStudentScope(req, useDefaultBranch = true) {
     created_by: req.user.id,
     updated_by: req.user.id,
   };
+}
+
+async function getStudentListScope(req) {
+  const scope = await getStudentScope(req);
+  if (req.query.scope === 'authored') {
+    return { ...scope, authored_only: true, created_by: req.user.id };
+  }
+  if (req.query.branch_id && scope.branch_id === req.query.branch_id
+    && req.user.role !== 'instructor') {
+    return { ...scope, branch_id: undefined, sales_branch_id: req.query.branch_id };
+  }
+  return scope;
 }
 
 class StudentController {
@@ -130,7 +145,7 @@ class StudentController {
   static async listSummary(req, res, next) {
     try {
       const { search, province, city, instructor_id, date_from, date_to, created_date, course_type } = req.query;
-      const common = { search, province, city, instructor_id, date_from, date_to, created_date, course_type, ...await getStudentScope(req) };
+      const common = { search, province, city, instructor_id, date_from, date_to, created_date, course_type, ...await getStudentListScope(req) };
       const [counts, reservations] = await Promise.all([
         StudentService.getAll({ ...common, aggregate: true }),
         StudentService.getActiveSeatReservations({ ...common, aggregate: true }),
@@ -141,7 +156,7 @@ class StudentController {
   static async getAll(req, res, next) {
     try {
       const { status, search, province, city, instructor_id, date_from, date_to, created_date, registration_type, course_type } = req.query;
-      const students = await StudentService.getAll({ status, search, province, city, instructor_id, date_from, date_to, created_date, registration_type, course_type, ...await getStudentScope(req),
+      const students = await StudentService.getAll({ status, search, province, city, instructor_id, date_from, date_to, created_date, registration_type, course_type, ...await getStudentListScope(req),
         ...(req.query.paginated === 'true' ? { paginated: true, page: /^\d{1,7}$/.test(req.query.page) ? Number(req.query.page) : 1, group: req.query.group, preferred_branch: effectiveBranchId(req) } : {}) });
       return res.json({ success: true, data: students });
     } catch (error) { next(error); }
@@ -157,7 +172,7 @@ class StudentController {
         province: req.query.province,
         city: req.query.city,
         course_type: req.query.course_type,
-        ...await getStudentScope(req),
+        ...await getStudentListScope(req),
         ...(req.query.paginated === 'true' ? { paginated: true, page: /^\d{1,7}$/.test(req.query.page) ? Number(req.query.page) : 1 } : {}),
       });
       return res.json({ success: true, data: reservations });
@@ -168,6 +183,7 @@ class StudentController {
     try {
       const reservation = await StudentService.createTemporarySeatReservation(req.body, req.user, {
         global: Boolean(req.authorization?.global),
+        branchId: effectiveBranchId(req),
       });
       return res.status(201).json({ success: true, data: reservation });
     } catch (error) { next(error); }

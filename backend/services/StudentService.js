@@ -117,15 +117,18 @@ class StudentService {
   }
 
   static async getActiveSeatReservations(filters = {}) {
+    if (filters.authored_only && !filters.created_by) throw createError(403, 'No se pudo verificar el autor del registro');
     await db.query('SELECT expire_course_cycle_seat_reservations()');
     const params = [];
     let where = "reservation.status='activo'";
     const add = value => { params.push(value); return `$${params.length}`; };
     if (filters.branch_id) where += ` AND reservation.branch_id=${add(filters.branch_id)}`;
+    if (filters.registration_branch_id) where += ` AND COALESCE(reservation.sales_branch_id,reservation_creator.branch_id,reservation.branch_id)=${add(filters.registration_branch_id)}`;
+    if (filters.sales_branch_id) where += ` AND reservation.sales_branch_id=${add(filters.sales_branch_id)}`;
     if (filters.city_id) where += ` AND branch.city_id=${add(filters.city_id)}`;
     if (filters.province) where += ` AND LOWER(branch.province)=LOWER(${add(filters.province)})`;
     if (filters.city) where += ` AND LOWER(branch.city)=LOWER(${add(filters.city)})`;
-    if (filters.created_only && filters.created_by) where += ` AND reservation.created_by=${add(filters.created_by)}`;
+    if ((filters.created_only || filters.authored_only) && filters.created_by) where += ` AND reservation.created_by=${add(filters.created_by)}`;
     if (filters.search) {
       const value = add(`%${String(filters.search).trim()}%`);
       where += ` AND (reservation.referred_name ILIKE ${value} OR reservation.referred_identification ILIKE ${value} OR instructor_user.first_name ILIKE ${value} OR instructor_user.last_name ILIKE ${value})`;
@@ -166,7 +169,7 @@ class StudentService {
     if (filters.paginated) {
       const total = Number((await db.query(`SELECT COUNT(*) total FROM (${sql}) source`, params)).rows[0].total);
       const page = Math.min(Math.max(1, Math.ceil(total / 10)), Math.max(1, Number(filters.page) || 1));
-      sql = `SELECT id,name,identification,phone,created_by_name,instructor_name,course_name,cycle_code,start_date,start_time,end_time,expires_at FROM (${sql}) source LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      sql = `SELECT id,name,identification,phone,created_at,created_by_name,instructor_name,course_name,cycle_code,start_date,start_time,end_time,expires_at FROM (${sql}) source LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
       return { reservations: (await db.query(sql, [...params, 10, (page - 1) * 10])).rows, total, page, pageSize: 10 };
     }
     return (await db.query(sql, params)).rows;
@@ -241,9 +244,9 @@ class StudentService {
       const firstTime=String(selections[0].time).match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);
       safeDraft.nationality=data.nationality||null;
       const reservation=(await client.query(`INSERT INTO course_cycle_seat_reservations
-        (cycle_id,instructor_id,referred_name,referred_phone,referred_identification,course_id,branch_id,reserved_start_time,reserved_end_time,notes,created_by,expires_at,reservation_kind,draft_data)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8::time,$9::time,$10,$11,NOW()+($12::int*INTERVAL '1 day'),'temporary_enrollment',$13::jsonb) RETURNING *`,
-        [cycleId,instructorId,`${firstName} ${lastName}`,data.phone||null,identification,courseId,reservationBranchId,firstTime[1],firstTime[2],String(data.notes||'').slice(0,240)||null,user.id,reservationDays,JSON.stringify(safeDraft)])).rows[0];
+        (cycle_id,instructor_id,referred_name,referred_phone,referred_identification,course_id,branch_id,reserved_start_time,reserved_end_time,notes,created_by,expires_at,reservation_kind,draft_data,sales_branch_id,sales_branch_source)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8::time,$9::time,$10,$11,NOW()+($12::int*INTERVAL '1 day'),'temporary_enrollment',$13::jsonb,$14,'authenticated_reserver_branch') RETURNING *`,
+        [cycleId,instructorId,`${firstName} ${lastName}`,data.phone||null,identification,courseId,reservationBranchId,firstTime[1],firstTime[2],String(data.notes||'').slice(0,240)||null,user.id,reservationDays,JSON.stringify(safeDraft),access.branchId||user.branch_id])).rows[0];
       for(const selection of selections){const match=String(selection.time).match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);await client.query(`INSERT INTO instructor_availability_overrides
         (instructor_id,schedule_date,start_time,end_time,status,reason,active,created_by,updated_by)
         VALUES($1,$2::date,$3::time,$4::time,'reserved',$5,TRUE,$6,$6)
@@ -308,11 +311,20 @@ class StudentService {
    * Obtener todos los estudiantes con su branch y enrollment info
    */
   static async getAll(filters = {}) {
+    const collectibleDebt = require('./StudentCollectibleDebt')('s');
+    const identification = String(filters.search || '').trim();
+    const identificationSearch = /^\d{10}$/.test(identification);
+    if (identificationSearch) {
+      filters = { ...filters };
+      // Identification lookup crosses presentation states, never authorization scope.
+      if (filters.status !== 'inhabilitado') delete filters.status;
+      delete filters.registration_type;
+    }
     // CURRENT_DATE no genera eventos en PostgreSQL. Recalcular al consultar garantiza
     // que un ciclo cambie a "en_curso" o "completado" aunque no haya otra escritura.
     await db.query('SELECT refresh_due_student_academic_statuses()');
     let sql = `
-      SELECT s.*, b.name as branch_name, pickup.name as pickup_branch_name, c.name as city_name, c.province as city_province,
+      SELECT s.*, ${collectibleDebt} AS has_collectible_debt, b.name as branch_name, pickup.name as pickup_branch_name, c.name as city_name, c.province as city_province,
         TRIM(CONCAT(creator.first_name, ' ', creator.last_name)) AS created_by_name,
         creator_branch.id AS registered_by_branch_id,
         creator_branch.name AS registered_by_branch_name,
@@ -363,12 +375,23 @@ class StudentService {
       WHERE 1=1`;
     const params = [];
     let idx = 1;
+    const salesJoin = ` LEFT JOIN LATERAL (
+      SELECT sale_branch.id,sale_branch.name,sale_branch.city
+      FROM enrollments sale JOIN branches sale_branch ON sale_branch.id=sale.sales_branch_id
+      WHERE sale.student_id=s.id AND LOWER(sale.status) NOT IN ('cancelado','inhabilitado')
+        ${filters.sales_branch_id ? `AND sale.sales_branch_id=$${idx++}` : ''}
+      ORDER BY sale.enrollment_date DESC,sale.id DESC LIMIT 1
+    ) sales_branch ON TRUE `;
+    if (filters.sales_branch_id) params.push(filters.sales_branch_id);
+    sql = sql.replace('SELECT s.*,', 'SELECT s.*, sales_branch.name AS sales_branch_name, sales_branch.id AS sales_branch_id, sales_branch.city AS sales_branch_city,');
+    sql = sql.replace('      WHERE 1=1', `${salesJoin} WHERE 1=1`);
+    if (filters.sales_branch_id) sql += ' AND sales_branch.id IS NOT NULL';
 
-    if (filters.status !== 'inhabilitado' && !filters.aggregate) sql += " AND s.status <> 'inhabilitado'";
+    if (!identificationSearch && filters.status !== 'inhabilitado' && !filters.aggregate) sql += " AND s.status <> 'inhabilitado'";
     if (filters.status === 'active') {
       sql += ` AND EXISTS (SELECT 1 FROM enrollments active_e WHERE active_e.student_id = s.id AND active_e.status = 'activo')`;
     } else if (filters.status === 'payment_pending') {
-      sql += ` AND s.status IN ('pendiente_pago', 'pago_parcial', 'pending_payment')`;
+      sql += ` AND ${collectibleDebt}`;
     } else if (filters.status === 'documents_pending') {
       sql += ` AND s.status IN ('pendiente_documentacion', 'pendiente_documentos', 'pendiente_doc', 'pending_documents')`;
     } else if (filters.status === 'historical') {
@@ -394,10 +417,19 @@ class StudentService {
       sql += ` AND s.created_at >= $${createdDateParam}::date AND s.created_at < ($${createdDateParam}::date + INTERVAL '1 day')`;
       params.push(filters.created_date);
     }
-    if (filters.search) {
-      sql += ` AND (s.identification ILIKE $${idx} OR s.first_name ILIKE $${idx} OR s.last_name ILIKE $${idx} OR CONCAT(s.first_name, ' ', s.last_name) ILIKE $${idx})`;
-      params.push(`%${filters.search}%`);
-      idx += 1;
+    if (identificationSearch) {
+      sql += ` AND LPAD(s.identification,10,'0') = $${idx++}`;
+      params.push(identification);
+    } else if (filters.search) {
+      for (const term of String(filters.search).trim().split(/\s+/).filter(Boolean)) {
+        sql += ` AND (s.identification ILIKE $${idx} OR CONCAT_WS(' ', s.first_name, s.last_name) ILIKE $${idx})`;
+        params.push(`%${term}%`);
+        idx += 1;
+      }
+    }
+    if (filters.registration_branch_id) {
+      sql += ` AND creator_branch.id = $${idx++}`;
+      params.push(filters.registration_branch_id);
     }
     if (filters.registration_type) {
       sql += ` AND s.registration_type = $${idx++}`;
@@ -433,6 +465,11 @@ class StudentService {
       sql += ` AND LOWER(b.city) = LOWER($${idx++})`;
       params.push(filters.city);
     }
+    if (filters.authored_only) {
+      if (!filters.created_by) throw createError(403, 'No se pudo verificar el autor del registro');
+      sql += ` AND s.created_by = $${idx++}`;
+      params.push(filters.created_by);
+    }
     if (filters.created_only) {
       sql += ` AND (s.created_by = $${idx} OR s.updated_by = $${idx++})`;
       params.push(filters.created_by);
@@ -457,15 +494,19 @@ class StudentService {
     const instructorEnd = sql.indexOf(') instructor ON true', instructorStart) + ') instructor ON true'.length;
     const needsInstructor = filters.instructor_id || filters.date_from || filters.date_to || filters.group === 'instructor';
     const instructorJoin = needsInstructor ? sql.slice(instructorStart,instructorEnd) : '';
-    const filterSql = 'SELECT s.id,s.status,s.registration_type FROM students s LEFT JOIN branches b ON b.id=s.branch_id ' + instructorJoin + sql.slice(sql.indexOf('      WHERE 1=1'));
+    const registrationJoin = filters.registration_branch_id
+      ? sql.slice(sql.indexOf('      LEFT JOIN users creator ON'), sql.indexOf('      LEFT JOIN users referrer ON')) : '';
+    const filterSql = 'SELECT s.id,s.status,s.registration_type FROM students s LEFT JOIN branches b ON b.id=s.branch_id ' + registrationJoin + salesJoin + instructorJoin + sql.slice(sql.indexOf(' WHERE 1=1'));
     if (filters.aggregate) {
-      sql = filterSql.replace('SELECT s.id,s.status,s.registration_type', "SELECT s.id,s.status,s.registration_type,EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=s.id AND e.status='activo') active");
+      sql = filterSql.replace('SELECT s.id,s.status,s.registration_type', `SELECT s.id,s.status,s.registration_type,${collectibleDebt} has_collectible_debt,EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=s.id AND e.status='activo') active`);
       return (await db.query(`SELECT status, COALESCE(registration_type,'REGULAR') registration_type,
-        active,
-        COUNT(*)::int count FROM (${sql}) source GROUP BY status, COALESCE(registration_type,'REGULAR'), active`, params)).rows;
+        active,has_collectible_debt,
+        COUNT(*)::int count FROM (${sql}) source GROUP BY status, COALESCE(registration_type,'REGULAR'), active,has_collectible_debt`, params)).rows;
     }
     if (filters.paginated) {
       sql = sql.replace(/SELECT s\.\*[\s\S]*?FROM students s/, `SELECT s.id,s.identification,s.first_name,s.last_name,s.email,s.status,s.branch_id,s.registration_type,s.created_at,
+        ${collectibleDebt} AS has_collectible_debt,
+        sales_branch.name sales_branch_name,sales_branch.id sales_branch_id,sales_branch.city sales_branch_city,
         b.name branch, TRIM(CONCAT(creator.first_name,' ',creator.last_name)) created_by_name,
         creator_branch.name registered_by_branch_name, creator_city.name registered_by_city_name,
         instructor.instructor_name FROM students s`);
@@ -530,7 +571,7 @@ class StudentService {
           'instructor_name', TRIM(CONCAT(iu.first_name, ' ', iu.last_name)),
           'branch_name', pb.name,
           'start_date', ap.start_date,
-          'end_date', ap.start_date + (ap.number_of_days - 1),
+          'end_date', (additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days))[ap.number_of_days],
           'daily_start_time', ap.daily_start_time,
           'number_of_days', ap.number_of_days,
           'completed_days', ap.completed_days,
@@ -540,7 +581,7 @@ class StudentService {
           'referred_by_name', NULLIF(TRIM(CONCAT(apu.first_name, ' ', apu.last_name)), ''),
           'status', CASE
             WHEN ap.status = 'CANCELLED' THEN 'CANCELLED'
-            WHEN ap.completed_days >= ap.number_of_days OR CURRENT_DATE > ap.start_date + (ap.number_of_days - 1) THEN 'COMPLETED'
+            WHEN ap.completed_days >= ap.number_of_days OR CURRENT_DATE > (additional_practice_dates(ap.branch_id,ap.start_date,ap.number_of_days))[ap.number_of_days] THEN 'COMPLETED'
             WHEN CURRENT_DATE >= ap.start_date THEN 'IN_PROGRESS'
             ELSE 'SCHEDULED'
           END
@@ -594,7 +635,7 @@ class StudentService {
     const cityId = scope.city_id || null;
     const createdBy = scope.created_by || null;
     const updatedBy = scope.updated_by || createdBy;
-    const searchTerm = `%${query}%`;
+    const searchTerms = String(query || '').trim().split(/\s+/).filter(Boolean).map(term => `%${term}%`);
     const result = await db.query(`
       SELECT s.*, b.name as branch_name, pickup.name as pickup_branch_name,
         COALESCE((SELECT json_agg(e.course_id) FROM enrollments e WHERE e.student_id=s.id
@@ -602,10 +643,10 @@ class StudentService {
       FROM students s
       LEFT JOIN branches b ON s.branch_id = b.id
       LEFT JOIN branches pickup ON pickup.id = s.pickup_branch_id
-      WHERE (s.identification ILIKE $1
-         OR s.first_name ILIKE $1
-         OR s.last_name ILIKE $1
-         OR s.first_name || ' ' || s.last_name ILIKE $1)
+      WHERE NOT EXISTS (
+        SELECT 1 FROM unnest($1::text[]) term
+        WHERE NOT (s.identification ILIKE term OR CONCAT_WS(' ',s.first_name,s.last_name) ILIKE term)
+      )
         AND (
           ($2::uuid IS NULL AND $3::uuid IS NULL AND $4::uuid IS NULL)
           OR s.branch_id = $2
@@ -616,7 +657,7 @@ class StudentService {
         )
       ORDER BY s.created_at DESC
       LIMIT 20
-    `, [searchTerm, branchId, cityId, createdBy, updatedBy]);
+    `, [searchTerms, branchId, cityId, createdBy, updatedBy]);
     return result.rows;
   }
 
@@ -730,9 +771,13 @@ class StudentService {
     }
 
     const discountBenefit = String(data.discountBenefit || '').trim() || null;
+    require('./validateHalloweenPromotion')(discountBenefit);
+    const comboSize=require('./validateComboSize')(discountBenefit,data.comboSize);
     const benefitFinalPrices = {
       UNIVERSITY_STUDENT: { moto: 117, carro: 180 },
+      HALLOWEEN: { moto: 114.99, carro: 164.99 },
       POLICE: { moto: 110, carro: 170 },
+      COMBO: { moto: 115, carro: 180 },
     };
     if (discountBenefit && !benefitFinalPrices[discountBenefit]) {
       throw createError(422, 'El convenio de descuento no es valido');
@@ -751,7 +796,7 @@ class StudentService {
       throw createError(422, 'El precio del convenio no puede superar el valor del curso');
     }
     const discount = discountBenefit
-      ? Number(selectedCourseRecord.price) - benefitFinalAmount
+      ? Number((Number(selectedCourseRecord.price) - benefitFinalAmount).toFixed(2))
       : Number(data.discount || 0);
     if (!Number.isFinite(discount) || discount < 0) throw createError(422, 'El descuento no es válido');
     if (discount > 0 && !allowDiscount && !discountBenefit) throw createError(403, 'No tienes permiso para aplicar descuentos');
@@ -788,8 +833,8 @@ class StudentService {
     const result = await db.query(`
       INSERT INTO students (identification, first_name, last_name, birth_date, email, phone,
         address, blood_type, branch_id, city_id, status, created_by, registration_type, referred_by_user_id, notes,
-        pickup_branch_id, disability_percentage, discount_benefit, nationality)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        pickup_branch_id, disability_percentage, discount_benefit, combo_size, nationality)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       RETURNING *
     `, [
       data.identification,
@@ -810,6 +855,7 @@ class StudentService {
       pickupBranchId,
       isTypeF ? disabilityPercentage : null,
       discountBenefit,
+      comboSize,
       data.nationality || null,
     ]);
 
@@ -868,7 +914,7 @@ class StudentService {
         await db.query('INSERT INTO history (student_id, action) VALUES ($1, $2)', [
           student.id,
           discountBenefit
-            ? `Convenio ${discountBenefit === 'POLICE' ? 'Policía' : 'Estudiante universitario'} aplicado: precio final $${benefitFinalAmount.toFixed(2)}`
+            ? `Convenio ${discountBenefit === 'HALLOWEEN' ? 'Promo Halloween' : discountBenefit === 'COMBO' ? `Combo (${comboSize} personas declaradas)` : discountBenefit === 'POLICE' ? 'Policía' : 'Estudiante universitario'} aplicado: precio final $${benefitFinalAmount.toFixed(2)}`
             : `Descuento de $${discount.toFixed(2)} aplicado al registrar la matrícula`,
         ]);
       }

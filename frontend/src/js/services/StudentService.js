@@ -184,7 +184,13 @@ class StudentService {
     if (this.useApi) {
       try {
         const result = await ApiService.getStudents(params);
-        if (result.success) return result.data.map(student => this.normalizeStudent(student));
+        if (result.success && Array.isArray(result.data)) return result.data.map(student => this.normalizeStudent(student));
+        if (result.success && Array.isArray(result.data?.students)) {
+          return {
+            ...result.data,
+            students: result.data.students.map(student => this.normalizeStudent(student)),
+          };
+        }
         return [];
       } catch (e) {
         console.error('No se pudo consultar el listado de estudiantes:', e.message);
@@ -192,6 +198,12 @@ class StudentService {
       }
     }
     return storageService.findAll('students');
+  }
+
+  static async getStudentListSummary(params = {}) {
+    const result = await ApiService.getStudentListSummary(params);
+    if (!result.success || !result.data) throw new Error('No se pudo cargar el resumen de estudiantes');
+    return result.data;
   }
 
   static async getInstructors(branchId = null) {
@@ -207,7 +219,10 @@ class StudentService {
   static async getActiveReservations(params = {}) {
     try {
       const result = await ApiService.getStudentReservations(params);
-      return result.success ? result.data : [];
+      if (!result.success) return [];
+      if (Array.isArray(result.data)) return result.data;
+      if (Array.isArray(result.data?.reservations)) return result.data.reservations;
+      return result.data;
     } catch (error) {
       console.error('No se pudieron consultar los cupos reservados:', error.message);
       return [];

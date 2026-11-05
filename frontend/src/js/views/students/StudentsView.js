@@ -73,21 +73,29 @@ class StudentsView extends Component {
     const summaryParams = { ...listParams };
     delete summaryParams.status;
     delete summaryParams.registration_type;
-    const summaryStudentsPromise = isRegistrationPage ? Promise.resolve([]) : StudentService.getAllStudents(summaryParams);
-    const studentsPromise = !isRegistrationPage && listParams.status
-      ? StudentService.getAllStudents(listParams)
-      : summaryStudentsPromise.then(items => identificationSearch ? items : items.filter(student => student.registrationType === selectedRegistrationType));
-    const [students, branches, reservations, summaryStudents, summaryReservations, disabledStudents] = await Promise.all([
+    const showingReservations = selectedStatus === 'reservado';
+    const paginatedListParams = { ...listParams, paginated: true, page: currentPage, group: this.groupBy };
+    const studentsPromise = !isRegistrationPage && !showingReservations
+      ? StudentService.getAllStudents(paginatedListParams)
+      : Promise.resolve({ students: [], total: 0, page: currentPage });
+    const reservationsPromise = !isRegistrationPage && showingReservations
+      ? StudentService.getActiveReservations({ ...listParams, paginated: true, page: currentPage })
+      : Promise.resolve([]);
+    const [studentPage, branches, reservationPage, summaryData] = await Promise.all([
       studentsPromise,
       StudentService.getBranches(),
-      isRegistrationPage ? Promise.resolve([]) : StudentService.getActiveReservations(listParams),
-      summaryStudentsPromise,
-      !isRegistrationPage && selectedStatus ? StudentService.getActiveReservations(summaryParams) : Promise.resolve(null),
-      isRegistrationPage ? Promise.resolve([]) : this.getDisabledStudents(summaryParams).catch(() => null),
+      reservationsPromise,
+      isRegistrationPage ? Promise.resolve(null) : StudentService.getStudentListSummary(summaryParams).catch(() => null),
     ]);
-    this.disabledStudentCount = disabledStudents?.length ?? null;
-    const allSummaryStudents = summaryStudents || students;
-    const allSummaryReservations = summaryReservations || reservations;
+    const students = Array.isArray(studentPage) ? studentPage : (studentPage?.students || []);
+    const totalStudents = Array.isArray(studentPage) ? students.length : (studentPage?.total ?? students.length);
+    const page = Array.isArray(studentPage) ? currentPage : (studentPage?.page ?? currentPage);
+    const reservations = Array.isArray(reservationPage) ? reservationPage : (reservationPage?.reservations || []);
+    const totalReservations = Array.isArray(reservationPage) ? reservations.length : (reservationPage?.total ?? reservations.length);
+    const totalPages = Math.max(Math.ceil((showingReservations ? totalReservations : totalStudents) / 10), 1);
+    const summaryCounts = summaryData?.counts || [];
+    this.disabledStudentCount = this.getCountByStatus(summaryCounts, 'inhabilitado');
+    const summaryModel = { counts: summaryCounts, reservations: summaryData?.reservations ?? reservations.length };
     this.visibleReservations = reservations;
     const currentBranch = currentUser?.branch || '';
     const currentBranchId = currentUser?.branch_id || '';
@@ -117,34 +125,16 @@ class StudentsView extends Component {
         : `branch:${queryParams.get('branch_id') || currentBranchRecord?.id || ''}`;
     const provinceOptions = [...new Set(cantonBranches.map(branch => branch.province).filter(Boolean))];
     const cantonOptions = [...new Set(cantonBranches.map(branch => branch.city).filter(Boolean))];
-    const orderedStudents = [...students].sort((first, second) => {
-      if (this.groupBy === 'instructor') {
-        const firstInstructor = (first.instructorName || 'Sin instructor').toLowerCase();
-        const secondInstructor = (second.instructorName || 'Sin instructor').toLowerCase();
-        return firstInstructor.localeCompare(secondInstructor)
-          || this.compareStudentsByCreationDate(first, second);
-      }
-      const belongsToCurrentBranch = student => String(student.branchId || '') === String(currentBranchId || '')
-        || String(student.branch || '').trim() === String(currentBranch || '').trim();
-      const firstCurrent = belongsToCurrentBranch(first) ? 0 : 1;
-      const secondCurrent = belongsToCurrentBranch(second) ? 0 : 1;
-      return firstCurrent - secondCurrent
-        || (first.branch || '').localeCompare(second.branch || '')
-        || this.compareStudentsByCreationDate(first, second);
-    });
+    const orderedStudents = students;
     this.studentsSnapshot = this.createSnapshot(orderedStudents);
-    this.reservationsSnapshot = this.createReservationsSnapshot(allSummaryReservations);
+    this.reservationsSnapshot = this.createReservationsSnapshot(reservations);
 
     // El registro completo vive en esta vista para conservar documentos,
     // horarios, pagos, QR y sus validaciones. En esta ruta se presenta como
     // página, no como diálogo superpuesto al listado.
-    const pageSize = 10;
-    const showingReservations = selectedStatus === 'reservado';
     const displayedRecords = showingReservations ? reservations : orderedStudents;
-    const totalPages = Math.max(Math.ceil(displayedRecords.length / pageSize), 1);
-    const page = Math.min(currentPage, totalPages);
-    const pagedStudents = orderedStudents.slice((page - 1) * pageSize, page * pageSize);
-    const pagedReservations = reservations.slice((page - 1) * pageSize, page * pageSize);
+    const pagedStudents = orderedStudents;
+    const pagedReservations = reservations;
 
     const studentsContent = `
       <div class="students">
@@ -163,7 +153,7 @@ class StudentsView extends Component {
         </div>
 
         <section class="students-summary" id="students-summary" aria-label="Resumen de estudiantes">
-          ${this.renderStudentSummary(allSummaryStudents, allSummaryReservations, selectedStatus)}
+          ${this.renderStudentSummary(summaryModel, [], selectedStatus)}
         </section>
 
         <form class="student-filter-bar" id="student-filter-form">
@@ -195,11 +185,11 @@ class StudentsView extends Component {
               <h3 class="card-title" id="students-list-title">${showingReservations ? 'Cupos reservados' : 'Estudiantes registrados'}</h3>
               <p id="students-list-description">${showingReservations ? 'Personas con un lugar protegido que todavía no tienen matrícula.' : 'Selecciona una fila para abrir el expediente.'}</p>
             </div>
-            <span class="students-result-count" id="students-result-count">${this.getResultCountLabel(displayedRecords.length, showingReservations)}</span>
+            <span class="students-result-count" id="students-result-count">${this.getResultCountLabel(showingReservations ? totalReservations : totalStudents, showingReservations)}</span>
           </div>
 
           <nav class="student-registration-tabs" id="student-registration-tabs" aria-label="Tipos de registro">
-            ${this.renderRegistrationTabs(allSummaryStudents, selectedRegistrationType)}
+            ${this.renderRegistrationTabs(summaryModel, selectedRegistrationType)}
           </nav>
 
           <div id="students-list-content">
@@ -348,52 +338,50 @@ class StudentsView extends Component {
       const summaryParams = { ...params };
       delete summaryParams.status;
       delete summaryParams.registration_type;
-      const summaryStudentsPromise = StudentService.getAllStudents(summaryParams);
-      const studentsPromise = prefetched.students ? Promise.resolve(prefetched.students)
-        : params.status ? StudentService.getAllStudents(params)
-        : summaryStudentsPromise.then(items => params.registration_type
-          ? items.filter(student => student.registrationType === params.registration_type) : items);
-      const [students, reservations, summaryStudents, summaryReservations, disabledStudents] = await Promise.all([
+      const paginatedParams = { ...params, paginated: true, page: requestedPage, group: this.groupBy };
+      const showingReservations = params.status === 'reservado';
+      const studentsPromise = showingReservations ? Promise.resolve({ students: [], total: 0, page: requestedPage })
+        : prefetched.students ? Promise.resolve(prefetched.students)
+          : StudentService.getAllStudents(paginatedParams);
+      const reservationsPromise = showingReservations
+        ? prefetched.reservations ? Promise.resolve(prefetched.reservations)
+          : StudentService.getActiveReservations({ ...params, paginated: true, page: requestedPage })
+        : Promise.resolve([]);
+      const [studentPage, reservationPage, summaryData] = await Promise.all([
         studentsPromise,
-        prefetched.reservations ? Promise.resolve(prefetched.reservations) : StudentService.getActiveReservations(params),
-        summaryStudentsPromise,
-        params.status ? StudentService.getActiveReservations(summaryParams) : Promise.resolve(null),
-        this.getDisabledStudents(summaryParams).catch(() => null),
+        reservationsPromise,
+        StudentService.getStudentListSummary(summaryParams).catch(() => null),
       ]);
       if (requestId !== this.studentListRequestId) return;
-      this.disabledStudentCount = disabledStudents?.length ?? null;
-      const currentBranch = authService.getCurrentUser()?.branch || '';
-      const orderedStudents = [...students].sort((first, second) => {
-        if (this.groupBy === 'instructor') {
-          return (first.instructorName || 'Sin instructor').localeCompare(second.instructorName || 'Sin instructor')
-            || this.compareStudentsByCreationDate(first, second);
-        }
-        return (first.branch === currentBranch ? 0 : 1) - (second.branch === currentBranch ? 0 : 1)
-          || (first.branch || '').localeCompare(second.branch || '')
-          || this.compareStudentsByCreationDate(first, second);
-      });
-      const pageSize = 10;
-      const showingReservations = params.status === 'reservado';
+      const students = Array.isArray(studentPage) ? studentPage : (studentPage?.students || []);
+      const totalStudents = Array.isArray(studentPage) ? students.length : (studentPage?.total ?? students.length);
+      const page = Array.isArray(studentPage) ? requestedPage : (studentPage?.page ?? requestedPage);
+      const reservations = Array.isArray(reservationPage) ? reservationPage : (reservationPage?.reservations || []);
+      const totalReservations = Array.isArray(reservationPage) ? reservations.length : (reservationPage?.total ?? reservations.length);
+      const totalPages = Math.max(Math.ceil((showingReservations ? totalReservations : totalStudents) / 10), 1);
+      const summaryCounts = summaryData?.counts || [];
+      const summaryModel = { counts: summaryCounts, reservations: summaryData?.reservations ?? reservations.length };
+      this.disabledStudentCount = this.getCountByStatus(summaryCounts, 'inhabilitado');
+      const orderedStudents = students;
       this.visibleReservations = reservations;
       const displayedRecords = showingReservations ? reservations : orderedStudents;
-      const totalPages = Math.max(Math.ceil(displayedRecords.length / pageSize), 1);
-      const page = Math.min(Math.max(Number(requestedPage) || 1, 1), totalPages);
-      const pagedStudents = orderedStudents.slice((page - 1) * pageSize, page * pageSize);
-      const pagedReservations = reservations.slice((page - 1) * pageSize, page * pageSize);
+      const displayedTotal = showingReservations ? totalReservations : totalStudents;
+      const pagedStudents = orderedStudents;
+      const pagedReservations = reservations;
       const statusSelect = document.querySelector('#student-filter-form [name="status"]');
       const statusOptions = Array.from(statusSelect?.options || [])
         .map(option => `<option value="${option.value}" ${option.selected ? 'selected' : ''}>${option.textContent}</option>`)
         .join('');
 
-      document.getElementById('students-result-count').textContent = this.getResultCountLabel(displayedRecords.length, showingReservations);
+      document.getElementById('students-result-count').textContent = this.getResultCountLabel(displayedTotal, showingReservations);
       document.getElementById('students-list-title').textContent = showingReservations ? 'Cupos reservados' : 'Estudiantes registrados';
       document.getElementById('students-list-description').textContent = showingReservations
         ? 'Personas con un lugar protegido que todavía no tienen matrícula.'
         : 'Selecciona una fila para abrir el expediente.';
       const summary = document.getElementById('students-summary');
-      if (summary) summary.innerHTML = this.renderStudentSummary(summaryStudents || orderedStudents, summaryReservations || reservations, params.status || '');
+      if (summary) summary.innerHTML = this.renderStudentSummary(summaryModel, [], params.status || '');
       const registrationTabs = document.getElementById('student-registration-tabs');
-      if (registrationTabs) registrationTabs.innerHTML = this.renderRegistrationTabs(summaryStudents || orderedStudents, this.registrationType);
+      if (registrationTabs) registrationTabs.innerHTML = this.renderRegistrationTabs(summaryModel, this.registrationType);
       container.innerHTML = displayedRecords.length ? `
         <div class="card-body">
           <div class="students-table ${showingReservations ? 'students-table--reservations' : 'students-table--with-created-date'}">
@@ -417,7 +405,7 @@ class StudentsView extends Component {
 
       this.listParams = { ...params };
       this.studentsSnapshot = this.createSnapshot(orderedStudents);
-      this.reservationsSnapshot = this.createReservationsSnapshot(summaryReservations || reservations);
+      this.reservationsSnapshot = this.createReservationsSnapshot(reservations);
       this.bindStudentTableEvents(document.getElementById('student-filter-form'), async () => {
         const form = document.getElementById('student-filter-form');
         const data = Object.fromEntries(new FormData(form));
@@ -607,7 +595,11 @@ class StudentsView extends Component {
       ['LICENSE_RENEWAL', 'Renovación de licencia'],
     ];
     return types.map(([value, label]) => {
-      const count = students.filter(student => String(student.registrationType || student.registration_type || 'REGULAR').toUpperCase() === value).length;
+      const count = Array.isArray(students)
+        ? students.filter(student => String(student.registrationType || student.registration_type || 'REGULAR').toUpperCase() === value).length
+        : (students.counts || []).filter(row => String(row.status || '').toLowerCase() !== 'inhabilitado'
+          && String(row.registration_type || 'REGULAR').toUpperCase() === value)
+          .reduce((total, row) => total + Number(row.count || 0), 0);
       const active = activeType === value;
       return `<button type="button" class="student-registration-tab ${active ? 'is-active' : ''}" data-registration-type="${value}" aria-pressed="${active}">${label}<b>${count}</b></button>`;
     }).join('');
@@ -2520,6 +2512,10 @@ class StudentsView extends Component {
         .find(calendar => Number(calendar.dataset.cycleIndex || 0) === activeIndex);
       return [`${set.dataset.course || ''}|${set.dataset.modality || ''}`, activeCalendar?.dataset.cycleId || ''];
     }));
+    const activeCycleIndices = new Map([...host.querySelectorAll('.enrollment-cycle-set')].map(set => [
+      `${set.dataset.course || ''}|${set.dataset.modality || ''}`,
+      set.dataset.activeCycleIndex || '0',
+    ]));
     // Al cambiar de instructor se conserva toda la pantalla de inscripción.
     // Solo se refrescan las celdas de disponibilidad del calendario.
     host.setAttribute('aria-busy', 'true');
@@ -2713,17 +2709,15 @@ class StudentsView extends Component {
     host.querySelectorAll('.enrollment-cycle-set').forEach(set => {
       const previousCycleId = activeCycleIds.get(`${set.dataset.course || ''}|${set.dataset.modality || ''}`);
       const calendars = [...set.querySelectorAll(':scope > .enrollment-calendar')];
-      const selectedInstructorCalendar = selectedInstructorId ? calendars.find(calendar =>
-        [...calendar.querySelectorAll('[data-course-instructor-id]')].some(button =>
-          String(button.dataset.courseInstructorId || '') === String(selectedInstructorId))) : null;
-      if (selectedInstructorCalendar) {
-        set.dataset.activeCycleIndex = selectedInstructorCalendar.dataset.cycleIndex || '0';
-        return;
-      }
       if (!previousCycleId) return;
       const matchingCalendar = calendars
         .find(calendar => String(calendar.dataset.cycleId || '') === String(previousCycleId));
       if (matchingCalendar) set.dataset.activeCycleIndex = matchingCalendar.dataset.cycleIndex || '0';
+      else {
+        const previousIndex = Number(activeCycleIndices.get(`${set.dataset.course || ''}|${set.dataset.modality || ''}`));
+        const matchingIndex = calendars.find(calendar => Number(calendar.dataset.cycleIndex) === previousIndex);
+        if (matchingIndex) set.dataset.activeCycleIndex = matchingIndex.dataset.cycleIndex || '0';
+      }
     });
     host.querySelectorAll('.enrollment-calendar').forEach(calendar => this.updateCalendarWindow(calendar));
     this.syncScheduleOptions();
@@ -6128,17 +6122,36 @@ class StudentsView extends Component {
     return `${count} ${count === 1 ? 'estudiante' : 'estudiantes'}`;
   }
 
+  getCountByStatus(counts, status) {
+    return (counts || []).filter(row => String(row.status || '').toLowerCase() === status)
+      .reduce((total, row) => total + Number(row.count || 0), 0);
+  }
+
   renderStudentSummary(students, reservations = [], activeStatus = '') {
     const enrolledStatuses = new Set(['matriculado', 'en_curso', 'active', 'activo']);
     const documentStatuses = new Set(['pendiente_documentacion', 'pendiente_documentos', 'pendiente_doc', 'pending_documents']);
-    const enrolled = students.filter(student => enrolledStatuses.has(String(student.status || '').toLowerCase())).length;
-    const pendingPayment = students.filter(student => student.hasCollectibleDebt === true).length;
-    const pendingDocuments = students.filter(student => documentStatuses.has(String(student.status || '').toLowerCase())).length;
+    let total = students.length;
+    let enrolled = students.filter(student => enrolledStatuses.has(String(student.status || '').toLowerCase())).length;
+    let pendingPayment = students.filter(student => student.hasCollectibleDebt === true).length;
+    let pendingDocuments = students.filter(student => documentStatuses.has(String(student.status || '').toLowerCase())).length;
+    let reservationCount = reservations.length;
+    if (!Array.isArray(students)) {
+      const counts = students.counts || [];
+      const visibleCounts = counts.filter(row => String(row.status || '').toLowerCase() !== 'inhabilitado');
+      total = visibleCounts.reduce((sum, row) => sum + Number(row.count || 0), 0);
+      enrolled = visibleCounts.filter(row => enrolledStatuses.has(String(row.status || '').toLowerCase()))
+        .reduce((sum, row) => sum + Number(row.count || 0), 0);
+      pendingPayment = visibleCounts.filter(row => row.has_collectible_debt === true)
+        .reduce((sum, row) => sum + Number(row.count || 0), 0);
+      pendingDocuments = visibleCounts.filter(row => documentStatuses.has(String(row.status || '').toLowerCase()))
+        .reduce((sum, row) => sum + Number(row.count || 0), 0);
+      reservationCount = Number(students.reservations || 0);
+    }
 
     return `
       <button type="button" class="student-summary-card student-summary-card--total ${!activeStatus ? 'is-active' : ''}" data-status="" aria-pressed="${!activeStatus}">
         <span class="student-summary-icon">E</span>
-        <div><strong>${students.length}</strong><span>Estudiantes visibles</span></div>
+        <div><strong>${total}</strong><span>Estudiantes visibles</span></div>
       </button>
       <button type="button" class="student-summary-card student-summary-card--enrolled ${activeStatus === 'active' ? 'is-active' : ''}" data-status="active" aria-pressed="${activeStatus === 'active'}">
         <span class="student-summary-icon">✓</span>
@@ -6154,7 +6167,7 @@ class StudentsView extends Component {
       </button>
       <button type="button" class="student-summary-card student-summary-card--reservations ${activeStatus === 'reservado' ? 'is-active' : ''}" data-status="reservado" aria-pressed="${activeStatus === 'reservado'}">
         <span class="student-summary-icon">R</span>
-        <div><strong>${reservations.length}</strong><span>Cupos reservados</span></div>
+        <div><strong>${reservationCount}</strong><span>Cupos reservados</span></div>
       </button>
       <button type="button" class="student-summary-card student-summary-card--disabled" data-open-disabled-students aria-haspopup="dialog">
         <span class="student-summary-icon" aria-hidden="true">!</span>

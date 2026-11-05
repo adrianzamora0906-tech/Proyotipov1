@@ -35,6 +35,11 @@ class ApiService {
     return apiClient.get(`/students${qs ? '?' + qs : ''}`);
   }
 
+  static async getStudentListSummary(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return apiClient.get(`/students/list-summary${qs ? '?' + qs : ''}`);
+  }
+
   static async getStudentReservations(params = {}) {
     const qs = new URLSearchParams(params).toString();
     return apiClient.get(`/students/reservations${qs ? '?' + qs : ''}`);

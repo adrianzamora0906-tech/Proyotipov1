@@ -40,14 +40,14 @@ class DashboardView extends Component {
       window.dispatchEvent(new PopStateEvent('popstate'));
       return '';
     }
-    const students = await StudentService.getAllStudents();
-    let documentSummaries = [];
-    try {
-      const result = await ApiService.getDocumentStudentSummaries();
-      documentSummaries = result.success ? result.data : [];
-    } catch (error) {
-      console.warn('No se pudo cargar el resumen de documentacion:', error.message);
-    }
+    const [students, documentResult] = await Promise.all([
+      StudentService.getAllStudents(),
+      ApiService.getDocumentStudentSummaries().catch(error => {
+        console.warn('No se pudo cargar el resumen de documentacion:', error.message);
+        return null;
+      }),
+    ]);
+    const documentSummaries = documentResult?.success ? documentResult.data : [];
     const [stats, quickActions] = await Promise.all([
       DashboardService.getDashboardStats(students, documentSummaries, { canViewPayments }),
       DashboardService.getQuickActions(students, documentSummaries, { canViewPayments }),

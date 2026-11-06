@@ -2,6 +2,7 @@ import Component from '../../components/Component.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
 import AdminDashboardService from '../../services/AdminDashboardService.js';
 import { permissionService } from '../../core/auth/PermissionService.js';
+import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js';
 
 const number = value => new Intl.NumberFormat('es-EC').format(Number(value) || 0);
 const money = value => new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD' }).format(Number(value) || 0);
@@ -30,6 +31,17 @@ export default class AdminDashboardView extends Component {
     this.activityItems = [];
     this.activityError = null;
     this.renderActions();
+    if (permissionService.can('DOCUMENT_CREATE')) {
+      const scanButton = document.createElement('button');
+      scanButton.type = 'button';
+      scanButton.className = 'btn btn-primary';
+      scanButton.id = 'admin-scanner-open';
+      scanButton.textContent = 'Escanear';
+      scanButton.addEventListener('click', () => {
+        if (permissionService.can('DOCUMENT_CREATE')) openScannerDeviceDialog();
+      });
+      document.getElementById('dashboard-refresh')?.before(scanButton);
+    }
     document.getElementById('dashboard-refresh')?.addEventListener('click', () => this.load());
     document.getElementById('dashboard-branch')?.addEventListener('change', () => this.load());
     document.getElementById('dashboard-period')?.addEventListener('change', e => { document.querySelectorAll('.custom-date').forEach(x => { x.hidden = e.target.value !== 'custom'; }); if (e.target.value !== 'custom') this.load(); });

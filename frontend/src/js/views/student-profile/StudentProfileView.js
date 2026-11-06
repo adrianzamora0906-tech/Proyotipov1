@@ -18,6 +18,7 @@ import NotificationService from '../../services/NotificationService.js';
 import DateHelper from '../../helpers/DateHelper.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
+import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -761,6 +762,7 @@ class StudentProfileView extends Component {
               </div>
               <div class="card-body">
                 <div class="form-row" style="margin-bottom: 1.5rem;">
+                  ${authService.can('DOCUMENT_CREATE') ? '<button type="button" class="btn btn-secondary" data-scanner-test>Escanear cédula (prueba)</button>' : ''}
                   ${this.renderCedulaPdfUpload(documents)}
                   <div style="flex:1; min-width:min(100%,220px);" id="profile-study-document">
                     <label class="registration-bachiller-check">
@@ -867,6 +869,9 @@ class StudentProfileView extends Component {
   }
 
   setupDocumentListeners(studentId) {
+    document.querySelector('[data-scanner-test]')?.addEventListener('click', () => {
+      if (authService.can('DOCUMENT_CREATE')) openScannerDeviceDialog();
+    });
     document.getElementById('profile-cedula-bachiller')?.addEventListener('change', async event => {
       const checkbox = event.currentTarget;
       if (!checkbox.checked) return;
@@ -1158,7 +1163,7 @@ class StudentProfileView extends Component {
     modal.innerHTML=`<section class="modal profile-edit-choice-modal" role="dialog" aria-modal="true" aria-labelledby="profile-edit-choice-title"><header class="modal-header"><div><h3 class="modal-title" id="profile-edit-choice-title">Editar estudiante</h3>${name?`<p class="profile-edit-choice-name">${escapeHtml(name)}</p>`:''}</div><button type="button" class="modal-close" data-close-modal aria-label="Cerrar">&times;</button></header><div class="modal-body profile-edit-choices"><button type="button" class="profile-edit-choice" data-edit-personal><span class="profile-edit-choice-icon"><i data-lucide="user-round-pen" aria-hidden="true"></i></span><span class="profile-edit-choice-label">Datos del estudiante</span><i data-lucide="chevron-right" aria-hidden="true"></i></button><button type="button" class="profile-edit-choice profile-edit-choice--schedule" data-edit-pending><span class="profile-edit-choice-icon"><i data-lucide="calendar-clock" aria-hidden="true"></i></span><span class="profile-edit-choice-label">Clases pendientes<small>Horario e instructor</small></span><i data-lucide="chevron-right" aria-hidden="true"></i></button></div><footer class="modal-footer"><button type="button" class="btn btn-secondary" data-close-modal>Cancelar</button></footer></section>`;
     modal.classList.add('active');this.bindProfileModalClose(modal);
     modal.querySelector('[data-edit-personal]').onclick=editData;
-    modal.querySelector('[data-edit-pending]').onclick=()=>this.openScheduleModal(studentId,{allowInitial:false});
+    modal.querySelector('[data-edit-pending]').onclick=()=>this.openScheduleModal(studentId,{allowInitial:false,allowInstructorFeedback:true});
     window.lucide?.createIcons();
     modal.querySelector('[data-edit-personal]').focus();
   }
@@ -1504,13 +1509,13 @@ class StudentProfileView extends Component {
     }
   }
 
-  async openScheduleModal(studentId, { allowInitial = false } = {}) {
+  async openScheduleModal(studentId, { allowInitial = false, allowInstructorFeedback = false } = {}) {
     const modal = document.getElementById('profile-action-modal');
     if (!modal) return;
     modal.innerHTML = '<div class="modal"><div class="modal-body">Cargando horarios disponibles…</div></div>';
     modal.classList.add('active');
     try {
-      return await this.openCourseCycleScheduleModal(studentId, modal);
+      return await this.openCourseCycleScheduleModal(studentId, modal, '', { allowInstructorFeedback });
       const result = await ApiService.getSchedules();
       const schedules = result.success ? result.data : [];
       const schedulesByDay = this.groupSchedulesByDay(schedules);
@@ -1766,7 +1771,7 @@ class StudentProfileView extends Component {
       </section>`;
   }
 
-  async openCourseCycleScheduleModal(studentId, modal, instructorId = '') {
+  async openCourseCycleScheduleModal(studentId, modal, instructorId = '', { allowInstructorFeedback = false } = {}) {
     const previousObservation=modal.querySelector('#profile-schedule-observation')?.value || '';
     const result = await ApiService.getStudentScheduleChangeOptions(studentId, instructorId);
     if (!modal.isConnected) return;
@@ -1782,7 +1787,7 @@ class StudentProfileView extends Component {
           <button class="modal-close" data-close-modal>×</button>
         </div>
         <div class="modal-body">
-          ${cycle ? `${this.renderCurrentPracticeAssignments(cycle)}<label class="form-group"><span class="form-label">Nuevo instructor para las clases pendientes</span><select class="form-input" id="pending-class-instructor">${(cycle.instructors || [cycle.instructor]).map(item=>`<option value="${escapeHtml(item.id)}" ${item.id===cycle.selectedInstructorId?'selected':''}>${escapeHtml(item.name)}</option>`).join('')}</select></label>${this.renderProfileScheduleCalendar(cycle)}
+          ${cycle ? `${this.renderCurrentPracticeAssignments(cycle)}${allowInstructorFeedback ? `<label class="form-group"><span class="form-label">Nuevo instructor para las clases pendientes</span><select class="form-input" id="pending-class-instructor" data-current-instructor-id="${escapeHtml(cycle.currentInstructorId || cycle.instructor?.id || '')}">${(cycle.instructors || [cycle.instructor]).map(item=>`<option value="${escapeHtml(item.id)}" ${String(item.id)===String(cycle.selectedInstructorId)?'selected':''}>${escapeHtml(item.name)}</option>`).join('')}</select></label>` : `<p class="form-group"><span class="form-label">Instructor</span><strong>${escapeHtml(cycle.instructor?.name || cycle.currentAssignments?.find(item=>item.instructorName)?.instructorName || 'Sin instructor asignado')}</strong></p>`}${this.renderProfileScheduleCalendar(cycle)}
             <label class="profile-schedule-observation" for="profile-schedule-observation">
               <span>Observación del cambio <strong>*</strong></span>
               <textarea id="profile-schedule-observation" class="form-textarea" maxlength="1000" rows="3"
@@ -1804,7 +1809,7 @@ class StudentProfileView extends Component {
     modal.querySelector('#pending-class-instructor')?.addEventListener('change',async event=>{
       const select=event.currentTarget;select.disabled=true;
       modal.querySelector('#confirm-profile-schedule').disabled=true;
-      try {await this.openCourseCycleScheduleModal(studentId,modal,select.value);}
+      try {await this.openCourseCycleScheduleModal(studentId,modal,select.value,{allowInstructorFeedback});}
       catch(error){select.disabled=false;modal.querySelector('#profile-schedule-error').textContent=error.message||'No se pudo consultar la disponibilidad. Vuelve a elegir el instructor.';modal.querySelector('#confirm-profile-schedule').disabled=true;}
     });
     if (cycle) this.mountProfileScheduleModal(modal, studentId);
@@ -1938,9 +1943,15 @@ class StudentProfileView extends Component {
       try {
         button.disabled = true;
         button.textContent = 'Guardando...';
+        const instructorSelect = modal.querySelector('#pending-class-instructor');
+        const selectedInstructorId = instructorSelect?.value;
         const response = await ApiService.changeStudentScheduleDay({
           studentId,
-          instructorId: modal.querySelector('#pending-class-instructor')?.value || undefined,
+          instructorId: selectedInstructorId && selectedInstructorId !== instructorSelect.dataset.currentInstructorId
+            ? selectedInstructorId
+            : undefined,
+          allowInstructorFeedback,
+          allowInstructorChange: allowInstructorFeedback,
           cycleId: selections[0].cycleId,
           replaceAllPending: true,
           changes: selections.map(selection => ({

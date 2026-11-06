@@ -1019,12 +1019,24 @@ class StudentsView extends Component {
                   <div class="student-modal-section-title"><h3>Programar prácticas adicionales</h3></div>
                   <div class="form-row">
                     <div class="form-group"><label class="form-label required">Instructor</label><select class="form-select" name="additionalPracticeInstructor"><option value="">Seleccionar instructor...</option></select><div class="form-error" id="additional-practice-instructor-error"></div></div>
-                    <div class="form-group"><label class="form-label required">Fecha de inicio</label><input type="date" class="form-input" name="additionalPracticeStartDate"><div class="form-error" id="additional-practice-date-error"></div></div>
+                    <div class="form-group"><label class="form-label required">Mostrar días desde</label><input type="date" class="form-input" name="additionalPracticeStartDate"><div class="form-error" id="additional-practice-date-error"></div></div>
                   </div>
                   <div class="form-row">
-                    <div class="form-group"><label class="form-label required">Horario diario</label><select class="form-select" name="additionalPracticeTime"><option value="">Seleccionar horario...</option>${[['06:00','07:40'],['08:00','09:40'],['10:00','11:40'],['12:00','13:40'],['14:00','15:40'],['16:00','17:40'],['18:00','19:40'],['20:00','21:40']].map(([start,end]) => `<option value="${start}">${start} – ${end}</option>`).join('')}</select><div class="form-error" id="additional-practice-time-error"></div></div>
+                    <div class="additional-practice-time-section">
+                      <span class="form-label required">Horario diario</span>
+                      <div class="additional-practice-time-grid" role="group" aria-label="Selecciona una franja horaria">
+                        ${[['06:00','07:40'],['08:00','09:40'],['10:00','11:40'],['12:00','13:40'],['14:00','15:40'],['16:00','17:40'],['18:00','19:40'],['20:00','21:40']].map(([start,end]) => `<button type="button" class="additional-practice-time-option" data-additional-practice-time="${start}" aria-pressed="false"><strong>${start} – ${end}</strong><span>Seleccionar</span></button>`).join('')}
+                      </div>
+                      <input type="hidden" name="additionalPracticeTime" value="">
+                      <div class="form-error" id="additional-practice-time-error"></div>
+                    </div>
                     <div class="form-group"><label class="form-label required">Duración</label><select class="form-select" name="additionalPracticeDays"><option value="">Seleccionar...</option>${[3,4,5,6,7,8].map(days => `<option value="${days}">${days} días</option>`).join('')}</select></div>
                   </div>
+                  <section class="additional-practice-days-section">
+                    <div class="additional-practice-days-heading"><strong>Selecciona los días de práctica</strong><span id="additional-practice-days-count">0 seleccionados</span></div>
+                    <div id="additional-practice-days-grid" class="additional-practice-days-grid" role="group" aria-label="Días disponibles para prácticas"></div>
+                  </section>
+                  <input type="hidden" name="additionalPracticeDates" value="[]">
                   <div class="form-row additional-practice-price-row">
                     <div class="additional-practice-price-card"><span>Total de la práctica</span><strong id="additional-practice-total">$0,00</strong><small id="additional-practice-rate">La tarifa se calcula según el historial.</small></div>
                   </div>
@@ -1280,7 +1292,24 @@ class StudentsView extends Component {
       else this.scheduleRegistrationIdentityLookup(event.target.value);
     });
     form?.querySelector('[name="additionalPracticeDays"]')?.addEventListener('change', () => this.updateAdditionalPracticePrice());
+    form?.querySelector('[name="additionalPracticeDays"]')?.addEventListener('change', () => this.renderAdditionalPracticeDateOptions());
+    form?.querySelector('[name="additionalPracticeStartDate"]')?.addEventListener('change', () => this.renderAdditionalPracticeDateOptions());
     form?.querySelector('[name="additionalPracticeFormerStudent"]')?.addEventListener('change', () => this.updateAdditionalPracticePrice());
+    form?.querySelectorAll('[data-additional-practice-time]').forEach(button => button.addEventListener('click', () => {
+      if (button.hidden) return;
+      const input = form.querySelector('[name="additionalPracticeTime"]');
+      const selecting = input.value !== button.dataset.additionalPracticeTime;
+      input.value = selecting ? button.dataset.additionalPracticeTime : '';
+      form.querySelectorAll('[data-additional-practice-time]').forEach(item => {
+        const active = selecting && item === button;
+        item.classList.toggle('selected', active);
+        item.setAttribute('aria-pressed', String(active));
+        item.querySelector('span').textContent = active ? 'Seleccionado' : 'Seleccionar';
+      });
+      document.getElementById('additional-practice-time-error').textContent = '';
+      this.scheduleAdditionalPracticeAvailability();
+    }));
+    this.renderAdditionalPracticeDateOptions();
     ['additionalPracticeInstructor','additionalPracticeStartDate','additionalPracticeTime','additionalPracticeDays'].forEach(name => {
       form?.querySelector(`[name="${name}"]`)?.addEventListener('change', () => this.scheduleAdditionalPracticeAvailability());
     });
@@ -1831,33 +1860,80 @@ class StudentsView extends Component {
     this.additionalPracticeAvailabilityTimer = setTimeout(() => this.checkAdditionalPracticeAvailability(), 250);
   }
 
+  renderAdditionalPracticeDateOptions() {
+    const form = document.getElementById('student-modal-form');
+    const grid = document.getElementById('additional-practice-days-grid');
+    if (!form || !grid) return;
+    const startDate = form.querySelector('[name="additionalPracticeStartDate"]')?.value;
+    const count = Number(form.querySelector('[name="additionalPracticeDays"]')?.value || 0);
+    const datesInput = form.querySelector('[name="additionalPracticeDates"]');
+    let selected = [];
+    try { selected = JSON.parse(datesInput?.value || '[]'); } catch {}
+    if (!startDate) {
+      grid.innerHTML = '<p class="text-sm text-gray-500">Elige una fecha de inicio para mostrar los días.</p>';
+      return;
+    }
+    selected = selected.filter(date => date >= startDate).slice(0, count || 8);
+    datesInput.value = JSON.stringify(selected);
+    const first = new Date(`${startDate}T12:00:00Z`);
+    const options = [];
+    for (let offset = 0; offset <= 60; offset++) {
+      const date = new Date(first);
+      date.setUTCDate(date.getUTCDate() + offset);
+      if (date.getUTCDay() === 0 || date.getUTCDay() === 6) continue;
+      const value = date.toISOString().slice(0, 10);
+      const label = new Intl.DateTimeFormat('es-EC', { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' }).format(date);
+      const checked = selected.includes(value);
+      const disabled = !checked && (!count || selected.length >= count);
+      options.push(`<label class="additional-practice-day-option ${checked ? 'selected' : ''} ${disabled ? 'disabled' : ''}"><input type="checkbox" data-practice-date="${value}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}><span>${label}</span></label>`);
+    }
+    grid.innerHTML = options.join('');
+    const updateSelection = () => {
+      selected = [...grid.querySelectorAll('[data-practice-date]:checked')].map(input => input.dataset.practiceDate).sort();
+      datesInput.value = JSON.stringify(selected);
+      const counter = document.getElementById('additional-practice-days-count');
+      if (counter) counter.textContent = `${selected.length} de ${count || '—'} seleccionados`;
+      grid.querySelectorAll('[data-practice-date]').forEach(input => {
+        input.disabled = !input.checked && (!count || selected.length >= count);
+        input.closest('.additional-practice-day-option')?.classList.toggle('selected', input.checked);
+        input.closest('.additional-practice-day-option')?.classList.toggle('disabled', input.disabled);
+      });
+      this.scheduleAdditionalPracticeAvailability();
+    };
+    grid.querySelectorAll('[data-practice-date]').forEach(input => input.addEventListener('change', updateSelection));
+    const counter = document.getElementById('additional-practice-days-count');
+    if (counter) counter.textContent = `${selected.length} de ${count || '—'} seleccionados`;
+  }
+
   async checkAdditionalPracticeAvailability() {
     const form = document.getElementById('student-modal-form');
     const instructorId = form?.querySelector('[name="additionalPracticeInstructor"]')?.value;
     const startDate = form?.querySelector('[name="additionalPracticeStartDate"]')?.value;
     const dailyTime = form?.querySelector('[name="additionalPracticeTime"]')?.value;
     const days = form?.querySelector('[name="additionalPracticeDays"]')?.value;
+    let selectedDates = [];
+    try { selectedDates = JSON.parse(form?.querySelector('[name="additionalPracticeDates"]')?.value || '[]'); } catch {}
     const box = document.getElementById('additional-practice-availability');
     if (!box) return;
-    if (!instructorId || !startDate || !dailyTime || !days) { box.hidden = true; return; }
+    if (!instructorId || !startDate || !dailyTime || !days || selectedDates.length !== Number(days)) { box.hidden = true; return; }
     box.hidden = false;
     box.className = 'additional-practice-availability checking';
     box.textContent = 'Comprobando disponibilidad del instructor...';
     const result = await StudentService.checkAdditionalPracticeAvailability({
-      instructor_id: instructorId, start_date: startDate, daily_start_time: dailyTime,
-      number_of_days: days, branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId(),
+      instructor_id: instructorId, start_date: selectedDates[0], daily_start_time: dailyTime,
+      number_of_days: days, schedule_dates: selectedDates.join(','), branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId(),
     });
     if (!result.success) { box.className = 'additional-practice-availability unavailable'; box.textContent = result.error || 'No se pudo comprobar la disponibilidad.'; return; }
     const data = result.data;
     if (data.available) {
       box.className = 'additional-practice-availability available';
-      box.textContent = `${data.instructor_name || 'El instructor'} está disponible desde el ${this.formatPracticeDate(startDate)} en el horario seleccionado.`;
+      box.textContent = `${data.instructor_name || 'El instructor'} está disponible en todas las fechas seleccionadas.`;
       return;
     }
     box.className = 'additional-practice-availability unavailable';
     const instructorName = data.instructor_name || 'El instructor';
     const alternativeName = data.alternative_instructor?.name;
-    box.textContent = `${instructorName} está ocupado. Estará disponible desde el ${this.formatPracticeDate(data.available_from)}.${alternativeName ? ` Puedes escoger a ${alternativeName} para conservar la fecha y el horario.` : ''}`;
+    box.textContent = `${instructorName} tiene conflictos en: ${data.conflict_dates?.map(date=>this.formatPracticeDate(date)).join(', ') || 'las fechas seleccionadas'}.${alternativeName ? ` También puedes escoger a ${alternativeName}.` : ''}`;
 
     const actions = document.createElement('div');
     actions.className = 'additional-practice-availability-actions';
@@ -1875,7 +1951,7 @@ class StudentsView extends Component {
       actions.appendChild(useAlternative);
     }
 
-    if (data.available_from) {
+    if (data.available_from && !selectedDates.length) {
       const keepInstructor = document.createElement('button');
       keepInstructor.type = 'button';
       keepInstructor.className = 'btn btn-small btn-primary';
@@ -5545,6 +5621,8 @@ class StudentsView extends Component {
     const startDate = formData.get('additionalPracticeStartDate');
     const dailyTime = formData.get('additionalPracticeTime');
     const days = Number(formData.get('additionalPracticeDays'));
+    let selectedDates = [];
+    try { selectedDates = JSON.parse(formData.get('additionalPracticeDates') || '[]'); } catch {}
     const hasDocumentFile = Boolean(documentFile && documentFile.size > 0);
     if (!hasMobileDocument && (hasDocumentFile || mobileDocumentUrl) && !this.isPdfFile(documentFile) && !this.isImageFile(documentFile)) {
       const error = document.getElementById('additional-practice-document-error');
@@ -5552,19 +5630,21 @@ class StudentsView extends Component {
       this.goToModalStep(3);
       return;
     }
-    if (!instructorId || !startDate || !dailyTime || !Number.isInteger(days) || days < 3 || days > 8) {
+    if (!instructorId || !startDate || !dailyTime || !Number.isInteger(days) || days < 3 || days > 8 || selectedDates.length !== days) {
       if (!instructorId) document.getElementById('additional-practice-instructor-error').textContent = 'Selecciona un instructor.';
       if (!startDate) document.getElementById('additional-practice-date-error').textContent = 'Selecciona la fecha de inicio.';
       if (!dailyTime) document.getElementById('additional-practice-time-error').textContent = 'Selecciona un horario.';
+      if (selectedDates.length !== days) document.getElementById('additional-practice-date-error').textContent = `Marca exactamente ${days} fechas en el calendario.`;
       this.showModalAlert('error', 'Completa la programación de las prácticas.');
       this.goToModalStep(1);
       return;
     }
     const availability = await StudentService.checkAdditionalPracticeAvailability({
       instructor_id: instructorId,
-      start_date: startDate,
+      start_date: selectedDates[0],
       daily_start_time: dailyTime,
       number_of_days: days,
+      schedule_dates: selectedDates.join(','),
       branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId(),
     });
     if (!availability.success || !availability.data?.available) {
@@ -5612,7 +5692,8 @@ class StudentsView extends Component {
       const practice = await StudentService.createAdditionalPractice(student.id, {
         branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId(),
         instructor_id: instructorId, number_of_days: days,
-        start_date: startDate, daily_start_time: dailyTime, payment_method: method,
+        schedule_dates: selectedDates,
+        start_date: selectedDates[0], daily_start_time: dailyTime, payment_method: method,
         customer_type: this.isFormerAdditionalPracticeStudent() ? 'FORMER_STUDENT' : 'EXTERNAL',
         former_student_declared: !this.additionalPracticeStudent?.former_student && this.isFormerAdditionalPracticeStudent(),
         referred_by_user_id: formData.get('referredByUserId') || null,

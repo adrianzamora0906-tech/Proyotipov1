@@ -1,6 +1,7 @@
-export function createDocumentImageSheet(images, { vertical = false } = {}) {
+export function createDocumentImageSheet(images, { vertical = false, row = false } = {}) {
   if (!images.length || images.length > 4) throw new Error('Selecciona entre una y cuatro fotos.');
-  if (vertical && images.length !== 2) throw new Error('Se necesitan ambas caras de la cédula.');
+  if (vertical && !row && images.length !== 2) throw new Error('Se necesitan ambas caras de la cédula.');
+  if (row && images.length !== 3) throw new Error('Se necesitan frente, reverso y carnet.');
   const encoder = new TextEncoder();
   const join = parts => {
     const result = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
@@ -12,11 +13,11 @@ export function createDocumentImageSheet(images, { vertical = false } = {}) {
     encoder.encode(`<< ${attributes} /Length ${bytes.length} >>\nstream\n`),bytes,encoder.encode('\nendstream'),
   ]);
   const content = images.map((image, index) => {
-    const boxWidth = vertical ? 499 : 235, boxHeight = vertical ? 300 : 175;
+    const boxWidth = row ? 163 : vertical ? 499 : 235, boxHeight = row ? 200 : vertical ? 300 : 175;
     const scale = Math.min(boxWidth / image.width, boxHeight / image.height);
     const width = image.width * scale, height = image.height * scale;
-    const x = vertical ? (595 - width) / 2 : (index % 2 ? 312 : 48) + (235 - width) / 2;
-    const y = vertical ? (index === 0 ? 460 : 70) + (300 - height) / 2 : (index < 2 ? 560 : 275) + (175 - height) / 2;
+    const x = row ? 41 + index * 175 + (163 - width) / 2 : vertical ? (595 - width) / 2 : (index % 2 ? 312 : 48) + (235 - width) / 2;
+    const y = row ? 560 + (200 - height) / 2 : vertical ? (index === 0 ? 460 : 70) + (300 - height) / 2 : (index < 2 ? 560 : 275) + (175 - height) / 2;
     return `q ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${index + 1} Do Q`;
   }).join('\n');
   const resources = images.map((_, index) => `/Im${index + 1} ${index + 4} 0 R`).join(' ');

@@ -70,7 +70,7 @@ export function openScannerDeviceDialog() {
     for (const device of devices) { const option = document.createElement('option'); option.value = device.id; option.textContent = `${device.name} · ${device.interface}`; select.append(option); }
     let previous; try { previous = localStorage.getItem('sportmancar.scanner.device'); } catch {}
     if (devices.some(device => device.id === previous)) select.value = previous;
-    status.textContent = devices.length ? 'Coloca el documento en el cristal. Después del escaneo podrás revisar y corregir el recorte. Para probar 200 ppp, utiliza el puente v1.3.' : 'Windows no informa escáneres WIA. Revisa alimentación, conexión y controlador; una impresora instalada no garantiza escaneo WIA.';
+    status.textContent = devices.length ? 'Coloca el documento en el cristal. Escaneo de prueba a 100 ppp; después podrás revisar y corregir el recorte.' : 'Windows no informa escáneres WIA. Revisa alimentación, conexión y controlador; una impresora instalada no garantiza escaneo WIA.';
   });
   const crop = async (side, file) => {
     const canvas = await editDocument(file, { maximumSide: 3600 });

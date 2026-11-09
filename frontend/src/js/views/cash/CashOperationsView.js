@@ -323,7 +323,7 @@ class CashOperationsView extends Component {
     const options = this.pending
       .map(
         (x, i) =>
-          `<option value="${i}">${esc(x.studentName || `${x.student?.firstName || ""} ${x.student?.lastName || ""}`)} · ${money(x.balance)}</option>`,
+          `<option value="${i}">${esc(x.studentName || `${x.student?.firstName || ""} ${x.student?.lastName || ""}`)} · ${esc(x.course || x.student?.course || 'Curso')} · ${money(x.balance)}</option>`,
       )
       .join("");
     const host = this.modal({
@@ -347,6 +347,7 @@ class CashOperationsView extends Component {
       try {
         const transferResult = await ApiService.createTransferVerification({
           studentId: p.studentId || p.student?.id,
+          enrollmentId: p.enrollmentId || null,
           serviceTransactionId: p.serviceTransactionId || null,
           amount: Number(fd.get("amount")),
           bank: fd.get("bank"),

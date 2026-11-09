@@ -24,13 +24,13 @@ export function loadScanner() {
   return runtime;
 }
 
-export async function photoCanvas(file) {
+export async function photoCanvas(file, maximumSide = 1600) {
   const url = URL.createObjectURL(file);
   try {
     const image = new Image();
     image.src = url;
     await image.decode();
-    const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
+    const scale = Math.min(1, maximumSide / Math.max(image.naturalWidth, image.naturalHeight));
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(image.naturalWidth * scale);
     canvas.height = Math.round(image.naturalHeight * scale);
@@ -204,8 +204,8 @@ export function correctPerspective(cv, canvas, points) {
   } finally { [source, output, from, to, transform].filter(Boolean).forEach(mat => mat.delete()); }
 }
 
-export async function editDocument(file) {
-  const original = await photoCanvas(file);
+export async function editDocument(file, { maximumSide = 1600 } = {}) {
+  const original = await photoCanvas(file, maximumSide);
   let cv, failure;
   try { cv = await loadScanner(); } catch (error) { failure = error.message; }
   let points = fullCorners(original);

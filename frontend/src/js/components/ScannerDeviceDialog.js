@@ -1,19 +1,25 @@
 import { LocalScannerService } from '../services/LocalScannerService.js';
+import { editDocument } from '../services/DocumentScannerService.js';
+import { createDocumentImageSheet } from '../services/DocumentImageSheet.js';
 
 export function openScannerDeviceDialog() {
   if (document.querySelector('[data-local-scanner-dialog]')) return;
   const dialog = document.createElement('dialog');
   dialog.dataset.localScannerDialog = '';
   dialog.style.cssText = 'width:min(640px,92vw);max-height:90vh;border:0;border-radius:12px;padding:24px;overflow:auto';
-  dialog.innerHTML = `<h2>Escanear cédula · prueba de conexión</h2>
-    <p>Fase 1: captura de prueba. Esta imagen no se guardará en el expediente. Utiliza una hoja sin datos personales.</p>
-    <p>Inicia tools/scanner-agent/start-scanner.cmd en esta computadora. Autoriza este origen:</p>
+  dialog.innerHTML = `<h2>Escanear cédula</h2>
+    <p>Escanea y revisa ambas caras para descargar un PDF A4. No se guardará automáticamente en el expediente.</p>
+    <p>En Windows 7, abre SportmancarScanner-x86.exe en esta computadora (también funciona en Windows de 64 bits). Mantén su ventana abierta y copia el código de vinculación. El puente debe autorizar este origen:</p>
     <code data-origin></code>
     <label style="display:block;margin:16px 0">Código de vinculación de la consola
       <input data-token type="password" autocomplete="off" spellcheck="false" style="width:100%"></label>
     <button type="button" class="btn btn-secondary" data-search>Buscar escáneres</button>
     <label style="display:block;margin:16px 0">Escáner <select data-device style="width:100%" disabled></select></label>
-    <button type="button" class="btn btn-primary" data-scan disabled>Escanear prueba</button>
+    <button type="button" class="btn btn-primary" data-scan disabled>Escanear frente</button>
+    <button type="button" class="btn btn-primary" data-back disabled>Escanear reverso</button>
+    <div data-cards></div>
+    <button type="button" class="btn btn-primary" data-pdf disabled>Generar PDF</button>
+    <div data-result hidden><a data-download download="cedula.pdf" class="btn btn-secondary">Descargar PDF</a><iframe title="Cédula en PDF A4" style="width:100%;height:420px;border:0"></iframe></div>
     <p role="status" aria-live="polite"></p>
     <img data-preview hidden alt="Captura de prueba del escáner" style="max-width:100%;max-height:45vh;object-fit:contain">
     <p><button type="button" class="btn btn-secondary" data-close>Cerrar</button></p>`;
@@ -23,17 +29,34 @@ export function openScannerDeviceDialog() {
   const search = dialog.querySelector('[data-search]'), scan = dialog.querySelector('[data-scan]');
   const status = dialog.querySelector('[role=status]'), preview = dialog.querySelector('[data-preview]');
   let busy = false, imageUrl;
+  const captures = {};
+  const back = dialog.querySelector('[data-back]'), pdf = dialog.querySelector('[data-pdf]');
+  const result = dialog.querySelector('[data-result]');
+  let pdfUrl;
+  const clearPdf = () => {
+    result.hidden = true;
+    result.querySelector('iframe').removeAttribute('src');
+    result.querySelector('a').removeAttribute('href');
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    pdfUrl = null;
+  };
   const close = () => { if (busy) { status.textContent = 'Espera a que termine la operación antes de cerrar.'; return; } dialog.close(); };
   dialog.oncancel = event => { event.preventDefault(); close(); };
-  dialog.onclose = () => { if (imageUrl) URL.revokeObjectURL(imageUrl); token.value = ''; dialog.remove(); };
+  dialog.onclose = () => { clearPdf(); if (imageUrl) URL.revokeObjectURL(imageUrl); token.value = ''; dialog.remove(); };
   dialog.querySelector('[data-close]').onclick = close;
   const run = async action => {
     if (busy) return;
     if (!token.value.trim()) { status.textContent = 'Introduce el código mostrado por el servicio local.'; return; }
-    busy = true; search.disabled = scan.disabled = select.disabled = token.disabled = true;
+    busy = true; search.disabled = scan.disabled = back.disabled = pdf.disabled = select.disabled = token.disabled = true;
+    dialog.querySelectorAll('[data-crop]').forEach(button => { button.disabled = true; });
     try { await action(new LocalScannerService(token.value.trim())); }
     catch (error) { status.textContent = error.message; }
-    finally { busy = false; search.disabled = token.disabled = false; select.disabled = scan.disabled = !select.options.length; }
+    finally {
+      busy = false; search.disabled = token.disabled = false; select.disabled = scan.disabled = !select.options.length;
+      back.disabled = !select.options.length || !captures.front;
+      pdf.disabled = !captures.front || !captures.back;
+      dialog.querySelectorAll('[data-crop]').forEach(button => { button.disabled = false; });
+    }
   };
   search.onclick = () => run(async client => {
     status.textContent = 'Buscando escáneres configurados en Windows…';
@@ -44,7 +67,23 @@ export function openScannerDeviceDialog() {
     if (devices.some(device => device.id === previous)) select.value = previous;
     status.textContent = devices.length ? 'Coloca una hoja de prueba en el cristal. Captura A4 a 300 ppp.' : 'Windows no informa escáneres WIA. Revisa alimentación, conexión y controlador; una impresora instalada no garantiza escaneo WIA.';
   });
-  scan.onclick = () => run(async client => {
+  const crop = async (side, file) => {
+    const canvas = await editDocument(file, { maximumSide: 3600 });
+    if (!canvas) { status.textContent = 'Recorte cancelado. Se conserva la captura anterior, si existía.'; return; }
+    clearPdf(); captures[side] = { file, canvas };
+    let card = dialog.querySelector(`[data-card="${side}"]`);
+    if (!card) {
+      card = document.createElement('section'); card.dataset.card = side;
+      const title = document.createElement('h3'); title.textContent = side === 'front' ? 'Frente' : 'Reverso';
+      const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'btn btn-secondary'; edit.dataset.crop = side; edit.textContent = 'Corregir recorte';
+      edit.onclick = () => run(() => crop(side, captures[side].file));
+      card.append(title, edit); dialog.querySelector('[data-cards]').append(card);
+    }
+    card.querySelector('canvas')?.remove(); canvas.style.cssText = 'display:block;max-width:100%;max-height:260px;object-fit:contain'; card.append(canvas);
+    (side === 'front' ? scan : back).textContent = side === 'front' ? 'Repetir frente' : 'Repetir reverso';
+    status.textContent = side === 'front' ? 'Voltea la cédula para escanear el reverso.' : 'Ambas caras listas. Revisa las imágenes y genera el PDF.';
+  };
+  const capture = side => run(async client => {
     status.textContent = 'Escaneando… No cierres esta ventana.';
     preview.hidden = true;
     if (imageUrl) { URL.revokeObjectURL(imageUrl); imageUrl = null; }
@@ -52,10 +91,23 @@ export function openScannerDeviceDialog() {
     const data = await client.scan(select.value);
     if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(data.imageUrl)) throw new Error('El servicio devolvió una imagen inválida.');
     const blob = await (await fetch(data.imageUrl)).blob();
-    imageUrl = URL.createObjectURL(blob); preview.src = imageUrl;
-    await preview.decode(); preview.hidden = false;
+    await crop(side, new File([blob], `${side}.jpg`, { type: 'image/jpeg' }));
     try { localStorage.setItem('sportmancar.scanner.device', select.value); } catch {}
-    status.textContent = `Captura recibida: ${data.width} × ${data.height} píxeles. No se ha guardado en el expediente.`;
+  });
+  scan.onclick = () => capture('front');
+  back.onclick = () => capture('back');
+  pdf.onclick = () => run(async () => {
+    if (!captures.front || !captures.back) throw new Error('Escanea y acepta ambas caras.');
+    const images = ['front', 'back'].map(side => {
+      const canvas = captures[side].canvas;
+      const raw = atob(canvas.toDataURL('image/jpeg', 0.92).split(',')[1]);
+      return { width: canvas.width, height: canvas.height, bytes: Uint8Array.from(raw, c => c.charCodeAt(0)) };
+    });
+    const blob = createDocumentImageSheet(images, { vertical: true });
+    if (blob.size > 9 * 1024 * 1024) throw new Error('El PDF supera 9 MB. Revisa el área de los recortes.');
+    clearPdf(); pdfUrl = URL.createObjectURL(blob);
+    result.querySelector('iframe').src = pdfUrl; result.querySelector('a').href = pdfUrl; result.hidden = false;
+    status.textContent = 'PDF A4 de una página: frente arriba y reverso debajo. Descárgalo para adjuntarlo al expediente.';
   });
   dialog.showModal();
 }

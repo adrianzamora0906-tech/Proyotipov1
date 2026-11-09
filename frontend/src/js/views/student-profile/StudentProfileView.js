@@ -25,6 +25,27 @@ const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character =>
 })[character]);
 
 class StudentProfileView extends Component {
+  renderEnrollmentCourses(enrollments = []) {
+    if (enrollments.length < 2) return '';
+    const dateLabel = value => value
+      ? DateHelper.format(`${String(value).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY')
+      : 'Sin fecha asignada';
+    return `<div class="card">
+      <div class="card-header"><h3 class="card-title">Cursos del estudiante</h3></div>
+      <div class="card-body additional-practices-list">
+        ${enrollments.map(enrollment => `<article class="additional-practice-profile-item">
+          <div class="additional-practice-profile-heading"><strong>${escapeHtml(enrollment.course_name || 'Curso sin identificar')}</strong><span class="badge badge-info">${escapeHtml(enrollment.status || 'Sin estado')}</span></div>
+          <div class="info-grid">
+            <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${escapeHtml(enrollment.instructor_name || 'Sin instructor asignado')}</span></div>
+            <div class="info-item"><span class="info-label">Inicio de clases</span><span class="info-value">${dateLabel(enrollment.practical_start_date)}</span></div>
+            <div class="info-item"><span class="info-label">Fin de clases</span><span class="info-value">${dateLabel(enrollment.practical_end_date)}</span></div>
+            <div class="info-item"><span class="info-label">Hora</span><span class="info-value">${escapeHtml(enrollment.time || 'Sin horario asignado')}</span></div>
+          </div>
+        </article>`).join('')}
+      </div>
+    </div>`;
+  }
+
   async render() {
     const studentId = this.props.studentId;
     try {
@@ -244,6 +265,8 @@ class StudentProfileView extends Component {
                       <span class="info-label">Tipo de registro</span>
                       <span class="info-value">Solo prácticas adicionales</span>
                     </div>
+                  ` : (student.enrollments || []).length > 1 ? `
+                    <div class="info-item"><span class="info-label">Cursos</span><span class="info-value">${student.enrollments.length} matrículas · detalle abajo</span></div>
                   ` : `
                     <div class="info-item"><span class="info-label">Curso</span><span class="info-value">${student.course || 'Sin curso asignado'}</span></div>
                     <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${student.instructorName || schedule?.instructor || 'Sin instructor asignado'}${isExamOnly ? ' <span class="student-exam-inline">Intensivo</span>' : ''}</span></div>
@@ -258,6 +281,7 @@ class StudentProfileView extends Component {
                 </div>
               </div>
             </div>
+            ${this.renderEnrollmentCourses(student.enrollments || [])}
             ${(student.additionalPractices || []).length ? `
               <div class="card additional-practices-card">
                 <div class="card-header">

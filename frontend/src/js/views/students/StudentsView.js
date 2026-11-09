@@ -3578,8 +3578,8 @@ class StudentsView extends Component {
     const parts = String(reservation.name || '').trim().split(/\s+/);
     const splitAt = Math.max(Math.ceil(parts.length / 2), 1);
     const values = {
-      firstName: parts.slice(0, splitAt).join(' '),
-      lastName: parts.slice(splitAt).join(' '),
+      firstName: draft.firstName || parts.slice(0, splitAt).join(' '),
+      lastName: draft.lastName || parts.slice(splitAt).join(' '),
       cedula: reservation.identification || '',
       phone: draft.phone||reservation.phone||'',birthDate:draft.birthDate||'',email:draft.email||'',address:draft.address||'',bloodType:draft.bloodType||'',nationality:draft.nationality||'',pickupBranchId:draft.pickupBranchId||authService.getEffectiveBranchId()||'',
     };

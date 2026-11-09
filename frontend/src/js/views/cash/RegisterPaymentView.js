@@ -6,6 +6,10 @@ import ReceiptService from '../../services/ReceiptService.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
 
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+})[character]);
+
 class RegisterPaymentView extends Component {
   async render() {
     const content = `
@@ -34,35 +38,45 @@ class RegisterPaymentView extends Component {
     const searchInput = document.getElementById('search-cedula');
     const studentCard = document.getElementById('student-card');
 
-    const renderStudent = (student) => {
+    let renderRequest = 0;
+    const renderStudent = async (student, selectedEnrollmentId = null) => {
+      const request = ++renderRequest;
       if (!student) {
         studentCard.innerHTML = `<div class="alert">Estudiante no encontrado</div>`;
         return;
       }
 
-      const bal = PaymentService.getStudentBalance(student.id);
+      const account = await PaymentService.getStudentBalance(student.id);
+      if (request !== renderRequest) return;
+      const enrollments = account.enrollments || [];
+      const enrollment = enrollments.find(item => item.id === selectedEnrollmentId) || enrollments[0];
+      const enrollmentId = enrollment?.id || null;
+      const bal = enrollment || account;
+      const availableToCollect = Math.max(0, Number(bal.balance) - Number(bal.pendingVerification || 0));
       const normalizedCedula = StringHelper.normalizeCedula(student.cedula);
 
       const renderPaymentForm = async () => {
       const methods = await PaymentService.getAvailableMethods(authService.getEffectiveBranchId());
+      if (request !== renderRequest) return;
       studentCard.innerHTML = `
         <div class="card">
           <div class="card-body">
             <h4>${StudentService.getFullName(student)}</h4>
             <div>Cédula: ${normalizedCedula}</div>
-            <div>Curso: ${student.course}</div>
+            ${enrollments.length ? `<div class="form-group"><label class="form-label" for="payment-enrollment">Curso a cobrar</label><select id="payment-enrollment" class="form-select">${enrollments.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === enrollmentId ? 'selected' : ''}>${escapeHtml(item.course)} · Saldo: $${Number(item.balance).toFixed(2)}</option>`).join('')}</select></div>` : `<div>Curso: ${escapeHtml(student.course)}</div>`}
             <div>Sucursal: ${student.branch || ''}</div>
             <div>Estado: ${student.status}</div>
             <div>Valor curso: ${bal.total}</div>
             <div>Pagado: ${bal.paid}</div>
             <div>Saldo: ${bal.balance}</div>
+            ${Number(bal.pendingVerification) > 0 ? `<div class="alert alert-warning">Transferencias por confirmar: $${Number(bal.pendingVerification).toFixed(2)}. Disponible para cobrar: $${availableToCollect.toFixed(2)}.</div>` : ''}
 
             <hr/>
             <form id="payment-form">
               <div class="form-row">
                 <div class="form-group">
                   <label class="form-label required">Monto a pagar</label>
-                  <input type="number" name="amount" class="form-input" value="${bal.balance}" step="0.01" min="0">
+                  <input type="number" name="amount" class="form-input" value="${availableToCollect}" step="0.01" min="0.01" max="${availableToCollect}" required>
                 </div>
 
                 <div class="form-group">
@@ -77,7 +91,7 @@ class RegisterPaymentView extends Component {
 
               <div class="form-footer">
                 <button type="button" class="btn btn-secondary" id="cancel-payment">Cancelar</button>
-                <button type="submit" class="btn btn-primary">Registrar Pago</button>
+                <button type="submit" class="btn btn-primary" ${availableToCollect <= 0 ? 'disabled' : ''}>Registrar Pago</button>
               </div>
             </form>
           </div>
@@ -85,6 +99,7 @@ class RegisterPaymentView extends Component {
       `;
 
       const form = document.getElementById('payment-form');
+      document.getElementById('payment-enrollment')?.addEventListener('change', event => renderStudent(student, event.target.value));
       const methodSelect = form.elements.method;
       const cardBatchGroup = document.getElementById('register-card-batch-group');
       const cardBatchInput = form.elements.cardBatch;
@@ -106,7 +121,7 @@ class RegisterPaymentView extends Component {
         if (String(method || '').toLowerCase() === 'tarjeta' && !String(fd.get('cardBatch') || '').trim()) { alert('Ingresa el lote de la tarjeta.'); return; }
         const cashier = (sessionStorage.getItem('erp_session') && JSON.parse(sessionStorage.getItem('erp_session')).username) || 'cajera';
 
-        const res = await PaymentService.registerPayment({ studentId: student.id, amount, method, reference:fd.get('reference'), cardBatch:fd.get('cardBatch'), cedula:student.cedula, cashier });
+        const res = await PaymentService.registerPayment({ studentId: student.id, enrollmentId, amount, method, reference:fd.get('reference'), cardBatch:fd.get('cardBatch'), cedula:student.cedula, cashier });
         if (!res.success) {
           alert(res.error);
           return;
@@ -125,7 +140,7 @@ class RegisterPaymentView extends Component {
         window.dispatchEvent(new PopStateEvent('popstate'));
       });
       };
-      renderPaymentForm();
+      await renderPaymentForm();
     };
 
     const searchError = document.getElementById('search-error');
@@ -133,27 +148,32 @@ class RegisterPaymentView extends Component {
     const prefillCedula = queryParams.get('cedula') || '';
     const prefillStudentId = queryParams.get('studentId') || '';
 
-    const validateInput = () => {
+    let searchRequest = 0;
+    const validateInput = async () => {
+      const request = ++searchRequest;
+      ++renderRequest;
       const cedula = searchInput.value.replace(/\D/g, '');
       searchInput.value = cedula;
       searchError.style.display = 'none';
 
       if (cedula.length === 10) {
-        const student = PaymentService.findStudentByCedula(cedula);
+        const found = await PaymentService.findStudentByCedula(cedula);
+        const student = found ? await StudentService.getStudent(found.id) : null;
+        if (request !== searchRequest) return;
         if (!student) {
           searchError.textContent = 'Cédula no encontrada. Verifica los números.';
           searchError.style.display = 'block';
           studentCard.innerHTML = '';
           return;
         }
-        renderStudent(student);
+        await renderStudent(student);
       } else {
         studentCard.innerHTML = '';
       }
     };
 
     if (prefillStudentId) {
-      const student = StudentService.getStudent(prefillStudentId);
+      const student = await StudentService.getStudent(prefillStudentId);
       if (student) {
         searchInput.value = StringHelper.normalizeCedula(student.cedula);
         renderStudent(student);

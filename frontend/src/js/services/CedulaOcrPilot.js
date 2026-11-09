@@ -1,24 +1,33 @@
 import Validator from '../helpers/Validator.js';
 export const PILOT_USER_ID = 'e838645a-123c-4615-b72f-dfdd6c03b6da';
 export function parseCedulaText(text) {
-  const lines = text.toUpperCase().split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const lines = text.toUpperCase().split(/\r?\n/).map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const candidates = [...text.matchAll(/\b\d{10}\b/g)].map(match => match[0]).filter(value => Validator.isValidCedula(value));
   const field = label => {
     const i = lines.findIndex(line => label.test(line));
     if (i < 0) return '';
-    const inline = lines[i].replace(label, '').replace(/^[:\s]+/, '').trim();
-    const value = inline || lines[i + 1] || '';
-    return /^[A-ZÁÉÍÓÚÜÑ ]{2,80}$/.test(value) && !/NACIONALIDAD|APELLIDOS|NOMBRES|FECHA|SEXO/.test(value) ? value : '';
+    const values = [];
+    const inline = lines[i].replace(label, '').replace(/^[:.\s]+/, '').trim();
+    for (const value of [inline, ...lines.slice(i + 1, i + 4)].filter(Boolean)) {
+      if (/NACIONALIDAD|APELLIDOS|NOMBRES|FECHA|SEXO|LUGAR|ESTADO|FIRMA|CEDULA|CÉDULA|INSTRUCCI|PROFESI|DOCUMENTO|DONANTE|ECUATORIANA|REPÚBLICA|REPUBLICA/.test(value)) break;
+      if (!/^[A-ZÁÉÍÓÚÜÑ ]{2,80}$/.test(value)) break;
+      values.push(value);
+      if (values.length === 2) break;
+    }
+    return values.join(' ');
   };
-  const birthLine = lines.findIndex(line => /FECHA DE NACIMIENTO/.test(line));
-  const match = birthLine < 0 ? null : lines.slice(birthLine, birthLine + 3).join(' ').match(/(\d{2})[\/.-](\d{2})[\/.-](\d{4})/);
+  const birthLine = lines.findIndex(line => /FECHA\s*(?:DE\s*)?NACIMIENTO/.test(line));
+  const months = { ENE:'01', FEB:'02', MAR:'03', ABR:'04', MAY:'05', JUN:'06', JUL:'07', AGO:'08', SEP:'09', SET:'09', OCT:'10', NOV:'11', DIC:'12' };
+  const birthText = birthLine < 0 ? '' : lines.slice(birthLine, birthLine + 3).join(' ').split(/VENCIMIENTO|EXPEDICI[ÓO]N|EMISI[ÓO]N|LUGAR/)[0];
+  const match = birthText.match(/\b(\d{1,2})[\s\/.-]+(\d{1,2}|ENE(?:RO)?|FEB(?:RERO)?|MAR(?:ZO)?|ABR(?:IL)?|MAY(?:O)?|JUN(?:IO)?|JUL(?:IO)?|AGO(?:STO)?|SEP(?:TIEMBRE)?|SET(?:IEMBRE)?|OCT(?:UBRE)?|NOV(?:IEMBRE)?|DIC(?:IEMBRE)?)[\s\/.-]+(\d{4})\b/);
   let birthDate = '';
   if (match) {
-    const iso = `${match[3]}-${match[2]}-${match[1]}`;
+    const month = months[match[2].slice(0,3)] || match[2].padStart(2,'0');
+    const iso = `${match[3]}-${month}-${match[1].padStart(2,'0')}`;
     const date = new Date(iso + 'T12:00:00Z');
     if (Number.isFinite(date.getTime()) && date.toISOString().slice(0,10) === iso && date < new Date()) birthDate = iso;
   }
-  return { identification: [...new Set(candidates)].length === 1 ? candidates[0] : '', firstName: field(/^NOMBRES\b/), lastName: field(/^APELLIDOS\b/), birthDate };
+  return { identification: [...new Set(candidates)].length === 1 ? candidates[0] : '', firstName: field(/^NOMBRES?\b/), lastName: field(/^APELLIDOS?\b/), birthDate };
 }
 let library;
 export async function recognizeCedula(images, progress) {
@@ -38,7 +47,24 @@ export async function recognizeCedula(images, progress) {
   });
   try {
     let text = '';
+    await worker.setParameters({ tessedit_pageseg_mode: '11' });
     for (const image of images) text += '\n' + (await worker.recognize(image)).data.text;
-    return parseCedulaText(text);
+    const result = parseCedulaText(text);
+    if ((!result.firstName || !result.lastName || !result.birthDate) && images[0]) {
+      progress?.('Releyendo la zona de nombres y nacimiento…');
+      // Older Ecuadorian cards place these labels in a narrow central column.
+      // Read that column independently so the portrait/right column do not
+      // interrupt the reading order. This is a copy, never the saved document.
+      const image = images[0];
+      const region = document.createElement('canvas');
+      const scale = Math.min(3, 2000 / (image.width * 0.48));
+      region.width = Math.round(image.width * 0.48 * scale);
+      region.height = Math.round(image.height * 0.72 * scale);
+      region.getContext('2d').drawImage(image, image.width * 0.27, 0, image.width * 0.48, image.height * 0.72, 0, 0, region.width, region.height);
+      await worker.setParameters({ tessedit_pageseg_mode: '6' });
+      const retry = parseCedulaText((await worker.recognize(region)).data.text);
+      for (const key of ['firstName', 'lastName', 'birthDate']) if (!result[key] && retry[key]) result[key] = retry[key];
+    }
+    return result;
   } finally { await worker.terminate(); }
 }

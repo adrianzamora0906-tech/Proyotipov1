@@ -12,7 +12,7 @@ export class LocalScannerService {
         body: JSON.stringify(body), signal: controller.signal,
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'No se pudo completar el escaneo.');
+      if (!response.ok) throw Object.assign(new Error(result.error || 'No se pudo completar el escaneo.'), { status: response.status });
       return result.data;
     } catch (error) {
       if (response) throw error;

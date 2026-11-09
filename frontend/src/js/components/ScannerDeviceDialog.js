@@ -9,40 +9,53 @@ export function openScannerDeviceDialog(options = {}) {
   if (document.querySelector('[data-local-scanner-dialog]')) return;
   const dialog = document.createElement('dialog');
   dialog.dataset.localScannerDialog = '';
-  dialog.style.cssText = 'width:min(640px,92vw);max-height:90vh;border:0;border-radius:12px;padding:24px;overflow:auto';
-  dialog.innerHTML = `<h2>Escanear cédula</h2>
-    <p>Escanea y revisa ambas caras para descargar un PDF A4. No se guardará automáticamente en el expediente.</p>
-    <p>En Windows 7, abre SportmancarScanner-x86.exe en esta computadora (también funciona en Windows de 64 bits). Mantén su ventana abierta y copia el código de vinculación. El puente debe autorizar este origen:</p>
-    <code data-origin></code>
-    <label style="display:block;margin:16px 0">Código de vinculación de la consola
-      <input data-token type="password" autocomplete="off" spellcheck="false" style="width:100%"></label>
-    <label><input type="checkbox" data-remember> Recordar en este navegador de la sucursal</label>
-    <button type="button" class="btn btn-secondary" data-forget>Olvidar vinculación</button>
-    <button type="button" class="btn btn-secondary" data-search>Buscar escáneres</button>
-    <label style="display:block;margin:16px 0">Escáner <select data-device style="width:100%" disabled></select></label>
-    <button type="button" class="btn btn-primary" data-scan disabled>Escanear frente</button>
-    <button type="button" class="btn btn-primary" data-back disabled>Escanear reverso</button>
-    <button type="button" class="btn btn-secondary" data-blood disabled>Escanear carnet (opcional)</button>
-    <button type="button" class="btn btn-secondary" data-remove-blood hidden>Quitar carnet</button>
-    <div data-cards></div>
+  dialog.className = 'document-capture';
+  if (!document.querySelector('[data-capture-style]')) {
+    const style = document.createElement('link'); style.rel = 'stylesheet';
+    style.href = '/src/assets/css/components/document-capture.css'; style.dataset.captureStyle = ''; document.head.append(style);
+  }
+  dialog.innerHTML = `<header class="capture-heading"><div><span class="capture-eyebrow">DOCUMENTOS DEL ESTUDIANTE</span><h2>Capturar cédula y carnet</h2>
+    <p>${pilot ? 'Captura las imágenes, revisa los datos y prepara el documento.' : 'Captura ambas caras para preparar un documento A4.'}</p></div>
+    <button type="button" class="btn btn-secondary" data-close>Cerrar</button></header>
+    <section class="capture-connection"><div class="capture-section-title"><h3>1. Elige cómo capturar</h3><span class="capture-badge" data-connection>Sin conectar</span></div>
+    <div class="capture-device-row"><label>Escáner disponible<select data-device disabled><option value="">Conecta el escáner</option></select></label>
+    <button type="button" class="btn btn-secondary" data-search>Conectar escáner</button></div>
+    <details data-pairing><summary>Configurar conexión</summary><div class="capture-settings">
+    <p>Solo la primera vez: abre el puente de escaneo en esta computadora y vincula este navegador. Después conectará automáticamente.</p>
+    <label>Código del puente<input data-token type="password" autocomplete="off" spellcheck="false"></label>
+    <label class="capture-check"><input type="checkbox" data-remember checked> Recordar conexión en esta computadora</label>
+    <button type="button" class="btn btn-secondary" data-forget>Olvidar conexión</button>
+    <small>Origen autorizado: <code data-origin></code>. Mantén el puente abierto mientras escaneas.</small></div></details></section>
+    <section class="capture-section"><h3>2. Captura los documentos</h3><p class="capture-hint">Primero el frente, luego voltea la cédula. El carnet es opcional.</p>
+    <div data-cards class="capture-cards">${[['front','Frente de la cédula','data-scan'],['back','Reverso de la cédula','data-back'],['blood','Carnet de tipo sanguíneo','data-blood']].map(([side,title,attribute], i) => `<section data-card="${side}" class="capture-card"><div class="capture-card-title"><span>${i+1}</span><h4>${title}</h4></div>
+      <div data-image="${side}" class="capture-image"><span>Sin captura${side === 'blood' ? ' · opcional' : ''}</span></div>
+      <button type="button" class="btn btn-secondary" ${attribute} disabled>Escanear ${side === 'front' ? 'frente' : side === 'back' ? 'reverso' : 'carnet'}</button>
+      ${side === 'blood' ? '<button type="button" class="btn btn-secondary" data-remove-blood hidden>Quitar carnet</button>' : ''}</section>`).join('')}</div></section>
+    <div data-ocr-slot></div>
+    <section class="capture-section"><h3>${pilot ? '4' : '3'}. Prepara el PDF</h3><p class="capture-hint">Una página A4, con las imágenes una debajo de otra.</p>
     <button type="button" class="btn btn-primary" data-pdf disabled>Generar PDF</button>
-    <div data-result hidden><a data-download download="cedula.pdf" class="btn btn-secondary">Descargar PDF</a><iframe title="Cédula en PDF A4" style="width:100%;height:420px;border:0"></iframe></div>
-    <p role="status" aria-live="polite"></p>
-    <img data-preview hidden alt="Captura de prueba del escáner" style="max-width:100%;max-height:45vh;object-fit:contain">
-    <p><button type="button" class="btn btn-secondary" data-close>Cerrar</button></p>`;
+    <div data-result hidden><a data-download download="cedula.pdf" class="btn btn-secondary">Descargar PDF</a><iframe title="Cédula en PDF A4"></iframe></div></section>
+    <footer class="capture-status"><p role="status" aria-live="polite">Conecta el escáner${pilot ? ' o utiliza fotos del teléfono' : ''} para comenzar.</p><small>El documento no se guarda en el expediente hasta confirmar el registro.</small></footer>
+    <img data-preview hidden alt="Captura del escáner">`;
   document.body.append(dialog);
   if (pilot) {
     const controls = document.createElement('section');
-    controls.innerHTML = `<p>Prueba privada · requiere puente v1.7 para impresora a 300 ppp. También puedes cargar fotos sin puente local.</p>
-      <label>Foto del frente<input type="file" data-photo="front" accept="image/jpeg,image/png" capture="environment"></label>
-      <label>Foto del reverso<input type="file" data-photo="back" accept="image/jpeg,image/png" capture="environment"></label>
+    controls.className = 'capture-section';
+    controls.innerHTML = `<h3>3. Revisa y autollena los datos</h3><p class="capture-hint">La lectura puede equivocarse. Comprueba los datos antes de aplicarlos.</p>
       <p data-ocr-help>Captura o carga frente y reverso para habilitar el autollenado.</p>
       <button type="button" class="btn btn-primary" data-read disabled aria-describedby="scanner-ocr-help">Revisar y autollenar datos</button>
       <div data-review hidden><p>Revisa las sugerencias antes de aplicarlas. Los campos vacíos no se modificarán.</p>
-      ${[['identification','Cédula'],['firstName','Nombres'],['lastName','Apellidos'],['birthDate','Nacimiento']].map(([key,label]) => `<label>${label}<input data-suggestion="${key}" type="${key === 'birthDate' ? 'date' : 'text'}"></label>`).join('')}
+      <div class="capture-fields">${[['identification','Cédula'],['firstName','Nombres'],['lastName','Apellidos'],['birthDate','Nacimiento']].map(([key,label]) => `<label>${label}<input data-suggestion="${key}" type="${key === 'birthDate' ? 'date' : 'text'}"></label>`).join('')}</div>
       <button type="button" data-apply class="btn btn-primary">Autollenar formulario con estos datos</button></div>`;
     controls.querySelector('[data-ocr-help]').id = 'scanner-ocr-help';
-    dialog.querySelector('[data-cards]').before(controls);
+    dialog.querySelector('[data-ocr-slot]').append(controls);
+    for (const [side,label] of [['front','frente'],['back','reverso'],['blood','carnet']]) {
+      const upload = document.createElement('label'); upload.className = 'capture-photo';
+      upload.textContent = 'Tomar o elegir foto';
+      const input = document.createElement('input'); input.type = 'file'; input.dataset.photo = side;
+      input.accept = 'image/jpeg,image/png'; input.setAttribute('capture','environment'); input.setAttribute('aria-label',`Foto del ${label}`);
+      upload.append(input); dialog.querySelector(`[data-card="${side}"]`).append(upload);
+    }
   }
   // Start loading while the user selects the scanner, rather than after acquisition.
   loadScanner().catch(() => {});
@@ -56,6 +69,10 @@ export function openScannerDeviceDialog(options = {}) {
     if (busy) return;
     try { localStorage.removeItem(pairingKey); } catch {}
     token.value = ''; remember.checked = false;
+    select.replaceChildren(); select.disabled = true;
+    scan.disabled = back.disabled = blood.disabled = true;
+    dialog.querySelector('[data-connection]').textContent = 'Sin conectar';
+    dialog.querySelector('[data-pairing]').open = true;
     status.textContent = 'Vinculación olvidada en este navegador. Introduce el código del puente para volver a conectar.';
   };
   const search = dialog.querySelector('[data-search]'), scan = dialog.querySelector('[data-scan]');
@@ -79,16 +96,22 @@ export function openScannerDeviceDialog(options = {}) {
   dialog.querySelector('[data-close]').onclick = close;
   const run = async action => {
     if (busy) return;
-    if (!pilot && !token.value.trim()) { status.textContent = 'Introduce el código mostrado por el servicio local.'; return; }
     busy = true; search.disabled = scan.disabled = back.disabled = blood.disabled = removeBlood.disabled = pdf.disabled = select.disabled = token.disabled = true;
     dialog.querySelectorAll('[data-photo],[data-read],[data-apply]').forEach(control => { control.disabled = true; });
     dialog.querySelectorAll('[data-crop]').forEach(button => { button.disabled = true; });
     try { await action(new LocalScannerService(token.value.trim())); }
-    catch (error) { status.textContent = error.message; }
+    catch (error) {
+      status.textContent = error.message;
+      if (error.status === 401) {
+        select.replaceChildren(); dialog.querySelector('[data-pairing]').open = true;
+        dialog.querySelector('[data-connection]').textContent = 'Revisar conexión';
+        try { localStorage.removeItem(pairingKey); } catch {}
+      }
+    }
     finally {
-      busy = false; search.disabled = token.disabled = false; select.disabled = scan.disabled = !select.options.length;
-      back.disabled = !select.options.length || !captures.front;
-      blood.disabled = !select.options.length || !captures.front || !captures.back;
+      busy = false; search.disabled = token.disabled = false; select.disabled = scan.disabled = !select.value;
+      back.disabled = !select.value || !captures.front;
+      blood.disabled = !select.value || !captures.front || !captures.back;
       removeBlood.disabled = false;
       pdf.disabled = !captures.front || !captures.back;
       const read = dialog.querySelector('[data-read]'); if (read) read.disabled = !captures.front || !captures.back;
@@ -100,6 +123,11 @@ export function openScannerDeviceDialog(options = {}) {
     }
   };
   search.onclick = () => run(async client => {
+    if (!token.value.trim()) {
+      dialog.querySelector('[data-pairing]').open = true; token.focus();
+      status.textContent = 'Vincula esta computadora una sola vez. Deja marcada «Recordar conexión» para no volver a escribir el código.';
+      return;
+    }
     status.textContent = 'Buscando escáneres configurados en Windows…';
     select.replaceChildren();
     const devices = await client.devices();
@@ -110,6 +138,9 @@ export function openScannerDeviceDialog(options = {}) {
     for (const device of devices) { const option = document.createElement('option'); option.value = device.id; option.textContent = `${device.name} · ${device.interface}`; select.append(option); }
     let previous; try { previous = localStorage.getItem('sportmancar.scanner.device'); } catch {}
     if (devices.some(device => device.id === previous)) select.value = previous;
+    dialog.querySelector('[data-connection]').textContent = devices.length ? 'Conectado' : 'Sin dispositivos';
+    search.textContent = 'Actualizar dispositivos';
+    if (devices.length) dialog.querySelector('[data-pairing]').open = false;
     status.textContent = devices.length ? 'Coloca el documento en el cristal. El recorte se procesará automáticamente; podrás corregirlo si lo necesitas.' : 'Windows no informa escáneres WIA. Revisa alimentación, conexión y controlador; una impresora instalada no garantiza escaneo WIA.';
   });
   const crop = async (side, file, automatic = true) => {
@@ -120,14 +151,13 @@ export function openScannerDeviceDialog(options = {}) {
     clearPdf(); captures[side] = { file, canvas };
     if (pilot) dialog.querySelector('[data-review]').hidden = true;
     let card = dialog.querySelector(`[data-card="${side}"]`);
-    if (!card) {
-      card = document.createElement('section'); card.dataset.card = side;
-      const title = document.createElement('h3'); title.textContent = side === 'front' ? 'Frente' : side === 'back' ? 'Reverso' : 'Carnet de tipo sanguíneo';
+    if (!card.querySelector('[data-crop]')) {
       const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'btn btn-secondary'; edit.dataset.crop = side; edit.textContent = 'Corregir recorte';
       edit.onclick = () => run(() => crop(side, captures[side].file, false));
-      card.append(title, edit); dialog.querySelector('[data-cards]').append(card);
+      card.append(edit);
     }
-    card.querySelector('canvas')?.remove(); canvas.style.cssText = 'display:block;max-width:100%;max-height:260px;object-fit:contain'; card.append(canvas);
+    card.querySelector('[data-image]').replaceChildren(canvas);
+    card.classList.add('has-capture');
     (side === 'front' ? scan : side === 'back' ? back : blood).textContent = side === 'front' ? 'Repetir frente' : side === 'back' ? 'Repetir reverso' : 'Repetir carnet';
     removeBlood.hidden = !captures.blood;
     status.textContent = side === 'front' ? 'Voltea la cédula para escanear el reverso.' : side === 'back' ? 'Puedes escanear el carnet para incluirlo debajo de la cédula, o generar el PDF solo con ambas caras.' : 'Carnet listo. El PDF incluirá frente, reverso y carnet uno debajo del otro.';
@@ -153,7 +183,11 @@ export function openScannerDeviceDialog(options = {}) {
   blood.onclick = () => capture('blood');
   removeBlood.onclick = () => {
     if (busy) return;
-    delete captures.blood; dialog.querySelector('[data-card="blood"]')?.remove();
+    delete captures.blood;
+    const card = dialog.querySelector('[data-card="blood"]');
+    card.querySelector('[data-image]').textContent = 'Sin captura · opcional';
+    card.querySelector('[data-crop]')?.remove(); card.classList.remove('has-capture');
+    const upload = card.querySelector('input[type=file]'); if (upload) upload.value = '';
     clearPdf(); removeBlood.hidden = true; blood.textContent = 'Escanear carnet (opcional)';
     status.textContent = 'Carnet retirado. Genera nuevamente el PDF con ambas caras de la cédula.';
   };
@@ -191,4 +225,5 @@ export function openScannerDeviceDialog(options = {}) {
     };
   }
   dialog.showModal();
+  if (token.value.trim()) search.click();
 }

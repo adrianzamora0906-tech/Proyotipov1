@@ -204,7 +204,7 @@ export function correctPerspective(cv, canvas, points) {
   } finally { [source, output, from, to, transform].filter(Boolean).forEach(mat => mat.delete()); }
 }
 
-export async function editDocument(file, { maximumSide = 1600 } = {}) {
+export async function editDocument(file, { maximumSide = 1600, automatic = false } = {}) {
   const original = await photoCanvas(file, maximumSide);
   let cv, failure;
   try { cv = await loadScanner(); } catch (error) { failure = error.message; }
@@ -213,6 +213,10 @@ export async function editDocument(file, { maximumSide = 1600 } = {}) {
   catch { failure = 'No se detectaron los bordes. Ajusta el recorte o conserva la foto completa.'; }
   if (!failure && points.every((p, i) => p.x === fullCorners(original)[i].x && p.y === fullCorners(original)[i].y)) {
     failure = 'No se detecto el borde del documento. Ajusta el recorte.';
+  }
+  if (automatic && !failure && cv) {
+    try { return correctPerspective(cv, original, points); }
+    catch { failure = 'No se pudo aplicar el recorte automático. Revisa las esquinas o conserva la foto completa.'; }
   }
   if (!document.querySelector('[data-scanner-style]')) {
     const link = document.createElement('link');

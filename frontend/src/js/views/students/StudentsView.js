@@ -21,6 +21,8 @@ import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
 import ApiService from '../../core/api/apiService.js';
 import { createDocumentImageSheet } from '../../services/DocumentImageSheet.js';
+import { PILOT_USER_ID } from '../../services/CedulaOcrPilot.js';
+import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -694,7 +696,7 @@ class StudentsView extends Component {
                   <div class="form-group" id="student-cedula-group">
                     <label class="form-label required">C&eacute;dula</label>
                     <input type="text" class="form-input" name="cedula" inputmode="numeric" maxlength="10" placeholder="1234567890" required>
-                    <div class="form-error"></div>
+                    <div class="form-error" id="student-cedula-error" aria-live="polite"></div>
                     <small id="registration-identity-status" role="status" aria-live="polite"></small>
                     <small id="additional-practice-person-status" class="additional-practice-only" hidden></small>
                     <label class="additional-practice-only" hidden><input type="checkbox" name="additionalPracticeFormerStudent"> Fue estudiante de la escuela</label>
@@ -1161,6 +1163,34 @@ class StudentsView extends Component {
     const citySelect = document.getElementById('modal-city-select');
     const branchSelect = document.getElementById('modal-branch-select');
     this.prepareScheduleFirstLayout();
+    if (this.isScanRegistrationPilot()) {
+      const tabs = form.querySelector('.student-modal-steps');
+      const order = this.scanRegistrationOrder();
+      order.forEach((step, index) => {
+        const tab = tabs?.querySelector(`[data-step="${step}"]`);
+        if (tab) { tab.textContent = `${index + 1}. ${step === 1 ? 'Horario' : step === 3 ? 'Escaneo' : step === 2 ? 'Datos' : 'Pago'}`; tabs.append(tab); }
+      });
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-primary'; button.textContent = 'Escanear y leer cédula · prueba 300 ppp';
+      form.querySelector('.student-modal-step[data-step="3"]')?.prepend(button);
+      button.onclick = () => { if (!this.isScanRegistrationPilot()) return; openScannerDeviceDialog({ pilot: true,
+        onData: values => {
+          if (!form.isConnected || !this.isScanRegistrationPilot()) return;
+          if (values.identification && !Validator.isValidCedula(values.identification)) { window.alert('La cédula reconocida no pasa el dígito verificador. Revísala.'); return; }
+          if (!window.confirm('¿Aplicar los datos revisados al formulario? Los campos vacíos no cambiarán los datos actuales.')) return;
+          for (const [key, value] of Object.entries(values)) {
+            const input = form.elements[key === 'identification' ? 'cedula' : key];
+            if (input && value) { input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })); }
+          }
+        },
+        onDocument: (fileUrl, includesBloodCard) => {
+          if (!form.isConnected || !this.isScanRegistrationPilot()) return;
+          form.elements.registrationDocumentsMobileFileUrl.value = fileUrl;
+          form.elements.registrationDocumentsMobileIncludesBloodCard.value = String(includesBloodCard);
+          form.elements.registrationDocumentsPdfFile.value = '';
+          document.getElementById('registration-documents-status').textContent = 'PDF del escáner preparado para esta inscripción.';
+        },
+      }); };
+    }
     const initializingSteps = [...(form?.querySelectorAll('.student-modal-step') || [])];
     initializingSteps.forEach(step => { step.inert = true; });
     if (form) { form.dataset.initializing = 'true'; form.setAttribute('aria-busy','true'); }
@@ -1288,9 +1318,11 @@ class StudentsView extends Component {
       if (event.target.closest('[data-clear-referrer]')) this.clearReferralStaff();
     });
     form?.querySelector('[name="cedula"]')?.addEventListener('input', event => {
+      if (!this.validateCedulaLive(event.target)) return;
       if (form.querySelector('[name="additionalPractice"]')?.checked) this.scheduleAdditionalPracticeResolution(event.target.value);
       else this.scheduleRegistrationIdentityLookup(event.target.value);
     });
+    form?.querySelector('[name="cedula"]')?.addEventListener('blur', event => this.validateCedulaLive(event.target, true));
     form?.querySelector('[name="additionalPracticeDays"]')?.addEventListener('change', () => this.updateAdditionalPracticePrice());
     form?.querySelector('[name="additionalPracticeDays"]')?.addEventListener('change', () => this.renderAdditionalPracticeDateOptions());
     form?.querySelector('[name="additionalPracticeStartDate"]')?.addEventListener('change', () => this.renderAdditionalPracticeDateOptions());
@@ -1672,6 +1704,28 @@ class StudentsView extends Component {
     return false;
   }
 
+  validateCedulaLive(input, onBlur = false) {
+    const value = input.value.trim();
+    const valid = Validator.isValidCedula(value);
+    const showError = !valid && (onBlur || value.length >= 10 || /\D/.test(value));
+    const error = input.closest('.form-group')?.querySelector('.form-error');
+    if (error) error.textContent = showError ? 'Cédula inválida: revisa los diez dígitos y el último dígito verificador.' : '';
+    input.setAttribute('aria-invalid', String(showError));
+    input.setAttribute('aria-describedby', 'student-cedula-error registration-identity-status');
+    input.classList.toggle('is-invalid', showError);
+    input.setCustomValidity(showError ? 'Revisa el número de cédula y su dígito verificador.' : '');
+    if (!valid) {
+      clearTimeout(this.registrationIdentityTimer);
+      clearTimeout(this.additionalPracticeLookupTimer);
+      this.registrationIdentityRequest = (this.registrationIdentityRequest || 0) + 1;
+      for (const id of ['registration-identity-status', 'additional-practice-person-status']) {
+        const status = document.getElementById(id);
+        if (status) status.textContent = '';
+      }
+    }
+    return valid;
+  }
+
   scheduleRegistrationIdentityLookup(value) {
     if (this.recordEditContext || this.activatingReservation) return;
     clearTimeout(this.registrationIdentityTimer);
@@ -1690,7 +1744,7 @@ class StudentsView extends Component {
       this.registrationIdentityFields=[];
     }
     if (status) status.textContent='';
-    if (!/^\d{10}$/.test(identification)) return;
+    if (!Validator.isValidCedula(identification)) return;
     if (this.registrationIdentityFound===identification) return;
     if (status) status.textContent='Buscando estudiante...';
     this.registrationIdentityTimer=setTimeout(()=>this.resolveRegistrationIdentity(identification,request),300);
@@ -1763,6 +1817,8 @@ class StudentsView extends Component {
     if (identification.length < 8) { if (status) status.textContent = 'Ingresa una cédula válida.'; return; }
     if (status) status.textContent = 'Verificando cédula...';
     const result = await StudentService.resolveAdditionalPracticeStudent(identification);
+    if (!form?.isConnected || String(form.elements.cedula?.value || '').trim() !== identification
+      || !Validator.isValidCedula(identification)) return;
     if (!result.success) { if (status) status.textContent = result.error || 'No se pudo realizar la búsqueda.'; return; }
     this.additionalPracticeStudent = result.data;
     this.additionalPracticeResolved = true;
@@ -3917,7 +3973,11 @@ class StudentsView extends Component {
       this.showTheoryConfirmationModal(() => this.goToNextModalStep());
       return;
     }
-    if (currentStep < this.getStudentModalLastStep()) this.goToModalStep(currentStep + 1);
+    if (this.isScanRegistrationPilot()) {
+      const order = this.scanRegistrationOrder();
+      const next = order[order.indexOf(currentStep) + 1];
+      if (next) this.goToModalStep(next);
+    } else if (currentStep < this.getStudentModalLastStep()) this.goToModalStep(currentStep + 1);
   }
 
   showTheoryConfirmationModal(onAccept = () => this.goToNextModalStep()) {
@@ -4013,13 +4073,26 @@ class StudentsView extends Component {
 
   goToPreviousModalStep() {
     const currentStep = this.getCurrentModalStep();
+    if (this.isScanRegistrationPilot()) {
+      const order = this.scanRegistrationOrder(); const previous = order[order.indexOf(currentStep) - 1];
+      if (previous) this.goToModalStep(previous);
+      return;
+    }
     if (currentStep > 1) this.goToModalStep(currentStep - 1);
   }
 
   goToModalStep(step) {
     if (this.scheduleSelectionChecking) return;
+    if (authService.getCurrentUser()?.userId === PILOT_USER_ID) {
+      const tabs = document.querySelector('#student-modal-form .student-modal-steps');
+      const order = this.isScanRegistrationPilot() ? this.scanRegistrationOrder() : [1, 2, 3, 4];
+      order.forEach((id, index) => {
+        const tab = tabs?.querySelector(`[data-step="${id}"]`);
+        if (tab) { tab.textContent = `${index + 1}. ${id === 1 ? 'Horario' : id === 2 ? 'Datos' : id === 3 ? (this.isScanRegistrationPilot() ? 'Escaneo' : 'Documentos') : 'Pago'}`; tabs.append(tab); }
+      });
+    }
     const lastStep = this.getStudentModalLastStep();
-    const targetStep = Math.max(1, Math.min(lastStep, step || 1));
+    const targetStep = Math.max(1, Math.min(this.isScanRegistrationPilot() ? 4 : lastStep, step || 1));
     document.querySelectorAll('.student-modal-step').forEach(section => {
       section.classList.toggle('active', Number(section.dataset.step) === targetStep);
     });
@@ -4123,7 +4196,16 @@ class StudentsView extends Component {
     });
   }
 
+  isScanRegistrationPilot() {
+    return authService.getCurrentUser()?.userId === PILOT_USER_ID && authService.can('DOCUMENT_CREATE')
+      && !this.recordEditContext && !this.activatingReservation
+      && document.querySelector('#student-modal-form [name="registrationMode"]:checked')?.value === 'regular';
+  }
+
+  scanRegistrationOrder() { return authService.can('PAYMENT_CREATE') ? [1, 3, 2, 4] : [1, 3, 2]; }
+
   getStudentModalLastStep() {
+    if (this.isScanRegistrationPilot()) return this.scanRegistrationOrder().at(-1);
     if (document.querySelector('#student-modal-form [name="registrationMode"]:checked')?.value === 'license-renewal') return 2;
     return authService.can('PAYMENT_CREATE') ? 4 : 3;
   }
@@ -4917,7 +4999,7 @@ class StudentsView extends Component {
       lastName: [{ type: 'required', message: 'El apellido es requerido' }],
       cedula: [
         { type: 'required', message: 'La cédula es requerida' },
-        { type: 'cedula', message: 'Formato de cédula inválido' },
+        { type: 'cedula', message: 'Cédula inválida: revisa los diez dígitos y el último dígito verificador' },
       ],
       birthDate: temporaryReservation || renewal || additionalPractice ? [] : [{ type: 'birthDate', message: 'Debes ser mayor de 16 años' }],
       email: additionalPractice || renewal ? [] : [

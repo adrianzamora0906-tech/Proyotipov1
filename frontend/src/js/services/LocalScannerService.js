@@ -20,5 +20,5 @@ export class LocalScannerService {
     } finally { clearTimeout(timeout); }
   }
   devices() { return this.request('/devices'); }
-  scan(deviceId) { return this.request('/scan', { deviceId }); }
+  scan(deviceId, dpi) { return this.request('/scan', { deviceId, ...(dpi ? { dpi } : {}) }); }
 }

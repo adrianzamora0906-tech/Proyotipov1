@@ -16,8 +16,15 @@ class Validator {
    * Valida una cédula de 10 dígitos sin separadores
    */
   static isValidCedula(cedula) {
-    const cedulaRegex = /^\d{10}$/;
-    return cedulaRegex.test(cedula.toString());
+    const text = String(cedula ?? '');
+    if (!/^\d{10}$/.test(text) || /^(\d)\1{9}$/.test(text)) return false;
+    let sum = 0;
+    for (let i = 0; i < 9; i++) {
+      let digit = Number(text[i]) * (i % 2 === 0 ? 2 : 1);
+      if (digit > 9) digit -= 9;
+      sum += digit;
+    }
+    return (10 - sum % 10) % 10 === Number(text[9]);
   }
 
   /**

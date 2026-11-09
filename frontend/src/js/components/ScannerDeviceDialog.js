@@ -46,7 +46,8 @@ export function openScannerDeviceDialog(options = {}) {
       <button type="button" class="btn btn-primary" data-read disabled aria-describedby="scanner-ocr-help">Revisar y autollenar datos</button>
       <div data-review hidden><p>Revisa las sugerencias antes de aplicarlas. Los campos vacíos no se modificarán.</p>
       <div class="capture-fields">${[['identification','Cédula'],['firstName','Nombres'],['lastName','Apellidos'],['birthDate','Nacimiento']].map(([key,label]) => `<label>${label}<input data-suggestion="${key}" type="${key === 'birthDate' ? 'date' : 'text'}"></label>`).join('')}</div>
-      <button type="button" data-apply class="btn btn-primary">Autollenar formulario con estos datos</button></div>`;
+      <button type="button" data-apply class="btn btn-primary">Autollenar formulario con estos datos</button>
+      <details><summary>Ver texto reconocido (diagnóstico)</summary><pre data-ocr-text style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px"></pre></details></div>`;
     controls.querySelector('[data-ocr-help]').id = 'scanner-ocr-help';
     dialog.querySelector('[data-ocr-slot]').append(controls);
     for (const [side,label] of [['front','frente'],['back','reverso'],['blood','carnet']]) {
@@ -149,7 +150,7 @@ export function openScannerDeviceDialog(options = {}) {
     const canvas = await editDocument(file, { maximumSide: 3600, automatic });
     if (!canvas) { status.textContent = 'Recorte cancelado. Se conserva la captura anterior, si existía.'; return; }
     clearPdf(); captures[side] = { file, canvas };
-    if (pilot) dialog.querySelector('[data-review]').hidden = true;
+    if (pilot) { dialog.querySelector('[data-review]').hidden = true; dialog.querySelector('[data-ocr-text]').textContent = ''; }
     let card = dialog.querySelector(`[data-card="${side}"]`);
     if (!card.querySelector('[data-crop]')) {
       const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'btn btn-secondary'; edit.dataset.crop = side; edit.textContent = 'Corregir recorte';
@@ -214,6 +215,7 @@ export function openScannerDeviceDialog(options = {}) {
     dialog.querySelector('[data-read]').onclick = () => run(async () => {
       const values = await recognizeCedula([captures.front.canvas, captures.back.canvas], message => { status.textContent = message; });
       dialog.querySelectorAll('[data-suggestion]').forEach(input => { input.value = values[input.dataset.suggestion] || ''; });
+      dialog.querySelector('[data-ocr-text]').textContent = values.diagnosticText || '';
       dialog.querySelector('[data-review]').hidden = false;
       dialog.querySelector('[data-review]').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       status.textContent = 'Lectura terminada. Verifica los datos contra la cédula; los campos no reconocidos quedan vacíos.';

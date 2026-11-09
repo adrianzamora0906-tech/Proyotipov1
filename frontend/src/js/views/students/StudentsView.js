@@ -1170,7 +1170,8 @@ class StudentsView extends Component {
         const tab = tabs?.querySelector(`[data-step="${step}"]`);
         if (tab) { tab.textContent = `${index + 1}. ${step === 1 ? 'Horario' : step === 3 ? 'Escaneo' : step === 2 ? 'Datos' : 'Pago'}`; tabs.append(tab); }
       });
-      const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-primary'; button.textContent = 'Escanear y leer cédula · prueba 300 ppp';
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-primary'; button.textContent = 'Autollenar datos de la cédula';
+      button.title = 'Escanea o carga ambas caras, lee el texto y revisa los datos antes de aplicarlos';
       form.querySelector('.student-modal-step[data-step="3"]')?.prepend(button);
       button.onclick = () => { if (!this.isScanRegistrationPilot()) return; openScannerDeviceDialog({ pilot: true,
         onData: values => {

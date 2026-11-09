@@ -36,10 +36,12 @@ export function openScannerDeviceDialog(options = {}) {
     controls.innerHTML = `<p>Prueba privada · requiere puente v1.7 para impresora a 300 ppp. También puedes cargar fotos sin puente local.</p>
       <label>Foto del frente<input type="file" data-photo="front" accept="image/jpeg,image/png" capture="environment"></label>
       <label>Foto del reverso<input type="file" data-photo="back" accept="image/jpeg,image/png" capture="environment"></label>
-      <button type="button" class="btn btn-secondary" data-read disabled>Leer datos de la cédula</button>
+      <p data-ocr-help>Captura o carga frente y reverso para habilitar el autollenado.</p>
+      <button type="button" class="btn btn-primary" data-read disabled aria-describedby="scanner-ocr-help">Revisar y autollenar datos</button>
       <div data-review hidden><p>Revisa las sugerencias antes de aplicarlas. Los campos vacíos no se modificarán.</p>
       ${[['identification','Cédula'],['firstName','Nombres'],['lastName','Apellidos'],['birthDate','Nacimiento']].map(([key,label]) => `<label>${label}<input data-suggestion="${key}" type="${key === 'birthDate' ? 'date' : 'text'}"></label>`).join('')}
-      <button type="button" data-apply class="btn btn-primary">Aplicar datos revisados</button></div>`;
+      <button type="button" data-apply class="btn btn-primary">Autollenar formulario con estos datos</button></div>`;
+    controls.querySelector('[data-ocr-help]').id = 'scanner-ocr-help';
     dialog.querySelector('[data-cards]').before(controls);
   }
   // Start loading while the user selects the scanner, rather than after acquisition.
@@ -90,6 +92,9 @@ export function openScannerDeviceDialog(options = {}) {
       removeBlood.disabled = false;
       pdf.disabled = !captures.front || !captures.back;
       const read = dialog.querySelector('[data-read]'); if (read) read.disabled = !captures.front || !captures.back;
+      if (read) dialog.querySelector('[data-ocr-help]').textContent = captures.front && captures.back
+        ? 'Ambas caras listas. Pulsa «Revisar y autollenar datos» y comprueba las sugerencias.'
+        : 'Captura o carga frente y reverso para habilitar el autollenado.';
       dialog.querySelectorAll('[data-photo],[data-apply]').forEach(control => { control.disabled = false; });
       dialog.querySelectorAll('[data-crop]').forEach(button => { button.disabled = false; });
     }
@@ -176,6 +181,7 @@ export function openScannerDeviceDialog(options = {}) {
       const values = await recognizeCedula([captures.front.canvas, captures.back.canvas], message => { status.textContent = message; });
       dialog.querySelectorAll('[data-suggestion]').forEach(input => { input.value = values[input.dataset.suggestion] || ''; });
       dialog.querySelector('[data-review]').hidden = false;
+      dialog.querySelector('[data-review]').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       status.textContent = 'Lectura terminada. Verifica los datos contra la cédula; los campos no reconocidos quedan vacíos.';
     });
     dialog.querySelector('[data-apply]').onclick = () => {

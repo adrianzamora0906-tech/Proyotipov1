@@ -87,7 +87,7 @@ export function openScannerDeviceDialog() {
     card.querySelector('canvas')?.remove(); canvas.style.cssText = 'display:block;max-width:100%;max-height:260px;object-fit:contain'; card.append(canvas);
     (side === 'front' ? scan : side === 'back' ? back : blood).textContent = side === 'front' ? 'Repetir frente' : side === 'back' ? 'Repetir reverso' : 'Repetir carnet';
     removeBlood.hidden = !captures.blood;
-    status.textContent = side === 'front' ? 'Voltea la cédula para escanear el reverso.' : side === 'back' ? 'Puedes escanear el carnet para incluir tres imágenes en una fila, o generar el PDF solo con la cédula.' : 'Carnet listo. El PDF incluirá frente, reverso y carnet en una fila.';
+    status.textContent = side === 'front' ? 'Voltea la cédula para escanear el reverso.' : side === 'back' ? 'Puedes escanear el carnet para incluirlo debajo de la cédula, o generar el PDF solo con ambas caras.' : 'Carnet listo. El PDF incluirá frente, reverso y carnet uno debajo del otro.';
   };
   const capture = side => run(async client => {
     status.textContent = 'Escaneando… No cierres esta ventana.';
@@ -116,11 +116,11 @@ export function openScannerDeviceDialog() {
       const raw = atob(canvas.toDataURL('image/jpeg', 0.92).split(',')[1]);
       return { width: canvas.width, height: canvas.height, bytes: Uint8Array.from(raw, c => c.charCodeAt(0)) };
     });
-    const blob = createDocumentImageSheet(images, { vertical: !captures.blood, row: Boolean(captures.blood) });
+    const blob = createDocumentImageSheet(images, { vertical: true });
     if (blob.size > 9 * 1024 * 1024) throw new Error('El PDF supera 9 MB. Revisa el área de los recortes.');
     clearPdf(); pdfUrl = URL.createObjectURL(blob);
     result.querySelector('iframe').src = pdfUrl; result.querySelector('a').href = pdfUrl; result.hidden = false;
-    status.textContent = captures.blood ? 'PDF A4 de una página: frente, reverso y carnet en una fila. Descárgalo para adjuntarlo al expediente.' : 'PDF A4 de una página: frente arriba y reverso debajo. Descárgalo para adjuntarlo al expediente.';
+    status.textContent = captures.blood ? 'PDF A4 de una página: frente, reverso y carnet uno debajo del otro. Descárgalo para adjuntarlo al expediente.' : 'PDF A4 de una página: frente arriba y reverso debajo. Descárgalo para adjuntarlo al expediente.';
   });
   dialog.showModal();
 }

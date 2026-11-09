@@ -1,5 +1,5 @@
 import { LocalScannerService } from '../services/LocalScannerService.js';
-import { photoCanvas } from '../services/DocumentScannerService.js';
+import { editDocument } from '../services/DocumentScannerService.js';
 import { createDocumentImageSheet } from '../services/DocumentImageSheet.js';
 
 export function openScannerDeviceDialog() {
@@ -51,6 +51,7 @@ export function openScannerDeviceDialog() {
     if (busy) return;
     if (!token.value.trim()) { status.textContent = 'Introduce el código mostrado por el servicio local.'; return; }
     busy = true; search.disabled = scan.disabled = back.disabled = blood.disabled = removeBlood.disabled = pdf.disabled = select.disabled = token.disabled = true;
+    dialog.querySelectorAll('[data-crop]').forEach(button => { button.disabled = true; });
     try { await action(new LocalScannerService(token.value.trim())); }
     catch (error) { status.textContent = error.message; }
     finally {
@@ -59,6 +60,7 @@ export function openScannerDeviceDialog() {
       blood.disabled = !select.options.length || !captures.front || !captures.back;
       removeBlood.disabled = false;
       pdf.disabled = !captures.front || !captures.back;
+      dialog.querySelectorAll('[data-crop]').forEach(button => { button.disabled = false; });
     }
   };
   search.onclick = () => run(async client => {
@@ -68,16 +70,19 @@ export function openScannerDeviceDialog() {
     for (const device of devices) { const option = document.createElement('option'); option.value = device.id; option.textContent = `${device.name} · ${device.interface}`; select.append(option); }
     let previous; try { previous = localStorage.getItem('sportmancar.scanner.device'); } catch {}
     if (devices.some(device => device.id === previous)) select.value = previous;
-    status.textContent = devices.length ? 'Coloca el documento en el cristal. Se utilizará directamente la imagen del escáner. Para probar 200 ppp, utiliza el puente v1.3.' : 'Windows no informa escáneres WIA. Revisa alimentación, conexión y controlador; una impresora instalada no garantiza escaneo WIA.';
+    status.textContent = devices.length ? 'Coloca el documento en el cristal. Después del escaneo podrás revisar y corregir el recorte. Para probar 200 ppp, utiliza el puente v1.3.' : 'Windows no informa escáneres WIA. Revisa alimentación, conexión y controlador; una impresora instalada no garantiza escaneo WIA.';
   });
   const crop = async (side, file) => {
-    const canvas = await photoCanvas(file, 3600);
+    const canvas = await editDocument(file, { maximumSide: 3600 });
+    if (!canvas) { status.textContent = 'Recorte cancelado. Se conserva la captura anterior, si existía.'; return; }
     clearPdf(); captures[side] = { file, canvas };
     let card = dialog.querySelector(`[data-card="${side}"]`);
     if (!card) {
       card = document.createElement('section'); card.dataset.card = side;
       const title = document.createElement('h3'); title.textContent = side === 'front' ? 'Frente' : side === 'back' ? 'Reverso' : 'Carnet de tipo sanguíneo';
-      card.append(title); dialog.querySelector('[data-cards]').append(card);
+      const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'btn btn-secondary'; edit.dataset.crop = side; edit.textContent = 'Corregir recorte';
+      edit.onclick = () => run(() => crop(side, captures[side].file));
+      card.append(title, edit); dialog.querySelector('[data-cards]').append(card);
     }
     card.querySelector('canvas')?.remove(); canvas.style.cssText = 'display:block;max-width:100%;max-height:260px;object-fit:contain'; card.append(canvas);
     (side === 'front' ? scan : side === 'back' ? back : blood).textContent = side === 'front' ? 'Repetir frente' : side === 'back' ? 'Repetir reverso' : 'Repetir carnet';

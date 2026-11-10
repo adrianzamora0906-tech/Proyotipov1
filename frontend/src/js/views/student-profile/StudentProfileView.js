@@ -586,6 +586,10 @@ class StudentProfileView extends Component {
   }
 
   unmount() {
+    this.bloodCardScanner?.dispose(); this.bloodCardScanner=null;
+    this.bloodCardPreviewRequest=(this.bloodCardPreviewRequest||0)+1;
+    if (this.bloodCardPreviewUrl) URL.revokeObjectURL(this.bloodCardPreviewUrl);
+    this.bloodCardPreviewUrl=null;
     this.stopProfileChanges?.();
     window.clearTimeout(this.backgroundTimer);
     super.unmount();
@@ -863,6 +867,10 @@ class StudentProfileView extends Component {
 
   async loadDocumentsTab() {
     if (this.documentsLoaded || this.documentsLoadPromise) return this.documentsLoadPromise;
+    this.bloodCardScanner?.dispose(); this.bloodCardScanner=null;
+    this.bloodCardPreviewRequest=(this.bloodCardPreviewRequest||0)+1;
+    if (this.bloodCardPreviewUrl) URL.revokeObjectURL(this.bloodCardPreviewUrl);
+    this.bloodCardPreviewUrl=null;
     const pane = document.querySelector('.tab-pane[data-tab="documents"]');
     if (!pane) return;
     pane.setAttribute('aria-busy','true');
@@ -893,6 +901,15 @@ class StudentProfileView extends Component {
   }
 
   setupDocumentListeners(studentId) {
+    document.getElementById('profile-scan-missing-blood-card')?.addEventListener('click', () => {
+      if (!authService.can('DOCUMENT_UPDATE')) return;
+      const host = document.getElementById('profile-blood-card-scanner');
+      if (!host || host.querySelector('[data-local-scanner-dialog]')) return;
+      this.bloodCardScanner = openScannerDeviceDialog({ container:host,photos:true,bloodOnly:true,
+        onBloodCard:fileUrl => this.previewBloodCardAppend(studentId,fileUrl),
+        onInvalidate:() => { this.bloodCardPreviewRequest=(this.bloodCardPreviewRequest||0)+1; this.bloodCardPreviewUrl && URL.revokeObjectURL(this.bloodCardPreviewUrl); this.bloodCardPreviewUrl=null; document.querySelector('[data-profile-card-preview]')?.remove(); },
+      });
+    });
     document.querySelector('[data-scanner-test]')?.addEventListener('click', () => {
       if (authService.can('DOCUMENT_CREATE')) openScannerDeviceDialog();
     });
@@ -1006,11 +1023,9 @@ class StudentProfileView extends Component {
         event.target.disabled = true;
         if (status) status.textContent = 'Actualizando el PDF consolidado...';
         const fileUrl = await this.readFileAsDataUrl(file);
-        const response = await ApiService.appendBloodCardToRegistrationPdf(studentId, { fileUrl });
-        if (!response.success) throw new Error('No se pudo actualizar el PDF.');
-        if (status) status.textContent = 'Carnet agregado correctamente al PDF.';
-        window.history.replaceState(null, null, `/student-profile/${studentId}`);
-        window.dispatchEvent(new PopStateEvent('popstate'));
+        await this.previewBloodCardAppend(studentId,fileUrl);
+        if (status) status.textContent = 'Vista previa lista. Guarda el documento combinado para completar el expediente.';
+        event.target.disabled = false;
       } catch (error) {
         event.target.disabled = false;
         if (status) status.textContent = error.message || 'No se pudo agregar el carnet.';
@@ -2163,6 +2178,39 @@ class StudentProfileView extends Component {
     `;
   }
 
+  async previewBloodCardAppend(studentId,fileUrl) {
+    if (!authService.can('DOCUMENT_UPDATE')) throw new Error('No tienes permiso para completar documentos.');
+    const request = this.bloodCardPreviewRequest = (this.bloodCardPreviewRequest||0)+1;
+    const pane = document.querySelector('.tab-pane[data-tab="documents"] .card-body');
+    const response = await ApiService.appendBloodCardToRegistrationPdf(studentId,{fileUrl,preview:true});
+    if (!response.success) throw new Error(response.error || 'No se pudo preparar el PDF combinado.');
+    if (request !== this.bloodCardPreviewRequest || !pane?.isConnected) return;
+    if (!/^data:application\/pdf;base64,/.test(response.data?.fileUrl||'')) throw new Error('Vista previa no valida.');
+    const blob = await (await fetch(response.data.fileUrl)).blob();
+    if (request !== this.bloodCardPreviewRequest || !pane.isConnected) return;
+    if (this.bloodCardPreviewUrl) URL.revokeObjectURL(this.bloodCardPreviewUrl);
+    this.bloodCardPreviewUrl = URL.createObjectURL(blob);
+    document.querySelector('[data-profile-card-preview]')?.remove();
+    const preview = document.createElement('section'); preview.dataset.profileCardPreview='';
+    preview.innerHTML = '<h3>Vista previa: cedula y carnet en una hoja A4</h3><p>Comprueba que los textos de ambos documentos se lean antes de guardar. El expediente todavia no se ha modificado.</p><iframe title="Documento combinado" style="width:100%;height:500px;border:1px solid #ddd"></iframe><button type="button" class="btn btn-primary" data-save-card>Guardar documento combinado</button><button type="button" class="btn btn-secondary" data-cancel-card>Cancelar</button><p role="status"></p>';
+    preview.querySelector('iframe').src = this.bloodCardPreviewUrl; pane.append(preview);
+    preview.querySelector('[data-cancel-card]').onclick=()=>{ this.bloodCardPreviewRequest++; URL.revokeObjectURL(this.bloodCardPreviewUrl); this.bloodCardPreviewUrl=null; preview.remove(); };
+    preview.querySelector('[data-save-card]').onclick=async event=>{
+      if (!authService.can('DOCUMENT_UPDATE') || request!==this.bloodCardPreviewRequest) return;
+      if (!window.confirm('Se actualizara el PDF de cedula con el carnet en una sola hoja. ¿Deseas guardarlo?')) return;
+      const button=event.currentTarget, cancel=preview.querySelector('[data-cancel-card]'); button.disabled=cancel.disabled=true;
+      try {
+        const saved=await ApiService.appendBloodCardToRegistrationPdf(studentId,{fileUrl,expectedSourceHash:response.data.sourceHash});
+        if (!saved.success) throw new Error(saved.error||'No se pudo guardar el documento.');
+        preview.querySelector('[role=status]').textContent='Carnet agregado. Expediente actualizado.';
+        this.bloodCardScanner?.dispose(); this.bloodCardScanner=null;
+        clearStudentReadCache(studentId,['documents']); this.documentsLoaded=false;
+        await this.loadDocumentsTab();
+      } catch(error) { preview.querySelector('[role=status]').textContent=error.message;button.disabled=cancel.disabled=false; }
+    };
+    preview.scrollIntoView({block:'nearest',behavior:'smooth'});
+  }
+
   renderCedulaPdfUpload(documents) {
     const uploaded = documents.find(document => document.type === 'cedula' && document.file_url);
     const bloodCard = documents.find(document => document.type === 'carnet_tipo_sangre' && document.file_url);
@@ -2174,9 +2222,11 @@ class StudentProfileView extends Component {
             ${bloodCard ? 'Cedula y carnet cargados' : 'Cedula cargada; falta agregar el carnet'}
           </small>
           ${uploaded.file_url ? `<a class="btn btn-small btn-secondary view-document-btn" style="margin-top:.5rem; display:inline-block" href="#" data-file-url="${uploaded.file_url}">Ver PDF actual</a>` : ''}
-          ${!bloodCard ? `
+          ${!bloodCard && authService.can('DOCUMENT_UPDATE') ? `
             <label class="form-label" style="display:block; margin-top:1rem;">Agregar carnet al PDF existente</label>
             <input type="file" class="form-input append-blood-card-input" accept="application/pdf,image/jpeg,image/png">
+            <button type="button" class="btn btn-primary" id="profile-scan-missing-blood-card" style="margin-top:.65rem;">Escanear carnet y completar PDF</button>
+            <div id="profile-blood-card-scanner"></div>
             <button type="button" class="btn btn-primary" id="mobile-blood-card-capture" style="margin-top:.65rem;">
               Capturar carnet desde telefono
             </button>

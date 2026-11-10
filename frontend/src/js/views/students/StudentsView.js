@@ -4205,12 +4205,11 @@ class StudentsView extends Component {
       onData: values => {
         if (!isCurrent() || !this.isScanRegistrationPilot()) return;
         if (values.identification && !Validator.isValidCedula(values.identification)) { window.alert('Revisa la cédula y su dígito verificador.'); return; }
-        if (!window.confirm('¿Aplicar los datos revisados al formulario?')) return;
         for (const [key,value] of Object.entries(values)) {
           const input = form.elements[key === 'identification' ? 'cedula' : key];
           if (input && value) { input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })); }
         }
-        document.getElementById('registration-documents-status').textContent = 'Datos aplicados. Revísalos en el paso Datos antes de guardar.';
+        document.getElementById('registration-documents-status').textContent = 'Datos reconocidos completados automáticamente en el formulario.';
       },
     });
   }

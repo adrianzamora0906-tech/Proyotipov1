@@ -1,7 +1,8 @@
-export function createDocumentImageSheet(images, { vertical = false, row = false } = {}) {
+export function createDocumentImageSheet(images, { vertical = false, row = false, fullPage = false } = {}) {
   if (!images.length || images.length > 4) throw new Error('Selecciona entre una y cuatro fotos.');
   if (vertical && !row && images.length < 2) throw new Error('Se necesitan ambas caras de la cédula.');
   if (row && images.length !== 3) throw new Error('Se necesitan frente, reverso y carnet.');
+  if (fullPage && (images.length !== 1 || vertical || row)) throw new Error('La copia debe ocupar una sola hoja.');
   const encoder = new TextEncoder();
   const join = parts => {
     const result = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
@@ -14,11 +15,11 @@ export function createDocumentImageSheet(images, { vertical = false, row = false
   ]);
   const content = images.map((image, index) => {
     const stacked = vertical && !row;
-    const boxWidth = row ? 163 : stacked ? 499 : 235, boxHeight = row ? 200 : stacked ? 205 : 175;
+    const boxWidth = fullPage ? 499 : row ? 163 : stacked ? 499 : 235, boxHeight = fullPage ? 746 : row ? 200 : stacked ? 205 : 175;
     const scale = Math.min(boxWidth / image.width, boxHeight / image.height);
     const width = image.width * scale, height = image.height * scale;
-    const x = row ? 41 + index * 175 + (163 - width) / 2 : stacked ? (595 - width) / 2 : (index % 2 ? 312 : 48) + (235 - width) / 2;
-    const y = row ? 560 + (200 - height) / 2 : stacked ? 605 - index * 245 + (205 - height) / 2 : (index < 2 ? 560 : 275) + (175 - height) / 2;
+    const x = fullPage ? (595 - width) / 2 : row ? 41 + index * 175 + (163 - width) / 2 : stacked ? (595 - width) / 2 : (index % 2 ? 312 : 48) + (235 - width) / 2;
+    const y = fullPage ? (842 - height) / 2 : row ? 560 + (200 - height) / 2 : stacked ? 605 - index * 245 + (205 - height) / 2 : (index < 2 ? 560 : 275) + (175 - height) / 2;
     return `q ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${index + 1} Do Q`;
   }).join('\n');
   const resources = images.map((_, index) => `/Im${index + 1} ${index + 4} 0 R`).join(' ');

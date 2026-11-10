@@ -41,6 +41,7 @@ class CashDashboardView extends Component {
     const today = new Intl.DateTimeFormat('es-EC', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
 
     const content = `
+      <link rel="stylesheet" href="/src/assets/css/pages/cash-operations.css?v=deposits-20261110">
       <div class="dashboard cash-dashboard">
         <div class="dashboard-header cash-dashboard__header">
           <div><span class="cash-dashboard__eyebrow">Gestión financiera</span><h1>Panel de Caja</h1><p>Control de cobros y comprobantes del día.</p></div>
@@ -69,6 +70,7 @@ class CashDashboardView extends Component {
             </div>
           </section>
         </div>
+        <a class="btn btn-secondary" href="/cash/deposits">Depósitos al banco</a>
         <div class="modal-overlay cash-search-overlay" id="cash-search-overlay" aria-hidden="true">
           <div class="modal cash-search-modal" role="dialog" aria-modal="true" aria-labelledby="cash-search-title">
             <div class="modal-header"><div><h2 class="modal-title" id="cash-search-title">Buscar estudiante para cobrar</h2><p>Consulta estudiantes con saldo pendiente.</p></div><button type="button" class="modal-close" id="cash-search-close" aria-label="Cerrar">×</button></div>

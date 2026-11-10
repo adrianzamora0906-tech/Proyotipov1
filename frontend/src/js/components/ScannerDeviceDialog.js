@@ -50,9 +50,12 @@ export function openScannerDeviceDialog(options = {}) {
     <div class="capture-section">
     <button type="button" class="btn btn-primary" data-pdf disabled>Generar y guardar</button>
     <div data-result hidden><a data-download download="cedula.pdf" class="btn btn-secondary">Descargar PDF</a><iframe title="Cédula en PDF A4"></iframe></div></div>
-    <footer class="capture-status"><p role="status" aria-live="polite">Conecta el escáner${pilot ? ' o utiliza fotos del teléfono' : ''} para comenzar.</p><small>El documento no se guarda en el expediente hasta confirmar el registro.</small></footer>
+    ${options.onCertificate ? `<section class="capture-card" data-certificate-card><div class="capture-card-title"><span>4</span><h4>Certificado de estudio</h4></div><div data-certificate-preview class="capture-image"><span>Sin captura · opcional</span></div><button type="button" class="btn btn-secondary" data-certificate disabled>Escanear certificado</button>${pilot || options.photos ? '<label class="capture-photo">Tomar o elegir foto<input type="file" data-certificate-photo accept="image/jpeg,image/png" capture="environment" aria-label="Foto del certificado de estudio"></label>' : ''}<button type="button" class="btn btn-secondary" data-remove-certificate hidden>Quitar certificado</button></section>` : ''}
+    <footer class="capture-status" hidden><p role="status" aria-live="polite"></p></footer>
     <img data-preview hidden alt="Captura del escáner">`;
   (options.container || document.body).append(dialog);
+  const certificateCard = dialog.querySelector('[data-certificate-card]');
+  if (certificateCard) dialog.querySelector('[data-cards]').append(certificateCard);
   if (inline) dialog.querySelector('.capture-heading').remove();
   if (bloodOnly) {
     dialog.querySelectorAll('[data-card="front"],[data-card="back"],[data-original-control],[data-combined-help]').forEach(element => { element.hidden = true; });
@@ -92,9 +95,14 @@ export function openScannerDeviceDialog(options = {}) {
   };
   const search = dialog.querySelector('[data-search]'), scan = dialog.querySelector('[data-scan]');
   const status = dialog.querySelector('[role=status]'), preview = dialog.querySelector('[data-preview]');
+  const statusObserver = new MutationObserver(() => { status.parentElement.hidden = !status.textContent.trim(); });
+  statusObserver.observe(status, { childList: true, characterData: true, subtree: true });
+  const certificate = dialog.querySelector('[data-certificate]');
+  const removeCertificate = dialog.querySelector('[data-remove-certificate]');
   let busy = false, imageUrl;
   let disposed = false;
   const captures = {};
+  let acceptCertificate;
   let lastOcrFront, lastOcrBack;
   const mode = dialog.querySelector('[data-mode]'), copyScan = dialog.querySelector('[data-copy-scan]');
   const copyComplete = dialog.querySelector('[data-copy-complete]'), copyBlood = dialog.querySelector('[data-copy-blood]');
@@ -135,12 +143,15 @@ export function openScannerDeviceDialog(options = {}) {
   }
   const close = () => { if (busy) { status.textContent = 'Espera a que termine la operación antes de cerrar.'; return; } dialog.close(); };
   dialog.oncancel = event => { event.preventDefault(); close(); };
-  const dispose = () => { disposed = true; clearPdf(); if (imageUrl) URL.revokeObjectURL(imageUrl); token.value = ''; dialog.remove(); };
+  const dispose = () => { disposed = true; statusObserver.disconnect(); clearPdf(); if (imageUrl) URL.revokeObjectURL(imageUrl); token.value = ''; dialog.remove(); };
   dialog.onclose = dispose;
   const closeButton = dialog.querySelector('[data-close]'); if (closeButton) closeButton.onclick = close;
   const run = async action => {
     if (busy || disposed) return;
     busy = true; search.disabled = scan.disabled = back.disabled = blood.disabled = removeBlood.disabled = pdf.disabled = select.disabled = token.disabled = true;
+    if (certificate) certificate.disabled = true;
+    if (removeCertificate) removeCertificate.disabled = true;
+    dialog.querySelectorAll('[data-certificate-photo]').forEach(input => { input.disabled = true; });
     mode.disabled = copyScan.disabled = copyComplete.disabled = copyBlood.disabled = true;
     dialog.querySelectorAll('[data-copy-photo]').forEach(control => { control.disabled = true; });
     combined.disabled = true;
@@ -170,6 +181,9 @@ export function openScannerDeviceDialog(options = {}) {
     }
     finally {
       busy = false; search.disabled = token.disabled = false; select.disabled = scan.disabled = !select.value;
+      if (certificate) certificate.disabled = !select.value;
+      if (removeCertificate) removeCertificate.disabled = false;
+      dialog.querySelectorAll('[data-certificate-photo]').forEach(input => { input.disabled = false; });
       mode.disabled = copyComplete.disabled = copyBlood.disabled = false;
       copyScan.disabled = !select.value;
       dialog.querySelectorAll('[data-copy-photo]').forEach(control => { control.disabled = false; });
@@ -284,6 +298,43 @@ export function openScannerDeviceDialog(options = {}) {
   scan.onclick = () => capture('front');
   back.onclick = () => capture('back');
   blood.onclick = () => capture('blood');
+  if (certificate) {
+    const prepareCertificate = async file => {
+      const canvas = await photoCanvas(file, 3600);
+      const jpeg = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+      if (!jpeg) throw new Error('No se pudo preparar el certificado.');
+      const blob = createDocumentImageSheet([{ width: canvas.width, height: canvas.height, bytes: new Uint8Array(await jpeg.arrayBuffer()) }], { fullPage: true });
+      if (blob.size > 9 * 1024 * 1024) throw new Error('El certificado supera 9 MB.');
+      const fileUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('No se pudo leer el certificado.')); reader.readAsDataURL(blob); });
+      if (disposed) return;
+      await options.onCertificate(fileUrl);
+      const host = dialog.querySelector('[data-certificate-preview]');
+      host.replaceChildren(canvas); host.hidden = false;
+      canvas.style.maxWidth = '100%'; canvas.style.maxHeight = '240px'; canvas.style.objectFit = 'contain';
+      removeCertificate.hidden = false;
+      certificate.textContent = 'Repetir certificado';
+      status.textContent = 'Certificado preparado.';
+    };
+    acceptCertificate = prepareCertificate;
+    certificate.onclick = () => run(async client => {
+      status.textContent = 'Escaneando certificado…';
+      const data = await client.scan(select.value, 300);
+      if (disposed) return;
+      if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(data.imageUrl)) throw new Error('El escáner devolvió una imagen inválida.');
+      const image = await (await fetch(data.imageUrl)).blob();
+      await prepareCertificate(new File([image], 'certificado.jpg', { type: 'image/jpeg' }));
+    });
+    const photo = dialog.querySelector('[data-certificate-photo]');
+    if (photo) photo.onchange = () => { const file = photo.files[0]; if (file) run(() => prepareCertificate(file)); };
+    removeCertificate.onclick = () => {
+      if (busy) return;
+      options.onCertificate('');
+      const host = dialog.querySelector('[data-certificate-preview]'); host.textContent = 'Sin captura · opcional'; host.hidden = false;
+      if (photo) photo.value = '';
+      removeCertificate.hidden = true; certificate.textContent = 'Escanear certificado';
+      status.textContent = '';
+    };
+  }
   copyScan.onclick = () => capture('copy');
   const copyPhoto = dialog.querySelector('[data-copy-photo]');
   if (copyPhoto) copyPhoto.onchange = () => { const file = copyPhoto.files[0]; if (file) run(() => acceptCopy(file)); };
@@ -327,7 +378,44 @@ export function openScannerDeviceDialog(options = {}) {
   if (pilot || options.photos) {
     dialog.querySelectorAll('[data-photo]').forEach(input => { input.onchange = () => { const file = input.files[0]; if (file) run(() => crop(input.dataset.photo, file)); }; });
   }
+  if (options.onPhoneCapture) {
+    dialog.querySelectorAll('[data-photo], [data-copy-photo], [data-certificate-photo]').forEach(input => {
+      const label = input.closest('label');
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'capture-photo';
+      button.textContent = 'Tomar foto desde el teléfono';
+      button.onclick = () => { if (!busy && !disposed) options.onPhoneCapture(); };
+      label.replaceWith(button);
+    });
+  }
   if (!inline) dialog.showModal();
   if (token.value.trim()) search.click();
-  return { dispose, get busy() { return busy; } };
+  return {
+    dispose,
+    get busy() { return busy; },
+    async importPhoneCaptures(images) {
+      if (busy || disposed) throw new Error('Espera a que termine la captura actual.');
+      await run(async () => {
+        delete captures.blood;
+        const bloodCard = dialog.querySelector('[data-card="blood"]');
+        bloodCard.querySelector('[data-image]').textContent = 'Sin captura · opcional';
+        bloodCard.querySelector('[data-crop]')?.remove();
+        bloodCard.classList.remove('has-capture'); removeBlood.hidden = true;
+        if (removeCertificate) {
+          options.onCertificate('');
+          dialog.querySelector('[data-certificate-preview]').textContent = 'Sin captura · opcional';
+          removeCertificate.hidden = true;
+        }
+        mode.value = 'original'; mode.onchange();
+        for (const side of ['front', 'back', 'blood', 'certificate']) {
+          if (!images[side]) continue;
+          const blob = await (await fetch(images[side])).blob();
+          const file = new File([blob], `${side}.jpg`, { type: 'image/jpeg' });
+          if (side === 'certificate') await acceptCertificate?.(file);
+          else await crop(side, file);
+        }
+        status.textContent = 'Fotos recibidas. Revisa las tarjetas y genera el PDF.';
+      });
+    },
+  };
 }

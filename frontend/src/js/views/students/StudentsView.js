@@ -2396,7 +2396,7 @@ class StudentsView extends Component {
   }
 
   async openRegistrationMobileCapturePackage(options = {}) {
-    if (!options.additionalPractice && window.matchMedia('(max-width: 768px)').matches) {
+    if (!options.forceQr && !options.additionalPractice && window.matchMedia('(max-width: 768px)').matches) {
       return this.openRegistrationGallery();
     }
     const isAdditionalPractice = Boolean(options.additionalPractice);
@@ -2484,6 +2484,11 @@ class StudentsView extends Component {
           if (!result.success || !result.data?.completed || result.data.usedAt === previousCaptureTime) return;
           timer?.();
           timer = null;
+          if (!isAdditionalPractice && result.data.captures && this.registrationCapture?.importPhoneCaptures) {
+            await this.registrationCapture.importPhoneCaptures(result.data.captures);
+            close();
+            return;
+          }
           receivedFileUrl = result.data.fileUrl;
           previewObjectUrl = this.createObjectUrlFromDataUrl(receivedFileUrl);
           document.querySelectorAll('.student-document-upload').forEach(card => {
@@ -4188,8 +4193,19 @@ class StudentsView extends Component {
         alternatives.before(details); details.append(summary, alternatives);
       }
     }
+    // La captura integrada reemplaza los controles duplicados; conservar los
+    // campos en el formulario permite guardar los PDF con el flujo existente.
+    pane.querySelectorAll(':scope > .student-modal-section-title, :scope > .registration-capture-alternatives, :scope > .registration-bachiller-check, :scope > .registration-certificate-field, :scope > #registration-documents-status').forEach(element => {
+      element.style.display = 'none';
+    });
     const isCurrent = () => form.isConnected && authService.can('DOCUMENT_CREATE') && form.querySelector('[name="registrationMode"]:checked')?.value === 'regular';
     this.registrationCapture = openScannerDeviceDialog({ container: host, photos: true, pilot: this.isScanRegistrationPilot(),
+      onPhoneCapture: () => this.openRegistrationMobileCapturePackage({ forceQr: true }),
+      onCertificate: fileUrl => {
+        if (!isCurrent()) return;
+        form.elements.certificadoBachillerMobileFileUrl.value = fileUrl;
+        if (fileUrl && form.elements.certificadoBachillerFile) form.elements.certificadoBachillerFile.value = '';
+      },
       onInvalidate: () => {
         if (!form.isConnected) return;
         form.elements.registrationDocumentsMobileFileUrl.value = '';

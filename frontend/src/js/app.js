@@ -25,6 +25,7 @@ import HistoryView from "./views/history/HistoryView.js";
 import ProfileView from "./views/profile/ProfileView.js?v=verificacion-unica-20261104";
 // Cash module views
 import CashDashboardView from "./views/cash/CashDashboardView.js?v=ventas-simple-20261030";
+import CashDepositsView from "./views/cash/CashDepositsView.js";
 import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";
 import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=segunda-matricula-20261015";
 import CashHistoryView from "./views/cash/CashHistoryView.js";
@@ -110,6 +111,7 @@ class App {
 
     // Cash module
     this.router.register("/cash", CashDashboardView, "cash");
+    this.router.register("/cash/deposits", CashDepositsView, "cash-deposits");
     this.router.register(
       "/cash/register",
       RegisterPaymentView,
@@ -270,6 +272,7 @@ class App {
         cash: "PAYMENT_VIEW",
         "cash-register": "PAYMENT_CREATE",
         "cash-pending": "PAYMENT_VIEW",
+        "cash-deposits": "PAYMENT_VIEW",
         "cash-history": "PAYMENT_VIEW",
         "cash-operations": "PAYMENT_VIEW",
         "course-reports": "REPORT_VIEW",

@@ -227,6 +227,9 @@ class SidebarLayout {
               ` : ''}
             `}
 
+            ${!isAdminSystem && !isGeneralManager && canViewPayments && authService.can('PAYMENT_CREATE') ? `<a href="/cash/deposits" class="nav-item ${currentPath === '/cash/deposits' ? 'active' : ''}">
+              <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 10 9-7 9 7M3 21h18M5 10v11M10 10v11M14 10v11M19 10v11"></path></svg><span class="nav-text">Depósitos al banco</span>
+            </a>` : ''}
             ${!isAdminSystem && !isGeneralManager && !isCashOnly && (user?.permissions?.includes('TRANSFER_VERIFY') || user?.permissions?.includes('TRANSFER_APPROVE')) ? `<a href="/cash/operations" class="nav-item ${currentPath === '/cash/operations' ? 'active' : ''}">
               <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"></path><circle cx="18" cy="18" r="3"></circle></svg><span class="nav-text">Confirmar transferencias</span>
             </a>` : ''}

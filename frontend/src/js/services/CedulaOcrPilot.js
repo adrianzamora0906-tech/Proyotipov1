@@ -10,9 +10,41 @@ export function parseMrzNames(text) {
   const unique = [...new Map(candidates.map(value => [value.firstName + '|' + value.lastName, value])).values()];
   return unique.length === 1 ? unique[0] : {};
 }
+function validPastDate(iso) {
+  const date = new Date(iso + 'T12:00:00Z');
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0,10) === iso && date < new Date();
+}
+export function parseMrzNumbers(text) {
+  const ids = new Set(), births = new Set();
+  for (const raw of text.toUpperCase().split(/\r?\n/)) {
+    const line = raw.replace(/\s/g, '');
+    // Only optional data of an Ecuadorian TD1 first line may contain NUI;
+    // the document number at the beginning is not the personal ID.
+    if (/^[IA]<*ECU/.test(line) && line.length >= 25) {
+      for (const match of line.slice(15).matchAll(/(?:^|<)(\d{10})(?=<|$)/g)) {
+        if (Validator.isValidCedula(match[1])) ids.add(match[1]);
+      }
+    }
+    const match = line.match(/^(\d{6})(\d)[MF<]\d{6}\d[A-Z<]{3}[A-Z0-9<]*$/);
+    if (!match) continue;
+    const checksum = [...match[1]].reduce((sum, digit, index) => sum + Number(digit) * [7,3,1][index % 3], 0) % 10;
+    if (checksum !== Number(match[2])) continue;
+    const yy = Number(match[1].slice(0,2)), month = match[1].slice(2,4), day = match[1].slice(4,6);
+    let year = 2000 + yy;
+    if (!validPastDate(`${year}-${month}-${day}`)) year -= 100;
+    const iso = `${year}-${month}-${day}`;
+    if (validPastDate(iso)) births.add(iso);
+  }
+  return { identification: ids.size === 1 ? [...ids][0] : '', birthDate: births.size === 1 ? [...births][0] : '' };
+}
 export function parseCedulaText(text) {
   const lines = text.toUpperCase().split(/\r?\n/).map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const candidates = [...text.matchAll(/\b\d{10}\b/g)].map(match => match[0]).filter(value => Validator.isValidCedula(value));
+  for (const match of text.toUpperCase().matchAll(/N[.\s]*U[.\s]*I[.:\s-]*(\d(?:[ .-]?\d){9})(?!\d)/g)) {
+    const value = match[1].replace(/\D/g,''); if (Validator.isValidCedula(value)) candidates.push(value);
+  }
+  const numbers = parseMrzNumbers(text);
+  if (numbers.identification) candidates.push(numbers.identification);
   const field = label => {
     const i = lines.findIndex(line => label.test(line));
     if (i < 0) return '';
@@ -38,7 +70,9 @@ export function parseCedulaText(text) {
     if (Number.isFinite(date.getTime()) && date.toISOString().slice(0,10) === iso && date < new Date()) birthDate = iso;
   }
   const mrz = parseMrzNames(text);
-  return { identification: [...new Set(candidates)].length === 1 ? candidates[0] : '', firstName: mrz.firstName || field(/^NOMBRES?\b/), lastName: mrz.lastName || field(/^APELLIDOS?\b/), birthDate };
+  const names = field(/^NOMBRES?\b/);
+  const firstName = mrz.firstName && names.startsWith(mrz.firstName) ? names : mrz.firstName || names;
+  return { identification: [...new Set(candidates)].length === 1 ? candidates[0] : '', firstName, lastName: mrz.lastName || field(/^APELLIDOS?\b/), birthDate: birthDate || numbers.birthDate };
 }
 let library;
 export async function recognizeCedula(images, progress) {
@@ -73,10 +107,17 @@ export async function recognizeCedula(images, progress) {
       const mrzText = (await worker.recognize(region)).data.text;
       diagnostics.push('REVERSO\n' + mrzText);
       const names = parseMrzNames(mrzText);
-      if (names.firstName) { result.firstName = names.firstName; result.lastName = names.lastName; }
+      if (names.firstName) {
+        if (!result.firstName || !result.firstName.startsWith(names.firstName)) result.firstName = names.firstName;
+        result.lastName = names.lastName;
+      }
+      const numbers = parseMrzNumbers(mrzText);
+      if (!result.identification) result.identification = numbers.identification;
+      if (!result.birthDate) result.birthDate = numbers.birthDate;
       await worker.setParameters({ tessedit_char_whitelist: '' });
     }
-    if ((!result.firstName || !result.lastName || !result.birthDate) && images[0]) {
+    const possiblyTruncatedName = result.firstName && result.firstName.split(' ').at(-1).length <= 3;
+    if ((!result.firstName || !result.lastName || !result.birthDate || possiblyTruncatedName) && images[0]) {
       progress?.('Releyendo la zona de nombres y nacimiento…');
       // Older Ecuadorian cards place these labels in a narrow central column.
       // Read that column independently so the portrait/right column do not
@@ -92,6 +133,7 @@ export async function recognizeCedula(images, progress) {
       diagnostics.push('ZONA CENTRAL\n' + regionText);
       const retry = parseCedulaText(regionText);
       for (const key of ['firstName', 'lastName', 'birthDate']) if (!result[key] && retry[key]) result[key] = retry[key];
+      if (retry.firstName && result.firstName && retry.firstName.startsWith(result.firstName)) result.firstName = retry.firstName;
     }
     if (!result.identification && images[0]) {
       progress?.('Verificando el número de cédula…');

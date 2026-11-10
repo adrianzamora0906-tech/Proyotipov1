@@ -21,7 +21,7 @@ import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
 import ApiService from '../../core/api/apiService.js';
 import { createDocumentImageSheet } from '../../services/DocumentImageSheet.js';
-import { PILOT_USER_ID } from '../../services/CedulaOcrPilot.js';
+import { isCedulaOcrPilotUser } from '../../services/CedulaOcrPilot.js';
 import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
@@ -3947,7 +3947,7 @@ class StudentsView extends Component {
       this.showTheoryConfirmationModal(() => this.goToNextModalStep());
       return;
     }
-    if (this.isScanRegistrationPilot()) {
+    if (this.isScanFirstRegistration()) {
       const order = this.scanRegistrationOrder();
       const next = order[order.indexOf(currentStep) + 1];
       if (next) this.goToModalStep(next);
@@ -4047,7 +4047,7 @@ class StudentsView extends Component {
 
   goToPreviousModalStep() {
     const currentStep = this.getCurrentModalStep();
-    if (this.isScanRegistrationPilot()) {
+    if (this.isScanFirstRegistration()) {
       const order = this.scanRegistrationOrder(); const previous = order[order.indexOf(currentStep) - 1];
       if (previous) this.goToModalStep(previous);
       return;
@@ -4057,16 +4057,16 @@ class StudentsView extends Component {
 
   goToModalStep(step) {
     if (this.scheduleSelectionChecking) return;
-    if (authService.getCurrentUser()?.userId === PILOT_USER_ID) {
+    {
       const tabs = document.querySelector('#student-modal-form .student-modal-steps');
-      const order = this.isScanRegistrationPilot() ? this.scanRegistrationOrder() : [1, 2, 3, 4];
+      const order = this.isScanFirstRegistration() ? this.scanRegistrationOrder() : [1, 2, 3, 4];
       order.forEach((id, index) => {
         const tab = tabs?.querySelector(`[data-step="${id}"]`);
-        if (tab) { tab.textContent = `${index + 1}. ${id === 1 ? 'Horario' : id === 2 ? 'Datos' : id === 3 ? (this.isScanRegistrationPilot() ? 'Escaneo' : 'Documentos') : 'Pago'}`; tabs.append(tab); }
+        if (tab) { tab.textContent = `${index + 1}. ${id === 1 ? 'Horario' : id === 2 ? 'Datos' : id === 3 ? (this.isScanFirstRegistration() ? 'Escaneo' : 'Documentos') : 'Pago'}`; tabs.append(tab); }
       });
     }
     const lastStep = this.getStudentModalLastStep();
-    const targetStep = Math.max(1, Math.min(this.isScanRegistrationPilot() ? 4 : lastStep, step || 1));
+    const targetStep = Math.max(1, Math.min(this.isScanFirstRegistration() ? 4 : lastStep, step || 1));
     if (targetStep === 3) this.mountInlineRegistrationCapture();
     document.querySelectorAll('.student-modal-step').forEach(section => {
       section.classList.toggle('active', Number(section.dataset.step) === targetStep);
@@ -4215,15 +4215,20 @@ class StudentsView extends Component {
   }
 
   isScanRegistrationPilot() {
-    return authService.getCurrentUser()?.userId === PILOT_USER_ID && authService.can('DOCUMENT_CREATE')
+    return isCedulaOcrPilotUser(authService.getCurrentUser()?.userId) && authService.can('DOCUMENT_CREATE')
       && !this.recordEditContext && !this.activatingReservation
+      && document.querySelector('#student-modal-form [name="registrationMode"]:checked')?.value === 'regular';
+  }
+
+  isScanFirstRegistration() {
+    return !this.recordEditContext && !this.activatingReservation
       && document.querySelector('#student-modal-form [name="registrationMode"]:checked')?.value === 'regular';
   }
 
   scanRegistrationOrder() { return authService.can('PAYMENT_CREATE') ? [1, 3, 2, 4] : [1, 3, 2]; }
 
   getStudentModalLastStep() {
-    if (this.isScanRegistrationPilot()) return this.scanRegistrationOrder().at(-1);
+    if (this.isScanFirstRegistration()) return this.scanRegistrationOrder().at(-1);
     if (document.querySelector('#student-modal-form [name="registrationMode"]:checked')?.value === 'license-renewal') return 2;
     return authService.can('PAYMENT_CREATE') ? 4 : 3;
   }

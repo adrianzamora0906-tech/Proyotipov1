@@ -790,7 +790,7 @@ class StudentProfileView extends Component {
               </div>
               <div class="card-body">
                 <div class="form-row" style="margin-bottom: 1.5rem;">
-                  ${authService.can('DOCUMENT_CREATE') ? '<button type="button" class="btn btn-secondary" data-scanner-test>Escanear cédula (prueba)</button>' : ''}
+                  ${authService.can('DOCUMENT_CREATE') ? '<button type="button" class="btn btn-secondary" data-scanner-test>Escanear cédula y carnet</button>' : ''}
                   ${this.renderCedulaPdfUpload(documents)}
                   <div style="flex:1; min-width:min(100%,220px);" id="profile-study-document">
                     <label class="registration-bachiller-check">
@@ -911,7 +911,7 @@ class StudentProfileView extends Component {
       });
     });
     document.querySelector('[data-scanner-test]')?.addEventListener('click', () => {
-      if (authService.can('DOCUMENT_CREATE')) openScannerDeviceDialog();
+      if (authService.can('DOCUMENT_CREATE')) openScannerDeviceDialog({photos:true});
     });
     document.getElementById('profile-cedula-bachiller')?.addEventListener('change', async event => {
       const checkbox = event.currentTarget;

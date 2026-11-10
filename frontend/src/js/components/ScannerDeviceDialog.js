@@ -1,11 +1,11 @@
 import { LocalScannerService } from '../services/LocalScannerService.js';
 import { editDocument, loadScanner, photoCanvas, detectCorners } from '../services/DocumentScannerService.js';
 import { createDocumentImageSheet } from '../services/DocumentImageSheet.js';
-import { recognizeCedula, PILOT_USER_ID } from '../services/CedulaOcrPilot.js';
+import { recognizeCedula, isCedulaOcrPilotUser } from '../services/CedulaOcrPilot.js';
 import { authService } from '../core/auth/AuthService.js';
 
 export function openScannerDeviceDialog(options = {}) {
-  const pilot = authService.getCurrentUser()?.userId === PILOT_USER_ID && options.pilot === true;
+  const pilot = isCedulaOcrPilotUser(authService.getCurrentUser()?.userId) && options.pilot === true;
   const inline = Boolean(options.container);
   const bloodOnly = options.bloodOnly === true;
   if (!inline && document.querySelector('dialog[data-local-scanner-dialog]')) return;
@@ -48,7 +48,7 @@ export function openScannerDeviceDialog(options = {}) {
     </div></section>
     <div data-ocr-slot></div>
     <div class="capture-section">
-    <button type="button" class="btn btn-primary" data-pdf disabled>Generar PDF</button>
+    <button type="button" class="btn btn-primary" data-pdf disabled>Generar y guardar</button>
     <div data-result hidden><a data-download download="cedula.pdf" class="btn btn-secondary">Descargar PDF</a><iframe title="Cédula en PDF A4"></iframe></div></div>
     <footer class="capture-status"><p role="status" aria-live="polite">Conecta el escáner${pilot ? ' o utiliza fotos del teléfono' : ''} para comenzar.</p><small>El documento no se guarda en el expediente hasta confirmar el registro.</small></footer>
     <img data-preview hidden alt="Captura del escáner">`;

@@ -1,5 +1,7 @@
 import Validator from '../helpers/Validator.js';
 export const PILOT_USER_ID = 'e838645a-123c-4615-b72f-dfdd6c03b6da';
+const pilotUsers = new Set([PILOT_USER_ID, 'cf826077-d878-4ab3-81be-cd5aa010d6e6', '232213dd-1596-4b29-93a9-4ffc7b182411']);
+export const isCedulaOcrPilotUser = userId => pilotUsers.has(userId);
 const nonName = /NACIONALIDAD|APELLIDOS|NOMBRES|FECHA|SEXO|LUGAR|ESTADO|FIRMA|C[EÉ]DULA|INSTRUCCI|PROFESI|DOCUMENTO|DONANTE|ECUATORIANA|REP[ÚU]BLICA|CONDICI[ÓO]N|CIUDADAN[IÍ]A|ACCI[ÓO]N|DIRECCI[ÓO]N/;
 export function parseMrzNames(text) {
   const candidates = text.toUpperCase().split(/\r?\n/).map(line => line.replace(/\s/g, ''))

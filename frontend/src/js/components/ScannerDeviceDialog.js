@@ -1,18 +1,22 @@
 import { LocalScannerService } from '../services/LocalScannerService.js';
-import { editDocument, loadScanner } from '../services/DocumentScannerService.js';
+import { editDocument, loadScanner, photoCanvas, detectCorners } from '../services/DocumentScannerService.js';
 import { createDocumentImageSheet } from '../services/DocumentImageSheet.js';
 import { recognizeCedula, PILOT_USER_ID } from '../services/CedulaOcrPilot.js';
 import { authService } from '../core/auth/AuthService.js';
 
 export function openScannerDeviceDialog(options = {}) {
   const pilot = authService.getCurrentUser()?.userId === PILOT_USER_ID && options.pilot === true;
-  if (document.querySelector('[data-local-scanner-dialog]')) return;
-  const dialog = document.createElement('dialog');
+  const inline = Boolean(options.container);
+  if (!inline && document.querySelector('dialog[data-local-scanner-dialog]')) return;
+  const dialog = document.createElement(inline ? 'section' : 'dialog');
   dialog.dataset.localScannerDialog = '';
-  dialog.className = 'document-capture';
+  dialog.className = `document-capture${inline ? ' document-capture--inline' : ''}`;
   if (!document.querySelector('[data-capture-style]')) {
     const style = document.createElement('link'); style.rel = 'stylesheet';
     style.href = '/src/assets/css/components/document-capture.css'; style.dataset.captureStyle = ''; document.head.append(style);
+  }
+  if (inline && !document.querySelector('[data-capture-inline-style]')) {
+    const style = document.createElement('link'); style.rel = 'stylesheet'; style.href = '/src/assets/css/components/document-capture-inline.css'; style.dataset.captureInlineStyle = ''; document.head.append(style);
   }
   dialog.innerHTML = `<header class="capture-heading"><div><span class="capture-eyebrow">DOCUMENTOS DEL ESTUDIANTE</span><h2>Capturar cédula y carnet</h2>
     <p>${pilot ? 'Captura las imágenes, revisa los datos y prepara el documento.' : 'Captura ambas caras para preparar un documento A4.'}</p></div>
@@ -27,6 +31,8 @@ export function openScannerDeviceDialog(options = {}) {
     <button type="button" class="btn btn-secondary" data-forget>Olvidar conexión</button>
     <small>Origen autorizado: <code data-origin></code>. Mantén el puente abierto mientras escaneas.</small></div></details></section>
     <section class="capture-section"><h3>2. Captura los documentos</h3><p class="capture-hint">Primero el frente, luego voltea la cédula. El carnet es opcional.</p>
+    <label class="capture-check"><input type="checkbox" data-combined> Incluir el carnet junto al frente en un solo escaneo (opcional)</label>
+    <p data-combined-help hidden class="capture-hint">Coloca la cédula en la mitad izquierda del cristal y el carnet en la mitad derecha, separados y sin cruzar el centro. Se obtendrán dos imágenes. Después escanea solo el reverso de la cédula.</p>
     <div data-cards class="capture-cards">${[['front','Frente de la cédula','data-scan'],['back','Reverso de la cédula','data-back'],['blood','Carnet de tipo sanguíneo','data-blood']].map(([side,title,attribute], i) => `<section data-card="${side}" class="capture-card"><div class="capture-card-title"><span>${i+1}</span><h4>${title}</h4></div>
       <div data-image="${side}" class="capture-image"><span>Sin captura${side === 'blood' ? ' · opcional' : ''}</span></div>
       <button type="button" class="btn btn-secondary" ${attribute} disabled>Escanear ${side === 'front' ? 'frente' : side === 'back' ? 'reverso' : 'carnet'}</button>
@@ -37,7 +43,8 @@ export function openScannerDeviceDialog(options = {}) {
     <div data-result hidden><a data-download download="cedula.pdf" class="btn btn-secondary">Descargar PDF</a><iframe title="Cédula en PDF A4"></iframe></div></section>
     <footer class="capture-status"><p role="status" aria-live="polite">Conecta el escáner${pilot ? ' o utiliza fotos del teléfono' : ''} para comenzar.</p><small>El documento no se guarda en el expediente hasta confirmar el registro.</small></footer>
     <img data-preview hidden alt="Captura del escáner">`;
-  document.body.append(dialog);
+  (options.container || document.body).append(dialog);
+  if (inline) dialog.querySelector('.capture-heading').remove();
   if (pilot) {
     const controls = document.createElement('section');
     controls.className = 'capture-section';
@@ -50,6 +57,8 @@ export function openScannerDeviceDialog(options = {}) {
       <details><summary>Ver texto reconocido (diagnóstico)</summary><pre data-ocr-text style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px"></pre></details></div>`;
     controls.querySelector('[data-ocr-help]').id = 'scanner-ocr-help';
     dialog.querySelector('[data-ocr-slot]').append(controls);
+  }
+  if (pilot || options.photos) {
     for (const [side,label] of [['front','frente'],['back','reverso'],['blood','carnet']]) {
       const upload = document.createElement('label'); upload.className = 'capture-photo';
       upload.textContent = 'Tomar o elegir foto';
@@ -79,12 +88,19 @@ export function openScannerDeviceDialog(options = {}) {
   const search = dialog.querySelector('[data-search]'), scan = dialog.querySelector('[data-scan]');
   const status = dialog.querySelector('[role=status]'), preview = dialog.querySelector('[data-preview]');
   let busy = false, imageUrl;
+  let disposed = false;
   const captures = {};
   const back = dialog.querySelector('[data-back]'), pdf = dialog.querySelector('[data-pdf]');
   const blood = dialog.querySelector('[data-blood]'), removeBlood = dialog.querySelector('[data-remove-blood]');
+  const combined = dialog.querySelector('[data-combined]');
+  combined.onchange = () => {
+    dialog.querySelector('[data-combined-help]').hidden = !combined.checked;
+    scan.textContent = combined.checked ? 'Escanear frente + carnet' : captures.front ? 'Repetir frente' : 'Escanear frente';
+  };
   const result = dialog.querySelector('[data-result]');
   let pdfUrl;
   const clearPdf = () => {
+    options.onInvalidate?.();
     result.hidden = true;
     result.querySelector('iframe').removeAttribute('src');
     result.querySelector('a').removeAttribute('href');
@@ -93,11 +109,13 @@ export function openScannerDeviceDialog(options = {}) {
   };
   const close = () => { if (busy) { status.textContent = 'Espera a que termine la operación antes de cerrar.'; return; } dialog.close(); };
   dialog.oncancel = event => { event.preventDefault(); close(); };
-  dialog.onclose = () => { clearPdf(); if (imageUrl) URL.revokeObjectURL(imageUrl); token.value = ''; dialog.remove(); };
-  dialog.querySelector('[data-close]').onclick = close;
+  const dispose = () => { disposed = true; clearPdf(); if (imageUrl) URL.revokeObjectURL(imageUrl); token.value = ''; dialog.remove(); };
+  dialog.onclose = dispose;
+  const closeButton = dialog.querySelector('[data-close]'); if (closeButton) closeButton.onclick = close;
   const run = async action => {
-    if (busy) return;
+    if (busy || disposed) return;
     busy = true; search.disabled = scan.disabled = back.disabled = blood.disabled = removeBlood.disabled = pdf.disabled = select.disabled = token.disabled = true;
+    combined.disabled = true;
     dialog.querySelectorAll('[data-photo],[data-read],[data-apply]').forEach(control => { control.disabled = true; });
     dialog.querySelectorAll('[data-crop]').forEach(button => { button.disabled = true; });
     try { await action(new LocalScannerService(token.value.trim())); }
@@ -111,6 +129,7 @@ export function openScannerDeviceDialog(options = {}) {
     }
     finally {
       busy = false; search.disabled = token.disabled = false; select.disabled = scan.disabled = !select.value;
+      combined.disabled = false;
       back.disabled = !select.value || !captures.front;
       blood.disabled = !select.value || !captures.front || !captures.back;
       removeBlood.disabled = false;
@@ -148,6 +167,7 @@ export function openScannerDeviceDialog(options = {}) {
     status.textContent = automatic ? 'Procesando recorte automático… Si no se detectan los bordes, se abrirá el ajuste manual.' : 'Ajusta el recorte y la orientación del documento.';
     await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
     const canvas = await editDocument(file, { maximumSide: 3600, automatic });
+    if (disposed) return;
     if (!canvas) { status.textContent = 'Recorte cancelado. Se conserva la captura anterior, si existía.'; return; }
     clearPdf(); captures[side] = { file, canvas };
     if (pilot) { dialog.querySelector('[data-review]').hidden = true; dialog.querySelector('[data-ocr-text]').textContent = ''; }
@@ -162,6 +182,7 @@ export function openScannerDeviceDialog(options = {}) {
     (side === 'front' ? scan : side === 'back' ? back : blood).textContent = side === 'front' ? 'Repetir frente' : side === 'back' ? 'Repetir reverso' : 'Repetir carnet';
     removeBlood.hidden = !captures.blood;
     status.textContent = side === 'front' ? 'Voltea la cédula para escanear el reverso.' : side === 'back' ? 'Puedes escanear el carnet para incluirlo debajo de la cédula, o generar el PDF solo con ambas caras.' : 'Carnet listo. El PDF incluirá frente, reverso y carnet uno debajo del otro.';
+    return true;
   };
   const capture = side => run(async client => {
     const started = performance.now();
@@ -170,11 +191,42 @@ export function openScannerDeviceDialog(options = {}) {
     if (imageUrl) { URL.revokeObjectURL(imageUrl); imageUrl = null; }
     preview.removeAttribute('src');
     const data = await client.scan(select.value, pilot ? 300 : undefined);
+    if (disposed) return;
     if (pilot && data.dpi !== 300) throw new Error('La captura no confirma 300 ppp. Actualiza el puente a v1.7 para esta prueba, o utiliza fotografías.');
     const acquired = performance.now();
     if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(data.imageUrl)) throw new Error('El servicio devolvió una imagen inválida.');
     const blob = await (await fetch(data.imageUrl)).blob();
-    await crop(side, new File([blob], `${side}.jpg`, { type: 'image/jpeg' }));
+    if (side === 'front' && combined.checked) {
+      status.textContent = 'Separando la cédula y el carnet de la misma captura…';
+      const full = await photoCanvas(new File([blob], 'captura.jpg', { type: 'image/jpeg' }), 3600);
+      const width = Math.floor(full.width / 2);
+      const files = {};
+      for (const [key,x,w] of [['front',0,width],['blood',width,full.width-width]]) {
+        const region = document.createElement('canvas'); region.width = w; region.height = full.height;
+        region.getContext('2d').drawImage(full,x,0,w,full.height,0,0,w,full.height);
+        if (key === 'blood') {
+          // A blank right half must not become a blood-card document.
+          let detected = false;
+          try {
+            const cv = await loadScanner(); const points = detectCorners(cv, region);
+            detected = points.some((p,i) => Math.abs(p.x - [0,w-1,w-1,0][i]) > 1 || Math.abs(p.y - [0,0,full.height-1,full.height-1][i]) > 1);
+          } catch { /* Keep the carnet optional if detection is unavailable. */ }
+          if (!detected) continue;
+        }
+        const part = await new Promise(resolve => region.toBlob(resolve, 'image/jpeg', 0.95));
+        if (!part) throw new Error('No se pudo separar la captura. Repite el escaneo.');
+        files[key] = new File([part], `${key}.jpg`, { type: 'image/jpeg' });
+      }
+      const accepted = await crop('front', files.front);
+      if (!accepted) return;
+      if (disposed) return;
+      if (files.blood) await crop('blood', files.blood);
+      if (disposed) return;
+      status.textContent = files.blood ? 'Captura conjunta procesada. Revisa ambas imágenes y voltea solo la cédula para escanear el reverso.' : 'No se detectó un carnet en la mitad derecha. Puedes continuar sin carnet o capturarlo por separado; una captura anterior del carnet se conserva.';
+      combined.onchange();
+    } else {
+      await crop(side, new File([blob], `${side}.jpg`, { type: 'image/jpeg' }));
+    }
     // The second duration includes review time if automatic detection fell back to the editor.
     status.textContent += ` Captura y transferencia: ${((acquired - started) / 1000).toFixed(1)} s. Procesamiento y revisión: ${((performance.now() - acquired) / 1000).toFixed(1)} s.`;
     try { localStorage.setItem('sportmancar.scanner.device', select.value); } catch {}
@@ -203,17 +255,20 @@ export function openScannerDeviceDialog(options = {}) {
     if (blob.size > 9 * 1024 * 1024) throw new Error('El PDF supera 9 MB. Revisa el área de los recortes.');
     clearPdf(); pdfUrl = URL.createObjectURL(blob);
     result.querySelector('iframe').src = pdfUrl; result.querySelector('a').href = pdfUrl; result.hidden = false;
-    if (pilot && options.onDocument) {
+    if (options.onDocument) {
       const reader = new FileReader();
       reader.onload = () => { if (dialog.isConnected) options.onDocument(String(reader.result), Boolean(captures.blood)); };
       reader.readAsDataURL(blob);
     }
     status.textContent = captures.blood ? 'PDF A4 de una página: frente, reverso y carnet uno debajo del otro. Descárgalo para adjuntarlo al expediente.' : 'PDF A4 de una página: frente arriba y reverso debajo. Descárgalo para adjuntarlo al expediente.';
   });
-  if (pilot) {
+  if (pilot || options.photos) {
     dialog.querySelectorAll('[data-photo]').forEach(input => { input.onchange = () => { const file = input.files[0]; if (file) run(() => crop(input.dataset.photo, file)); }; });
+  }
+  if (pilot) {
     dialog.querySelector('[data-read]').onclick = () => run(async () => {
       const values = await recognizeCedula([captures.front.canvas, captures.back.canvas], message => { status.textContent = message; });
+      if (disposed) return;
       dialog.querySelectorAll('[data-suggestion]').forEach(input => { input.value = values[input.dataset.suggestion] || ''; });
       dialog.querySelector('[data-ocr-text]').textContent = values.diagnosticText || '';
       dialog.querySelector('[data-review]').hidden = false;
@@ -226,6 +281,7 @@ export function openScannerDeviceDialog(options = {}) {
       options.onData?.(values);
     };
   }
-  dialog.showModal();
+  if (!inline) dialog.showModal();
   if (token.value.trim()) search.click();
+  return { dispose, get busy() { return busy; } };
 }

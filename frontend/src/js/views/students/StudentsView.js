@@ -1163,35 +1163,6 @@ class StudentsView extends Component {
     const citySelect = document.getElementById('modal-city-select');
     const branchSelect = document.getElementById('modal-branch-select');
     this.prepareScheduleFirstLayout();
-    if (this.isScanRegistrationPilot()) {
-      const tabs = form.querySelector('.student-modal-steps');
-      const order = this.scanRegistrationOrder();
-      order.forEach((step, index) => {
-        const tab = tabs?.querySelector(`[data-step="${step}"]`);
-        if (tab) { tab.textContent = `${index + 1}. ${step === 1 ? 'Horario' : step === 3 ? 'Escaneo' : step === 2 ? 'Datos' : 'Pago'}`; tabs.append(tab); }
-      });
-      const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-primary'; button.textContent = 'Autollenar datos de la cédula';
-      button.title = 'Escanea o carga ambas caras, lee el texto y revisa los datos antes de aplicarlos';
-      form.querySelector('.student-modal-step[data-step="3"]')?.prepend(button);
-      button.onclick = () => { if (!this.isScanRegistrationPilot()) return; openScannerDeviceDialog({ pilot: true,
-        onData: values => {
-          if (!form.isConnected || !this.isScanRegistrationPilot()) return;
-          if (values.identification && !Validator.isValidCedula(values.identification)) { window.alert('La cédula reconocida no pasa el dígito verificador. Revísala.'); return; }
-          if (!window.confirm('¿Aplicar los datos revisados al formulario? Los campos vacíos no cambiarán los datos actuales.')) return;
-          for (const [key, value] of Object.entries(values)) {
-            const input = form.elements[key === 'identification' ? 'cedula' : key];
-            if (input && value) { input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })); }
-          }
-        },
-        onDocument: (fileUrl, includesBloodCard) => {
-          if (!form.isConnected || !this.isScanRegistrationPilot()) return;
-          form.elements.registrationDocumentsMobileFileUrl.value = fileUrl;
-          form.elements.registrationDocumentsMobileIncludesBloodCard.value = String(includesBloodCard);
-          form.elements.registrationDocumentsPdfFile.value = '';
-          document.getElementById('registration-documents-status').textContent = 'PDF del escáner preparado para esta inscripción.';
-        },
-      }); };
-    }
     const initializingSteps = [...(form?.querySelectorAll('.student-modal-step') || [])];
     initializingSteps.forEach(step => { step.inert = true; });
     if (form) { form.dataset.initializing = 'true'; form.setAttribute('aria-busy','true'); }
@@ -3748,6 +3719,7 @@ class StudentsView extends Component {
   }
 
   closeStudentModal() {
+    this.registrationCapture?.dispose(); this.registrationCapture = null;
     clearTimeout(this.registrationIdentityTimer);
     this.registrationIdentityRequest=(this.registrationIdentityRequest || 0)+1;
     this.registrationIdentityFound=null;
@@ -3961,6 +3933,7 @@ class StudentsView extends Component {
   }
 
   goToNextModalStep() {
+    if (this.registrationCapture?.busy) { this.showModalAlert('error','Espera a que termine la captura o lectura del documento.'); return; }
     if (this.scheduleSelectionChecking) return;
     if (document.getElementById('student-modal-form')?.dataset.initializing === 'true') return;
     const currentStep = this.getCurrentModalStep();
@@ -4094,6 +4067,7 @@ class StudentsView extends Component {
     }
     const lastStep = this.getStudentModalLastStep();
     const targetStep = Math.max(1, Math.min(this.isScanRegistrationPilot() ? 4 : lastStep, step || 1));
+    if (targetStep === 3) this.mountInlineRegistrationCapture();
     document.querySelectorAll('.student-modal-step').forEach(section => {
       section.classList.toggle('active', Number(section.dataset.step) === targetStep);
     });
@@ -4194,6 +4168,50 @@ class StudentsView extends Component {
       const input = form.querySelector(`[name="${name}"]`);
       if (input) input.required = required;
       input?.closest('.form-group')?.querySelector('.form-label')?.classList.toggle('required', required);
+    });
+  }
+
+  mountInlineRegistrationCapture() {
+    const form = document.getElementById('student-modal-form');
+    if (!form || !authService.can('DOCUMENT_CREATE') || this.recordEditContext || this.activatingReservation
+      || form.querySelector('[name="registrationMode"]:checked')?.value !== 'regular') return;
+    if (form.querySelector('[data-inline-registration-capture] [data-local-scanner-dialog]')) return;
+    this.registrationCapture?.dispose();
+    const pane = form.querySelector('.student-modal-step[data-step="3"]');
+    let host = pane.querySelector('[data-inline-registration-capture]');
+    if (!host) {
+      host = document.createElement('div'); host.dataset.inlineRegistrationCapture = ''; host.className = 'regular-enrollment-only'; pane.prepend(host);
+      const alternatives = pane.querySelector('.registration-document-options');
+      if (alternatives) {
+        const details = document.createElement('details'); details.className = 'registration-capture-alternatives regular-enrollment-only';
+        const summary = document.createElement('summary'); summary.textContent = 'Adjuntar un PDF o capturar desde otro teléfono';
+        alternatives.before(details); details.append(summary, alternatives);
+      }
+    }
+    const isCurrent = () => form.isConnected && authService.can('DOCUMENT_CREATE') && form.querySelector('[name="registrationMode"]:checked')?.value === 'regular';
+    this.registrationCapture = openScannerDeviceDialog({ container: host, photos: true, pilot: this.isScanRegistrationPilot(),
+      onInvalidate: () => {
+        if (!form.isConnected) return;
+        form.elements.registrationDocumentsMobileFileUrl.value = '';
+        form.elements.registrationDocumentsMobileIncludesBloodCard.value = '';
+      },
+      onDocument: (fileUrl, includesBloodCard) => {
+        if (!isCurrent()) return;
+        form.elements.registrationDocumentsMobileFileUrl.value = fileUrl;
+        form.elements.registrationDocumentsMobileIncludesBloodCard.value = String(includesBloodCard);
+        form.elements.registrationDocumentsPdfFile.value = '';
+        document.getElementById('registration-documents-status').textContent = 'PDF preparado. Se guardará al confirmar el registro.';
+      },
+      onData: values => {
+        if (!isCurrent() || !this.isScanRegistrationPilot()) return;
+        if (values.identification && !Validator.isValidCedula(values.identification)) { window.alert('Revisa la cédula y su dígito verificador.'); return; }
+        if (!window.confirm('¿Aplicar los datos revisados al formulario?')) return;
+        for (const [key,value] of Object.entries(values)) {
+          const input = form.elements[key === 'identification' ? 'cedula' : key];
+          if (input && value) { input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        document.getElementById('registration-documents-status').textContent = 'Datos aplicados. Revísalos en el paso Datos antes de guardar.';
+      },
     });
   }
 
@@ -5038,6 +5056,7 @@ class StudentsView extends Component {
   }
 
   async handleStudentSubmit(event) {
+    if (this.registrationCapture?.busy) { event?.preventDefault(); this.showModalAlert('error','Espera a que termine la captura o lectura antes de registrar.'); return; }
     if (this.scheduleSelectionChecking) { event.preventDefault(); return; }
     if (document.getElementById('student-modal-form')?.dataset.initializing === 'true') {
       event.preventDefault();
@@ -6407,6 +6426,7 @@ class StudentsView extends Component {
   }
 
   unmount() {
+    this.registrationCapture?.dispose(); this.registrationCapture = null;
     if (this.refreshTimer) window.clearInterval(this.refreshTimer);
     super.unmount();
   }

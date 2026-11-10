@@ -1,0 +1,4 @@
+.document-capture--inline{display:block;width:100%;max-height:none;overflow:visible;border:0;border-radius:0;background:transparent}
+.document-capture--inline .capture-connection,.document-capture--inline .capture-section{margin:0 0 18px}
+.document-capture--inline .capture-status{border:1px solid #e7e9f0;border-radius:10px;margin-bottom:18px}
+.registration-capture-alternatives{margin:16px 0}.registration-capture-alternatives>summary{cursor:pointer;color:#6252de;font-weight:600;margin-bottom:12px}

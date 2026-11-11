@@ -686,7 +686,7 @@ export default class AdminBranchesView extends Component {
       <article><strong>${number(preview.affectedStudents)}</strong><span>Alumnos afectados</span></article>
       <article><strong>${number(preview.affectedClasses)}</strong><span>Clases por reorganizar</span></article>
     </div>
-    ${preview.isInstructor?`<div class="vacation-rule ${preview.studentsTaught>=preview.minimumRequired?'ok':'blocked'}"><strong>Meta mensual: ${preview.studentsTaught} de ${preview.minimumRequired} alumnos</strong><span>${preview.studentsTaught>=preview.minimumRequired?'Cumple la regla para aprobar vacaciones.':'No se pueden aprobar vacaciones todavia.'}</span></div>`:''}
+    ${preview.isInstructor?`<div class="vacation-rule ${preview.studentsTaught>=preview.minimumRequired?'ok':'blocked'}"><strong>Meta mensual: ${preview.studentsTaught} de ${preview.minimumRequired} alumnos</strong><span>${preview.studentsTaught>=preview.minimumRequired?'Meta cumplida.':'Aviso: no alcanza la meta mensual; esto no impide aprobar las vacaciones.'}</span></div>`:''}
     ${groups.length?`<div class="vacation-groups"><h3>Grupos que deben reorganizarse</h3>${groups.map(group=>`<div><strong>${esc(group.code)} · ${esc(group.cycle_code)}</strong><span>${number(group.students)} alumnos · instructores ${number(group.instructors_before)} a ${number(group.instructors_during)}</span></div>`).join('')}</div>`:''}
     ${(preview.warnings||[]).map(warning=>`<p class="vacation-warning">${esc(warning)}</p>`).join('')}
     ${preview.isInstructor?'<label class="vacation-ack"><input type="checkbox" name="reorganizationAcknowledged"> Revise los grupos y clases que deben reorganizarse.</label>':''}`;

@@ -15,6 +15,7 @@
 .cash-deposit-actions .btn { width: 100%; min-height: 46px; }
 .cash-deposits .cash-deposit-filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; margin: 0 0 24px; }
 .cash-deposit-filters label { max-width: 200px; }
+.cash-deposit-filters .cash-deposit-person-filter { flex: 1 1 220px; max-width: 320px; }
 .cash-deposit-filters strong:not(:empty) { display: block; width: 100%; padding: 14px; background: #f5f4ff; border-radius: 10px; color: #4338a5; font-size: 13px; line-height: 1.8; }
 #cash-deposit-message:empty { display: none; }
 #cash-deposit-message:not(:empty) { padding: 12px; background: #f1f5f9; border-radius: 8px; margin: 16px 0 0; font-size: 13px; }

@@ -43,6 +43,17 @@ class CashOperationsView extends Component {
     this.methods = methods || [];
   }
   async render() {
+    if (!document.querySelector('[data-cash-ops-styles]')) {
+      await new Promise((resolve) => {
+        const stylesheet = document.createElement('link');
+        stylesheet.rel = 'stylesheet';
+        stylesheet.href = '/src/assets/css/pages/cash-operations.css';
+        stylesheet.dataset.cashOpsStyles = 'true';
+        stylesheet.onload = resolve;
+        stylesheet.onerror = resolve;
+        document.head.appendChild(stylesheet);
+      });
+    }
     try {
       await this.load();
       this.error = "";
@@ -59,14 +70,13 @@ class CashOperationsView extends Component {
     const urgent = this.data.alerts.filter(
       (x) => x.alert_type !== "PENDING_BALANCE",
     ).length;
-    const content = `<link rel="stylesheet" href="/src/assets/css/pages/cash-operations.css">
-      <div class="cash-ops">
+    const content = `<div class="cash-ops">
         <header class="cash-ops-head"><div><span class="cash-dashboard__eyebrow">CONTROL DE CARTERA</span><h1>Operaciones de Caja</h1></div></header>
         ${this.error ? `<div class="alert alert-error">${esc(this.error)}</div>` : ""}
         <section class="cash-ops-kpis">
-          <article class="cash-ops-kpi"><strong id="transfer-pending-total">${pendingTransfers}</strong><span>Transferencias pendientes</span></article>
-          <article class="cash-ops-kpi"><strong>${urgent}</strong><span>Alertas prioritarias</span></article>
-          <article class="cash-ops-kpi"><strong>${this.data.corrections.length}</strong><span>Correcciones auditadas</span></article>
+          <article class="cash-ops-kpi cash-ops-kpi--pending"><strong id="transfer-pending-total">${pendingTransfers}</strong><span>Transferencias pendientes</span></article>
+          <article class="cash-ops-kpi cash-ops-kpi--alerts"><strong>${urgent}</strong><span>Alertas prioritarias</span></article>
+          <article class="cash-ops-kpi cash-ops-kpi--audit"><strong>${this.data.corrections.length}</strong><span>Correcciones auditadas</span></article>
         </section>
         <nav class="cash-ops-tabs" aria-label="Operaciones">
           <button class="cash-ops-tab active" data-tab="transfers">Transferencias</button>
@@ -77,13 +87,18 @@ class CashOperationsView extends Component {
           <div class="cash-ops-panel-head"><h2>Transferencias</h2><div class="cash-ops-toolbar-actions"><button class="btn btn-primary" id="new-transfer">Nueva transferencia</button></div></div>
           <div class="cash-ops-filters">
             <label class="cash-ops-search"><span>Buscar</span><input class="form-input" id="transfer-search" type="search" placeholder="Nombre, cédula o comprobante"></label>
-            <label><span>Estado</span><select class="form-select" id="transfer-state"><option value="all">Todos los estados</option><option value="approval">Por aprobar</option><option value="confirmation">Por confirmar</option><option value="completed">Aprobadas / aplicadas</option><option value="rejected">Rechazadas</option></select></label>
             <label><span>Desde</span><input class="form-input" type="date" id="transfer-from"></label>
             <label><span>Hasta</span><input class="form-input" type="date" id="transfer-to"></label>
           </div>
+          <nav class="cash-ops-state-filters" aria-label="Filtrar transferencias por estado">
+            <button type="button" class="cash-ops-state-filter active" data-transfer-state="all" aria-pressed="true"><span>Todas</span><strong id="transfer-count-all">${this.data.transfers.length}</strong></button>
+            <button type="button" class="cash-ops-state-filter" data-transfer-state="confirmation" aria-pressed="false"><span>Por confirmar</span><strong id="transfer-count-confirmation">0</strong></button>
+            <button type="button" class="cash-ops-state-filter" data-transfer-state="approval" aria-pressed="false"><span>Por aprobar</span><strong id="transfer-count-approval">0</strong></button>
+            <button type="button" class="cash-ops-state-filter" data-transfer-state="completed" aria-pressed="false"><span>Aprobadas / aplicadas</span><strong id="transfer-count-completed">0</strong></button>
+            <button type="button" class="cash-ops-state-filter" data-transfer-state="rejected" aria-pressed="false"><span>Rechazadas</span><strong id="transfer-count-rejected">0</strong></button>
+          </nav>
           <div class="cash-ops-results"><span id="transfer-result-count"></span><span id="transfer-feedback" role="status" aria-live="polite"></span></div>
-          <div class="cash-ops-columns" aria-hidden="true"><span>Estudiante y comprobante</span><span>Valor y fecha</span><span>Estado y revisión</span></div>
-          <div class="cash-ops-list" id="transfer-list">${this.transferRows()}</div>
+          <div class="cash-ops-table-wrap"><table class="cash-ops-table"><thead><tr><th scope="col">Estudiante</th><th scope="col">Comprobante</th><th scope="col">Importe</th><th scope="col">Fecha</th><th scope="col">Estado</th><th scope="col">Acciones</th></tr></thead><tbody id="transfer-list">${this.transferTableRows()}</tbody></table></div>
         </section>
         <section class="cash-ops-panel" data-panel="alerts"><div class="cash-ops-panel-head"><h2>Atención requerida</h2></div><div class="cash-ops-list">${this.alertRows()}</div></section>
         <section class="cash-ops-panel" data-panel="corrections"><div class="cash-ops-panel-head"><h2>Corrección de datos del cobro</h2><button class="btn btn-primary" id="new-correction">Corregir cobro</button></div><div class="cash-ops-list">${this.correctionRows()}</div></section>
@@ -120,6 +135,26 @@ class CashOperationsView extends Component {
       '<div class="cash-ops-empty"><strong>No hay transferencias para mostrar</strong></div>'
     );
   }
+  transferTableRows() {
+    const pending = (item) => ['PENDING', 'AWAITING_APPROVAL'].includes(item.status) || this.needsLegacyApproval(item);
+    return this.data.transfers
+      .filter((item) => this.matchesTransfer(item))
+      .slice()
+      .sort((a, b) => {
+        if (pending(a) !== pending(b)) return pending(a) ? -1 : 1;
+        return (Date.parse(b.transfer_date || b.created_at) || 0) - (Date.parse(a.transfer_date || a.created_at) || 0)
+          || (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0);
+      })
+      .map((item) => `<tr class="cash-ops-row ${pending(item) ? 'cash-ops-row--pending' : ''}">
+        <td data-label="Estudiante"><strong>${esc(item.student_name)}</strong><small>C&#233;dula ${esc(item.identification)}</small></td>
+        <td data-label="Comprobante"><strong>${esc(item.reference || 'Sin referencia')}</strong><small>${esc(item.bank || 'Sin banco')}</small></td>
+        <td data-label="Importe"><strong class="transfer-amount">${money(item.amount)}</strong></td>
+        <td data-label="Fecha">${esc(this.transferDateLabel(item))}</td>
+        <td data-label="Estado"><span class="cash-ops-badge ${esc(this.needsLegacyApproval(item) ? 'AWAITING_APPROVAL' : item.status)}">${esc(this.transferStatus(item))}</span>${item.approved_at ? `<small>${date(item.approved_at)}</small>` : ''}${item.void_request_pending ? '<small class="cash-ops-void-note">Anulación solicitada</small>' : ''}</td>
+        <td data-label="Acciones"><div class="cash-ops-actions">${this.transferActions(item)}</div></td>
+      </tr>`)
+      .join('') || '<tr><td class="cash-ops-empty" colspan="6"><strong>No hay transferencias para mostrar</strong></td></tr>';
+  }
   needsLegacyApproval(transfer) {
     return transfer.status === "CONFIRMED" && !transfer.approved_at && !transfer.direct_payment;
   }
@@ -144,11 +179,26 @@ class CashOperationsView extends Component {
     const day = this.transferDay(transfer);
     return !(filters.from && day < filters.from) && !(filters.to && day > filters.to);
   }
+  transferCounts() {
+    return this.data.transfers.reduce((counts, transfer) => {
+      counts.all += 1;
+      if (transfer.status === 'PENDING') counts.confirmation += 1;
+      else if (transfer.status === 'AWAITING_APPROVAL' || this.needsLegacyApproval(transfer)) counts.approval += 1;
+      else if (transfer.status === 'REJECTED') counts.rejected += 1;
+      else if (transfer.status === 'CONFIRMED') counts.completed += 1;
+      return counts;
+    }, { all: 0, confirmation: 0, approval: 0, completed: 0, rejected: 0 });
+  }
   updateTransferList(message = '') {
-    document.getElementById('transfer-list').innerHTML = this.transferRows();
+    document.getElementById('transfer-list').innerHTML = this.transferTableRows();
     const count = this.data.transfers.filter(transfer => this.matchesTransfer(transfer)).length;
     document.getElementById('transfer-result-count').textContent = `${count} de ${this.data.transfers.length} transferencias`;
     document.getElementById('transfer-pending-total').textContent = this.data.transfers.filter(transfer => ['PENDING', 'AWAITING_APPROVAL'].includes(transfer.status) || this.needsLegacyApproval(transfer)).length;
+    const counts = this.transferCounts();
+    for (const [state, count] of Object.entries(counts)) {
+      const element = document.getElementById(`transfer-count-${state}`);
+      if (element) element.textContent = count;
+    }
     document.getElementById('transfer-feedback').textContent = message;
   }
   transferStatus(transfer) {
@@ -158,6 +208,10 @@ class CashOperationsView extends Component {
   transferActions(transfer) {
     const legacy = this.needsLegacyApproval(transfer);
     const approval = transfer.status === "AWAITING_APPROVAL" || legacy;
+    if (transfer.status === 'CONFIRMED' && !legacy && transfer.approved_at && transfer.payment_detail_id && authService.can('PAYMENT_VOID')) {
+      if (transfer.void_request_pending) return '<span class="cash-ops-void-pending">Anulación solicitada</span>';
+      return `<button type="button" class="btn btn-danger request-transfer-void" data-transfer-id="${esc(transfer.id)}" data-payment-detail-id="${esc(transfer.payment_detail_id)}">Anular</button>`;
+    }
     if (transfer.status !== "PENDING" && !approval) return "";
     const permission = approval ? "TRANSFER_APPROVE" : "TRANSFER_VERIFY";
     if (!authService.can(permission)) return "";
@@ -238,15 +292,28 @@ class CashOperationsView extends Component {
       .getElementById("new-correction")
       ?.addEventListener("click", () => this.openCorrection());
     this.transferFilters = { search: '', state: 'all', from: '', to: '' };
-    for (const [id, key] of [['transfer-search', 'search'], ['transfer-state', 'state'], ['transfer-from', 'from'], ['transfer-to', 'to']]) {
+    for (const [id, key] of [['transfer-search', 'search'], ['transfer-from', 'from'], ['transfer-to', 'to']]) {
       document.getElementById(id).addEventListener(key === 'search' ? 'input' : 'change', (event) => {
         this.transferFilters[key] = event.target.value;
         this.updateTransferList();
       });
     }
+    document.querySelectorAll('[data-transfer-state]').forEach((button) => {
+      button.addEventListener('click', () => {
+        this.transferFilters.state = button.dataset.transferState;
+        document.querySelectorAll('[data-transfer-state]').forEach((item) => {
+          const active = item === button;
+          item.classList.toggle('active', active);
+          item.setAttribute('aria-pressed', String(active));
+        });
+        this.updateTransferList();
+      });
+    });
     document.getElementById('transfer-list').addEventListener('click', (event) => {
       const button = event.target.closest('.review-transfer');
       if (button) this.openReview(button.dataset.id, button.dataset.decision, button.dataset.stage);
+      const voidButton = event.target.closest('.request-transfer-void');
+      if (voidButton) this.openVoidRequest(voidButton.dataset.transferId, voidButton.dataset.paymentDetailId);
     });
     this.updateTransferList();
   }
@@ -316,6 +383,35 @@ class CashOperationsView extends Component {
         host.querySelectorAll('[data-close]').forEach(control => { control.disabled = false; });
         button.textContent = rejected ? 'Rechazar' : approval ? 'Aprobar' : 'Confirmar';
         host.querySelector('#cash-op-error').textContent = error.message;
+      }
+    };
+  }
+  openVoidRequest(transferId, paymentDetailId) {
+    const transfer = this.data.transfers.find((item) => String(item.id) === String(transferId));
+    if (!transfer || !transfer.payment_detail_id || String(transfer.payment_detail_id) !== String(paymentDetailId)
+      || transfer.status !== 'CONFIRMED' || !authService.can('PAYMENT_VOID')) return;
+    const host = this.modal({
+      title: 'Solicitar anulación de transferencia',
+      save: 'Enviar solicitud',
+      body: `<p class="transfer-review-name">${esc(transfer.student_name)} · ${money(transfer.amount)}</p><p>La anulación quedará pendiente de revisión por otra persona autorizada.</p><form id="transfer-void-form"><label class="transfer-review-note">Motivo<textarea name="reason" class="form-input" maxlength="1000" required></textarea></label></form>`,
+    });
+    host.querySelector('#cash-op-save').onclick = async () => {
+      const form = host.querySelector('#transfer-void-form');
+      if (!form.reportValidity()) return;
+      const reason = String(new FormData(form).get('reason') || '').trim();
+      if (!reason) { host.querySelector('#cash-op-error').textContent = 'Escribe el motivo de la anulación.'; return; }
+      const button = host.querySelector('#cash-op-save');
+      button.disabled = true;
+      button.textContent = 'Enviando...';
+      try {
+        await ApiService.voidPaymentDirectly(paymentDetailId, reason);
+        transfer.void_request_pending = true;
+        host.querySelector('[data-close]').click();
+        this.updateTransferList('Solicitud de anulación enviada para revisión.');
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = 'Enviar solicitud';
+        host.querySelector('#cash-op-error').textContent = error.message || 'No se pudo enviar la solicitud.';
       }
     };
   }

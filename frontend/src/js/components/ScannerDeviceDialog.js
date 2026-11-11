@@ -33,7 +33,7 @@ export function openScannerDeviceDialog(options = {}) {
     <small>Origen autorizado: <code data-origin></code>. Mantén el puente abierto mientras escaneas.</small></div></details></section>
     <section class="capture-section"><h3>2. Captura los documentos</h3>
     <label>¿Qué vas a escanear?<select data-mode><option value="original">Documentos originales: frente y reverso por separado</option><option value="copy">Copia en papel con ambas caras en la misma hoja</option></select></label>
-    <p class="capture-hint">El carnet es opcional. Si la copia solo tiene una cara, utiliza la captura por separado.</p>
+    <p data-mode-hint class="capture-hint">El carnet es opcional. Si la copia solo tiene una cara, utiliza la captura por separado.</p>
     <label class="capture-check" data-original-control><input type="checkbox" data-combined> Incluir el carnet junto al frente en un solo escaneo (opcional)</label>
     <p data-combined-help hidden class="capture-hint">Coloca la cédula en la mitad superior del cristal y el carnet en la mitad inferior, uno debajo del otro, separados y sin cruzar el centro. Después escanea solo el reverso de la cédula.</p>
     <div data-cards class="capture-cards">${[['front','Frente de la cédula','data-scan'],['back','Reverso de la cédula','data-back'],['blood','Carnet de tipo sanguíneo','data-blood']].map(([side,title,attribute], i) => `<section data-card="${side}" class="capture-card"><div class="capture-card-title"><span>${i+1}</span><h4>${title}</h4></div>
@@ -50,12 +50,12 @@ export function openScannerDeviceDialog(options = {}) {
     <div class="capture-section">
     <button type="button" class="btn btn-primary" data-pdf disabled>Generar y guardar</button>
     <div data-result hidden><a data-download download="cedula.pdf" class="btn btn-secondary">Descargar PDF</a><iframe title="Cédula en PDF A4"></iframe></div></div>
-    ${options.onCertificate ? `<section class="capture-card" data-certificate-card><div class="capture-card-title"><span>4</span><h4>Certificado de estudio</h4></div><div data-certificate-preview class="capture-image"><span>Sin captura · opcional</span></div><button type="button" class="btn btn-secondary" data-certificate disabled>Escanear certificado</button>${pilot || options.photos ? '<label class="capture-photo">Tomar o elegir foto<input type="file" data-certificate-photo accept="image/jpeg,image/png" capture="environment" aria-label="Foto del certificado de estudio"></label>' : ''}<button type="button" class="btn btn-secondary" data-remove-certificate hidden>Quitar certificado</button></section>` : ''}
+    ${options.onCertificate ? `<section class="capture-card" data-certificate-card><div class="capture-card-title"><span>4</span><h4>Título o certificado de estudio · opcional</h4></div><p class="capture-hint">Coloca el documento completo en el cristal. Se guardará en una sola hoja, sin separar sus partes.</p><div data-certificate-preview class="capture-image"><span>Sin captura · opcional</span></div><button type="button" class="btn btn-secondary" data-certificate disabled>Escanear título o certificado</button>${pilot || options.photos ? '<label class="capture-photo">Tomar o elegir foto<input type="file" data-certificate-photo accept="image/jpeg,image/png" capture="environment" aria-label="Foto del título o certificado de estudio"></label>' : ''}<button type="button" class="btn btn-secondary" data-remove-certificate hidden>Quitar captura</button></section>` : ''}
     <footer class="capture-status" hidden><p role="status" aria-live="polite"></p></footer>
     <img data-preview hidden alt="Captura del escáner">`;
   (options.container || document.body).append(dialog);
   const certificateCard = dialog.querySelector('[data-certificate-card]');
-  if (certificateCard) dialog.querySelector('[data-cards]').append(certificateCard);
+  if (certificateCard) dialog.querySelector('[data-copy-panel]').after(certificateCard);
   if (inline) dialog.querySelector('.capture-heading').remove();
   if (bloodOnly) {
     dialog.querySelectorAll('[data-card="front"],[data-card="back"],[data-original-control],[data-combined-help]').forEach(element => { element.hidden = true; });
@@ -132,8 +132,11 @@ export function openScannerDeviceDialog(options = {}) {
     dialog.querySelector('[data-original-control]').hidden = copyMode();
     dialog.querySelector('[data-combined-help]').hidden = copyMode() || !combined.checked;
     dialog.querySelector('[data-copy-panel]').hidden = !copyMode();
+    dialog.querySelector('[data-mode-hint]').textContent = 'El título o certificado de estudio es opcional y se captura completo en una sola hoja.';
+    pdf.hidden = false;
+    result.hidden = true;
     clearPdf(); pdf.disabled = !canGenerate();
-    status.textContent = copyMode() ? 'Escanea la copia completa y confirma qué documentos contiene.' : 'Captura frente y reverso. El carnet sigue siendo opcional.';
+    status.textContent = copyMode() ? 'Escanea la copia completa y confirma qué documentos contiene. También puedes escanear el título en la misma sesión.' : 'Captura frente y reverso. El carnet y el título siguen siendo opcionales.';
   };
   for (const checkbox of [copyComplete, copyBlood]) checkbox.onchange = () => { clearPdf(); pdf.disabled = !canGenerate(); };
   if (pilot || options.photos) {
@@ -313,7 +316,7 @@ export function openScannerDeviceDialog(options = {}) {
       canvas.style.maxWidth = '100%'; canvas.style.maxHeight = '240px'; canvas.style.objectFit = 'contain';
       removeCertificate.hidden = false;
       certificate.textContent = 'Repetir certificado';
-      status.textContent = 'Certificado preparado.';
+      status.textContent = 'Título o certificado preparado en una sola hoja. Se guardará al confirmar el registro del estudiante.';
     };
     acceptCertificate = prepareCertificate;
     certificate.onclick = () => run(async client => {

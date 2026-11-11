@@ -44,7 +44,8 @@ class SPAHandler(http.server.SimpleHTTPRequestHandler):
         api_base_url = values.get('API_BASE_URL', 'http://localhost:5000/api')
         requested_host = (self.headers.get('Host') or '').split(':', 1)[0].strip()
         if requested_host in ('localhost', '127.0.0.1'):
-            api_base_url = 'http://127.0.0.1:5001/api'
+            api_port = values.get('LOCAL_API_PORT', '5001')
+            api_base_url = f'http://127.0.0.1:{api_port}/api'
         parsed_api = urlparse(api_base_url)
         if (parsed_api.hostname in ('localhost', '127.0.0.1')
                 and requested_host not in ('', 'localhost', '127.0.0.1')):

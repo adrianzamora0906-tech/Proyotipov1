@@ -20,7 +20,7 @@ export function cashDepositPanel() {
       <p id="cash-deposit-message" role="status" aria-live="polite"></p>
       </section>
       <section class="cash-deposit-records"><div class="cash-deposit-block-heading"><span class="cash-deposit-step">2</span><div><h3>Historial de envíos</h3><p>Consulta los movimientos de tu sucursal.</p></div></div>
-      <div class="cash-deposit-filters"><label>Consultar día<input class="form-input" type="date" id="cash-deposit-filter" value="${today()}" required></label><strong id="cash-deposit-total"></strong></div>
+      <div class="cash-deposit-filters"><label>Desde<input class="form-input" type="date" id="cash-deposit-from" value="${today()}" required></label><label>Hasta<input class="form-input" type="date" id="cash-deposit-to" value="${today()}" required></label><label>Banco<select class="form-select" id="cash-deposit-bank"><option value="">Todos los bancos</option><option value="PICHINCHA">Banco Pichincha</option><option value="GUAYAQUIL">Banco Guayaquil</option></select></label><label class="cash-deposit-person-filter">Persona<input class="form-input" type="search" id="cash-deposit-person" maxlength="100" placeholder="Nombre o usuario"></label><strong id="cash-deposit-total"></strong></div>
       <div id="cash-deposit-history" aria-live="polite">Cargando envíos…</div>
       </section>
     </div>
@@ -32,16 +32,20 @@ export function mountCashDepositPanel() {
     const stylesheet = document.createElement('link');
     stylesheet.id = 'cash-deposit-styles';
     stylesheet.rel = 'stylesheet';
-    stylesheet.href = '/src/assets/css/pages/cash-deposits.css?v=2';
+    stylesheet.href = '/src/assets/css/pages/cash-deposits.css?v=4';
     document.head.appendChild(stylesheet);
   }
   const form = document.getElementById('cash-deposit-form');
-  const filter = document.getElementById('cash-deposit-filter');
+  const fromFilter = document.getElementById('cash-deposit-from');
+  const toFilter = document.getElementById('cash-deposit-to');
+  const bankFilter = document.getElementById('cash-deposit-bank');
+  const personFilter = document.getElementById('cash-deposit-person');
   const history = document.getElementById('cash-deposit-history');
   const total = document.getElementById('cash-deposit-total');
   const message = document.getElementById('cash-deposit-message');
-  if (!filter || !history) return;
+  if (!fromFilter || !toFilter || !bankFilter || !personFilter || !history) return;
   let request = 0;
+  let searchTimer;
   let operationKey = null;
   let operationPayload = null;
   const load = async () => {
@@ -49,14 +53,33 @@ export function mountCashDepositPanel() {
     total.textContent = '';
     history.textContent = 'Cargando envíos…';
     try {
-      const result = await apiClient.get(`/payments/deposit-dispatches?${new URLSearchParams({ date: filter.value })}`);
+      const params = new URLSearchParams({ from: fromFilter.value, to: toFilter.value });
+      if (bankFilter.value) params.set('bank', bankFilter.value);
+      if (personFilter.value.trim()) params.set('person', personFilter.value.trim());
+      const result = await apiClient.get(`/payments/deposit-dispatches?${params}`);
       if (current !== request || !history.isConnected) return;
       if (!result.success) throw new Error(result.error || 'No se pudo consultar el historial');
       total.textContent = `Total enviado: ${money(result.data.total)} · Pichincha: ${money(result.data.bankTotals?.PICHINCHA)} · Guayaquil: ${money(result.data.bankTotals?.GUAYAQUIL)}`;
-      history.innerHTML = result.data.rows.length ? `<div class="cash-search-table-wrap"><table class="cash-search-table"><thead><tr><th>Registrado por</th><th>Sucursal</th><th>Banco</th><th>Monto enviado</th><th>Observación</th><th>Fecha de registro</th></tr></thead><tbody>${result.data.rows.map(row => `<tr><td>${escape(row.registered_by_name)}</td><td>${escape(row.branch_name)}</td><td>${escape(bankName(row.bank))}</td><td>${money(row.amount)}</td><td>${escape(row.note || '—')}</td><td>${escape(new Date(row.created_at).toLocaleString('es-EC', { timeZone: 'America/Guayaquil' }))}</td></tr>`).join('')}</tbody></table></div>` : '<p>No hay envíos registrados para este día.</p>';
+      history.innerHTML = result.data.rows.length ? `<div class="cash-search-table-wrap"><table class="cash-search-table"><thead><tr><th>Registrado por</th><th>Sucursal</th><th>Banco</th><th>Monto enviado</th><th>Observación</th><th>Fecha de registro</th></tr></thead><tbody>${result.data.rows.map(row => `<tr><td>${escape(row.registered_by_name)}</td><td>${escape(row.branch_name)}</td><td>${escape(bankName(row.bank))}</td><td>${money(row.amount)}</td><td>${escape(row.note || '—')}</td><td>${escape(new Date(row.created_at).toLocaleString('es-EC', { timeZone: 'America/Guayaquil' }))}</td></tr>`).join('')}</tbody></table></div>` : '<p>No hay envíos registrados en este rango.</p>';
     } catch (error) { if (current === request && history.isConnected) history.textContent = error.message; }
   };
-  filter.addEventListener('change', () => { if (filter.reportValidity()) void load(); });
+  const applyFilters = () => {
+    if (!fromFilter.reportValidity() || !toFilter.reportValidity()) return;
+    if (fromFilter.value > toFilter.value) {
+      toFilter.setCustomValidity('La fecha Hasta debe ser igual o posterior a Desde.');
+      toFilter.reportValidity();
+      toFilter.setCustomValidity('');
+      return;
+    }
+    void load();
+  };
+  fromFilter.addEventListener('change', applyFilters);
+  toFilter.addEventListener('change', applyFilters);
+  bankFilter.addEventListener('change', applyFilters);
+  personFilter.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(applyFilters, 300);
+  });
   form?.addEventListener('submit', async event => {
     event.preventDefault();
     if (!form.reportValidity()) return;
@@ -75,7 +98,10 @@ export function mountCashDepositPanel() {
       form.elements.amount.value = '';
       form.elements.note.value = '';
       form.elements.bank.value = '';
-      filter.value = data.date;
+      fromFilter.value = data.date;
+      toFilter.value = data.date;
+      bankFilter.value = '';
+      personFilter.value = '';
       message.textContent = 'Envío registrado correctamente.';
       await load();
     } catch (error) { message.textContent = error.message; }

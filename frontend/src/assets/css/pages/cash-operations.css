@@ -52,9 +52,62 @@
 .transfer-review-note { display: grid; gap: 6px; font-size: 13px; margin-top: 16px; }
 .transfer-review-note textarea { min-height: 72px; resize: vertical; }
 .cash-ops button:focus-visible, .cash-ops input:focus-visible, .cash-ops select:focus-visible { outline: 2px solid #5146e5; outline-offset: 3px; }
+.cash-ops { gap: 18px; max-width: 1480px; margin-inline: auto; }
+.cash-ops-head { min-height: 56px; }
+.cash-ops-head h1 { font-size: 28px; }
+.cash-ops-kpis { overflow: hidden; border: 1px solid #e0e4e9; border-radius: 8px; }
+.cash-ops-kpi { display: grid; gap: 4px; padding: 16px 20px; }
+.cash-ops-kpi strong { font-size: 26px; line-height: 1.1; }
+.cash-ops-tabs { gap: 26px; }
+.cash-ops-tab { padding: 13px 2px; }
+.cash-ops-panel-head { align-items: center; padding: 2px 0 12px; }
+.cash-ops-filters { align-items: end; padding: 14px; border: 1px solid #e0e4e9; border-radius: 8px; background: #f8f9fb; }
+.cash-ops-filters label > span { color: #475467; }
+.cash-ops-results { min-height: 20px; align-items: center; padding: 10px 2px; }
+.cash-ops-table-wrap { overflow-x: auto; border: 1px solid #e0e4e9; border-radius: 8px; background: #fff; }
+.cash-ops-table { width: 100%; min-width: 900px; border-collapse: separate; border-spacing: 0; text-align: left; }
+.cash-ops .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.cash-ops-table th { position: sticky; top: 0; z-index: 1; padding: 12px 14px; background: #f3f5f8; color: #475467; border-bottom: 1px solid #dfe3e8; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.cash-ops-table thead th { background: #eef0ff; color: #3933a8; }
+.cash-ops-table td { padding: 13px 14px; border-bottom: 1px solid #eaecf0; vertical-align: middle; font-size: 13px; }
+.cash-ops-table tbody tr:last-child td { border-bottom: 0; }
+.cash-ops-row:hover { background: #fafbff; }
+.cash-ops-row--pending { background: #f8f9ff; }
+.cash-ops-row--pending td:first-child { box-shadow: inset 3px 0 #5146e5; }
+.cash-ops-table td strong { display: block; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.cash-ops-table td small { display: block; margin-top: 3px; color: #667085; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.cash-ops-table .transfer-amount { font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cash-ops-table td:nth-child(4) { white-space: nowrap; color: #475467; }
+.cash-ops-table td:nth-child(6) { min-width: 165px; }
+.cash-ops-table .cash-ops-actions { justify-content: flex-start; }
+.cash-ops-table .cash-ops-actions .btn { min-height: 34px; padding: 7px 10px; font-size: 12px; }
+.cash-ops-table .cash-ops-badge { max-width: 190px; white-space: normal; line-height: 1.35; }
+.cash-ops-void-note, .cash-ops-void-pending { color: #a33b18 !important; font-size: 11px; font-weight: 600; }
+.cash-ops-table .request-transfer-void { min-height: 34px; padding: 7px 10px; font-size: 12px; }
+.cash-ops-empty { padding: 38px 16px !important; text-align: center; color: #667085; }
+.cash-ops-empty strong { display: block; color: #344054; }
+.cash-ops-list { border: 1px solid #e0e4e9; border-radius: 8px; overflow: hidden; }
+.cash-ops-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; overflow: visible; border: 0; background: transparent; }
+.cash-ops-kpi, .cash-ops-kpi + .cash-ops-kpi { min-height: 78px; box-sizing: border-box; border: 1px solid #e0e4e9; border-top: 3px solid var(--kpi-accent); border-radius: 8px; background: #fff; }
+.cash-ops-kpi--pending { --kpi-accent: #5146e5; }
+.cash-ops-kpi--alerts { --kpi-accent: #e58b13; }
+.cash-ops-kpi--audit { --kpi-accent: #09966a; }
+.cash-ops-kpi--pending strong { color: #4238c3; }
+.cash-ops-kpi--alerts strong { color: #a85d00; }
+.cash-ops-kpi--audit strong { color: #087443; }
+.cash-ops-filters { grid-template-columns: minmax(260px, 2fr) minmax(150px, 1fr) minmax(150px, 1fr); }
+.cash-ops-state-filters { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 6px; }
+.cash-ops-state-filter { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 9px; min-height: 38px; padding: 6px 11px; border: 1px solid #dfe3e8; border-radius: 6px; background: #fff; color: #475467; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.cash-ops-state-filter strong { min-width: 22px; padding: 2px 6px; border-radius: 10px; background: #eef0f4; color: #475467; font-size: 11px; text-align: center; }
+.cash-ops-state-filter:hover { border-color: #b8bdf4; background: #fafaff; }
+.cash-ops-state-filter.active { border-color: #5146e5; background: #f2f1ff; color: #4238c3; }
+.cash-ops-state-filter[data-transfer-state="confirmation"] strong { background: #fff2d6; color: #8a5a00; }
+.cash-ops-state-filter[data-transfer-state="approval"] strong { background: #e8efff; color: #2255a4; }
+.cash-ops-state-filter[data-transfer-state="completed"] strong { background: #e3f5e9; color: #087443; }
+.cash-ops-state-filter[data-transfer-state="rejected"] strong { background: #ffebeb; color: #b42318; }
 @media (max-width: 1000px) {
   .cash-ops-filters { grid-template-columns: 1fr 1fr; }
-  .cash-ops-columns, .cash-ops-item { grid-template-columns: minmax(0, 1.4fr) minmax(115px, .6fr) minmax(175px, 1fr); gap: 12px; }
+  .cash-ops-item { grid-template-columns: minmax(0, 1.4fr) minmax(115px, .6fr) minmax(175px, 1fr); gap: 12px; }
 }
 @media (max-width: 650px) {
   .cash-ops { gap: 16px; }
@@ -64,7 +117,6 @@
   .cash-ops-kpi span { font-size: 11px; }
   .cash-ops-panel-head { align-items: flex-start; flex-wrap: wrap; }
   .cash-ops-toolbar-actions { width: 100%; }
-  .cash-ops-columns { display: none; }
   .cash-ops-item { grid-template-columns: minmax(0, 1fr) auto; gap: 14px; padding: 16px 12px; }
   .cash-ops-item > div:nth-child(2) { text-align: right; }
   .cash-ops-item > div:nth-child(3) { grid-column: 1 / -1; }
@@ -75,6 +127,9 @@
   .cash-ops-results { flex-direction: column; gap: 4px; }
   .cash-ops-form { grid-template-columns: 1fr; }
   .transfer-review-details { gap: 12px; }
+  .cash-ops-table { min-width: 820px; }
+  .cash-ops-panel-head { align-items: flex-start; }
+  .cash-ops-filters { grid-template-columns: 1fr 1fr; }
 }
 .cash-deposits { margin-top: 24px; }
 .cash-deposits .cash-deposit-form { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) minmax(200px, 1.4fr); gap: 20px; align-items: end; padding: 20px; background: #f8f9fc; border: 1px solid #e5e7ef; border-radius: 12px; }

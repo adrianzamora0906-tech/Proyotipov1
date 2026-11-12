@@ -1,51 +1,21 @@
-import { apiClient } from '../../core/api/ApiClient.js';
-import { subscribeStudentChanges, affectedStudentSections } from '../../core/realtime/StudentChanges.js';
-import { readStudentCached, clearStudentReadCache } from '../../core/realtime/StudentReadCache.js';
 /**
  * Student Profile View
  * Expediente del estudiante con pestañas
  */
 
 import Component from '../../components/Component.js';
-import { renderQrDataUrl } from '../../lib/qrcodeRealLocal.js';
-import { subscribeRealtime } from '../../core/realtime/RealtimeClient.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
 import StudentService from '../../services/StudentService.js';
 import ApiService from '../../core/api/apiService.js';
+import { downloadReceiptPDF } from '../../services/ReceiptPdf.js';
 import PaymentService from '../../services/PaymentService.js?v=voucher-pago-20260824';
 import ScheduleService from '../../services/ScheduleService.js';
 import NotificationService from '../../services/NotificationService.js';
 import DateHelper from '../../helpers/DateHelper.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
-import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js';
-
-const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-})[character]);
 
 class StudentProfileView extends Component {
-  renderEnrollmentCourses(enrollments = []) {
-    if (enrollments.length < 2) return '';
-    const dateLabel = value => value
-      ? DateHelper.format(`${String(value).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY')
-      : 'Sin fecha asignada';
-    return `<div class="card">
-      <div class="card-header"><h3 class="card-title">Cursos del estudiante</h3></div>
-      <div class="card-body additional-practices-list">
-        ${enrollments.map(enrollment => `<article class="additional-practice-profile-item">
-          <div class="additional-practice-profile-heading"><strong>${escapeHtml(enrollment.course_name || 'Curso sin identificar')}</strong><span class="badge badge-info">${escapeHtml(enrollment.status || 'Sin estado')}</span></div>
-          <div class="info-grid">
-            <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${escapeHtml(enrollment.instructor_name || 'Sin instructor asignado')}</span></div>
-            <div class="info-item"><span class="info-label">Inicio de clases</span><span class="info-value">${dateLabel(enrollment.practical_start_date)}</span></div>
-            <div class="info-item"><span class="info-label">Fin de clases</span><span class="info-value">${dateLabel(enrollment.practical_end_date)}</span></div>
-            <div class="info-item"><span class="info-label">Hora</span><span class="info-value">${escapeHtml(enrollment.time || 'Sin horario asignado')}</span></div>
-          </div>
-        </article>`).join('')}
-      </div>
-    </div>`;
-  }
-
   async render() {
     const studentId = this.props.studentId;
     try {
@@ -64,57 +34,53 @@ class StudentProfileView extends Component {
       `;
     }
 
-    const student = await this.readSection('detail', () => StudentService.getStudent(studentId));
+    const student = await StudentService.getStudent(studentId);
     this.student = student;
 
     if (!student) {
       return `<div class="error-page"><h1>Estudiante no encontrado</h1></div>`;
     }
 
-    const isBranchAdmin = (authService.getCurrentUser()?.roles || []).includes('BRANCH_ADMIN');
-    this.documentsLoaded = false;
-    this.documentsLoadPromise = null;
-    this.historyLoaded = false;
-    this.historyLoadPromise = null;
-    this.financialPage = 1;
-    this.historyPage = 1;
-    this.financialLoaded = false;
-    this.financialLoadPromise = null;
-    const [attendanceResult, scheduleResult] = await Promise.allSettled([
-      isBranchAdmin ? ApiService.getBranchAdminAttendance(studentId) : Promise.resolve(null),
-      this.readSection('schedule', () => ApiService.getStudentSchedule(studentId)),
-    ]);
-    const branchAdminAttendance = attendanceResult.status === 'fulfilled' && attendanceResult.value?.success
-      ? attendanceResult.value.data : null;
-    const schedule = scheduleResult.status === 'fulfilled' && scheduleResult.value?.success
-      ? scheduleResult.value.data : ScheduleService.getStudentSchedule(studentId);
-    this.studentSchedule = schedule;
-    const history = [];
+    let documents = [];
+    try {
+      const result = await ApiService.getStudentDocuments(studentId);
+      documents = result.success ? result.data.filter(document => document.type !== 'foto') : [];
+    } catch (error) {
+      console.warn('No se pudieron cargar los documentos:', error.message);
+    }
+
+    const payments = await PaymentService.getStudentPayments(studentId);
+    const totalPaid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    let balanceInfo = { total: 0, paid: totalPaid, balance: 0 };
+    try {
+      balanceInfo = await PaymentService.getStudentBalance(studentId);
+    } catch (error) {
+      console.warn('No se pudo cargar el saldo del estudiante:', error.message);
+    }
+    let schedule = ScheduleService.getStudentSchedule(studentId);
+    try {
+      const result = await ApiService.getStudentSchedule(studentId);
+      if (result.success) schedule = result.data;
+    } catch (error) {
+      console.warn('No se pudo cargar el horario desde la API:', error.message);
+    }
+    const history = await StudentService.getStudentHistory(studentId);
+    const pendingBalance = Math.max(0, Number(balanceInfo?.balance || 0));
+    const paidAmount = Number(balanceInfo?.paid ?? totalPaid);
+    const canProcessPayments = authService.can('PAYMENT_CREATE');
+    const canVoidPayments = authService.can('PAYMENT_VOID');
     const activeEnrollment = (student.enrollments || []).find(enrollment => enrollment.status === 'activo') || (student.enrollments || [])[0] || null;
     const classStartDate = activeEnrollment?.practical_start_date
       || activeEnrollment?.practicalStartDate
-      || activeEnrollment?.start_date
-      || activeEnrollment?.startDate
       || student.assignment_start_date
       || student.assignmentStartDate
       || schedule?.startDate
       || null;
-    const classEndDate = activeEnrollment?.practical_end_date
-      || activeEnrollment?.practicalEndDate
-      || activeEnrollment?.end_date
-      || activeEnrollment?.endDate
-      || student.assignment_end_date
-      || student.assignmentEndDate
-      || schedule?.endDate
-      || null;
     const classStartDateLabel = classStartDate
       ? DateHelper.format(`${String(classStartDate).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY')
       : 'Sin fecha asignada';
-    const classEndDateLabel = classEndDate
-      ? DateHelper.format(`${String(classEndDate).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY')
-      : 'Sin fecha asignada';
     const isExamOnly = schedule?.type === 'exam_only' || schedule?.appointmentType === 'EXAM_ONLY';
-    const isAdditionalPracticeOnly = (student.registrationType === 'ADDITIONAL_PRACTICE' && !(student.enrollments || []).length)
+    const isAdditionalPracticeOnly = student.registrationType === 'ADDITIONAL_PRACTICE'
       || ((student.additionalPractices || []).length > 0 && !(student.enrollments || []).length);
     const accessAccount = student.accessAccount;
     const canResetStudentAccess = authService.can('STUDENT_UPDATE');
@@ -134,16 +100,14 @@ class StudentProfileView extends Component {
             <div>
               <h1>${student.firstName} ${student.lastName}</h1>
               <p>Cédula: <strong>${StringHelper.normalizeCedula(student.cedula)}</strong></p>
-              ${student.disabilityPercentage ? `<p>Discapacidad: <strong>${Number(student.disabilityPercentage)}%</strong></p>` : ''}
               <span class="badge ${isAdditionalPracticeOnly ? 'badge-info' : this.getStatusBadgeClass(student.status)}">${isAdditionalPracticeOnly ? 'Prácticas adicionales' : this.getStatusLabel(student.status)}</span>
               ${isExamOnly ? '<span class="badge badge-info student-exam-badge">Formaci&oacute;n intensiva</span>' : ''}
             </div>
           </div>
           <div class="profile-header-actions">
-            ${isBranchAdmin ? `<button class="btn btn-primary" id="register-branch-admin-attendance" ${branchAdminAttendance?.canRegister?'':'disabled'} data-phase="${branchAdminAttendance?.phase || 'ENTRY'}" title="${escapeHtml(branchAdminAttendance?.message || 'No se pudo comprobar la clase programada')}">${branchAdminAttendance?.completed?'Asistencia completa':branchAdminAttendance?.phase==='EXIT'?'Registrar salida':'Registrar entrada'}</button>` : ''}
             <button class="btn btn-secondary" id="edit-student-btn">Editar</button>
             ${canManageStudentRecord ? `
-              <button type="button" class="btn btn-secondary" id="disable-student-btn" data-disabled="${student.status === 'inhabilitado'}">${student.status === 'inhabilitado' ? 'Habilitar' : 'Inhabilitar'}</button>
+              <button type="button" class="btn btn-secondary" id="disable-student-btn">Inhabilitar</button>
               <button type="button" class="btn btn-danger" id="delete-student-btn">Eliminar</button>
             ` : ''}
           </div>
@@ -221,14 +185,6 @@ class StudentProfileView extends Component {
               <div class="card-body">
                 <div class="info-grid personal-info-grid">
                   <div class="info-item">
-                    <span class="info-label">Inscrito por</span>
-                    <span class="info-value">${escapeHtml(student.createdByName || 'Sin registrar')}</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Fecha y hora de registro</span>
-                    <span class="info-value">${student.createdAt && !Number.isNaN(Date.parse(student.createdAt)) ? new Intl.DateTimeFormat('es-EC', { timeZone: 'America/Guayaquil', dateStyle: 'short', timeStyle: 'medium' }).format(new Date(student.createdAt)) : 'Sin registrar'}</span>
-                  </div>
-                  <div class="info-item">
                     <span class="info-label">Nombre Completo</span>
                     <span class="info-value">${student.firstName} ${student.lastName}</span>
                   </div>
@@ -253,10 +209,6 @@ class StudentProfileView extends Component {
                     <span class="info-value">${student.bloodType}</span>
                   </div>
                   <div class="info-item">
-                    <span class="info-label">Nacionalidad</span>
-                    <span class="info-value">${String(student.nationality || 'Sin registrar').replace(/[&<>"']/g, value => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[value]))}</span>
-                  </div>
-                  <div class="info-item">
                     <span class="info-label">Dirección</span>
                     <span class="info-value">${student.address || 'N/A'}</span>
                   </div>
@@ -265,14 +217,10 @@ class StudentProfileView extends Component {
                       <span class="info-label">Tipo de registro</span>
                       <span class="info-value">Solo prácticas adicionales</span>
                     </div>
-                  ` : (student.enrollments || []).length > 1 ? `
-                    <div class="info-item"><span class="info-label">Cursos</span><span class="info-value">${student.enrollments.length} matrículas · detalle abajo</span></div>
                   ` : `
                     <div class="info-item"><span class="info-label">Curso</span><span class="info-value">${student.course || 'Sin curso asignado'}</span></div>
                     <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${student.instructorName || schedule?.instructor || 'Sin instructor asignado'}${isExamOnly ? ' <span class="student-exam-inline">Intensivo</span>' : ''}</span></div>
                     <div class="info-item"><span class="info-label">Inicio de clases</span><span class="info-value">${classStartDateLabel}</span></div>
-                    <div class="info-item"><span class="info-label">Fin de clases</span><span class="info-value">${classEndDateLabel}</span></div>
-                    <div class="info-item"><span class="info-label">Hora</span><span class="info-value">${schedule?.time || 'Sin horario asignado'}</span></div>
                   `}
                   <div class="info-item">
                     <span class="info-label">Estado</span>
@@ -281,7 +229,6 @@ class StudentProfileView extends Component {
                 </div>
               </div>
             </div>
-            ${this.renderEnrollmentCourses(student.enrollments || [])}
             ${(student.additionalPractices || []).length ? `
               <div class="card additional-practices-card">
                 <div class="card-header">
@@ -307,7 +254,6 @@ class StudentProfileView extends Component {
                         <div class="info-item"><span class="info-label">Duración</span><span class="info-value">${practice.number_of_days} días · 1 h 40 min por día</span></div>
                         <div class="info-item"><span class="info-label">Avance</span><span class="info-value">${practice.completed_days || 0} de ${practice.number_of_days} días</span></div>
                         <div class="info-item"><span class="info-label">Valor</span><span class="info-value">$${Number(practice.total_amount || 0).toFixed(2)}</span></div>
-                        ${practice.referred_by_name ? `<div class="info-item"><span class="info-label">Referido por</span><span class="info-value">${escapeHtml(practice.referred_by_name)}</span></div>` : ''}
                       </div>
                     </article>
                   `).join('')}
@@ -340,10 +286,102 @@ class StudentProfileView extends Component {
             </div>
           </div>
 
-          <!-- Documents load only when their tab is opened. -->
-          <div class="tab-pane" data-tab="documents"></div>
+          <!-- Documents -->
+          <div class="tab-pane" data-tab="documents">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Documentación</h3>
+              </div>
+              <div class="card-body">
+                <div class="form-row" style="margin-bottom: 1.5rem;">
+                  ${this.renderCedulaPdfUpload(documents)}
+                  ${this.renderDocumentUpload('certificado_bachiller', 'Certificado de estudio', 'application/pdf,image/*', documents)}
+                </div>
+                ${documents.length > 0 ? `
+                  <div class="documents-list">
+                    ${documents.map(doc => `
+                      <div class="document-item">
+                        <div class="document-info">
+                          <div class="document-name">${doc.name}</div>
+                        </div>
+                        <div class="document-actions">
+                          ${doc.file_url ? `<a class="btn btn-small btn-secondary view-document-btn" href="#" data-file-url="${doc.file_url}">Ver archivo</a>` : ''}
+                          <label class="btn btn-small btn-secondary" style="cursor:pointer;">
+                            Editar
+                            <input type="file" class="replace-document-input" data-document-type="${doc.type}"
+                              accept="application/pdf,image/jpeg,image/png" hidden>
+                          </label>
+                          <button type="button" class="btn btn-small btn-danger delete-document-btn"
+                            data-document-id="${doc.id}" data-document-name="${doc.name}">
+                            Eliminar
+                          </button>
+                        </div>
+                      </div>
+                    `).join('')}
+                  </div>
+                ` : `
+                  <p style="color: var(--gray-500); text-align: center;">No hay documentos</p>
+                `}
+              </div>
+            </div>
+          </div>
 
-          <div class="tab-pane" data-tab="financial"><p>Preparando estado financiero...</p></div>
+          <!-- Financial -->
+          <div class="tab-pane" data-tab="financial">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Estado Financiero</h3>
+              </div>
+              <div class="card-body">
+                <div class="financial-info">
+                  <div class="financial-item">
+                    <span>Total Pagado</span>
+                    <span class="financial-value" style="color: var(--success);">$${paidAmount.toFixed(2)}</span>
+                  </div>
+                  <div class="financial-item">
+                    <span>Estado</span>
+                    <span class="badge ${this.getStatusBadgeClass(student.status)}">
+                      ${this.getStatusLabel(student.status)}
+                    </span>
+                  </div>
+                </div>
+
+                ${pendingBalance > 0 && canProcessPayments ? `
+                  <button class="btn btn-primary mt-4" id="record-payment-btn"
+                    data-cedula="${student.cedula}" data-balance="${pendingBalance}">
+                    Procesar pago ($${pendingBalance.toFixed(2)} pendiente)
+                  </button>
+                ` : pendingBalance === 0 ? `
+                  <p class="mt-4" style="color: var(--success); font-weight: 600;">Pago completado. No existen valores pendientes.</p>
+                ` : `
+                  <p class="mt-4" style="color: var(--gray-500);">Saldo pendiente: $${pendingBalance.toFixed(2)}. Debe procesarlo el personal de caja.</p>
+                `}
+
+                ${payments.length > 0 ? `
+                  <div class="payments-history mt-4">
+                    <h4>Historial de Pagos</h4>
+                    ${payments.map(payment => `
+                      <div class="payment-item">
+                        <div>
+                          <div class="payment-concept">${payment.concept || payment.payment_method || payment.method || 'Pago registrado'}</div>
+                          <div class="payment-date">${DateHelper.format(payment.created_at || payment.date, 'DD/MM/YYYY HH:MM')}</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:.75rem;">
+                          <div style="font-weight: 600; color: var(--success);">$${Number(payment.amount || 0).toFixed(2)}</div>
+                          ${payment.void_pending ? '<span class="badge badge-warning">Anulación pendiente</span>' : canVoidPayments && String(payment.status || 'ACTIVE').toUpperCase() === 'ACTIVE' ? `
+                            <button type="button" class="btn btn-small btn-danger void-payment-btn"
+                              data-payment-id="${payment.id}" data-payment-amount="${Number(payment.amount || 0).toFixed(2)}">
+                              Anular
+                            </button>
+                          ` : ''}
+                        </div>
+                      </div>
+                    `).join('')}
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          </div>
 
           <!-- Schedule -->
           <div class="tab-pane" data-tab="schedule">
@@ -369,7 +407,6 @@ class StudentProfileView extends Component {
                 ` : schedule ? `
                   <div class="schedule-info">
                     ${isExamOnly ? '<div class="student-exam-schedule-heading"><span class="badge badge-info">Formaci&oacute;n intensiva</span><strong>Jornada intensiva programada</strong></div>' : ''}
-                    <div class="student-profile-schedule-heading"><strong>Pr&aacute;cticas</strong></div>
                     <div class="info-grid">
                       <div class="info-item">
                         <span class="info-label">${isExamOnly ? 'Fecha de formación intensiva' : 'Día'}</span>
@@ -387,17 +424,8 @@ class StudentProfileView extends Component {
                         <span class="info-label">Curso</span>
                         <span class="info-value">${schedule.course}</span>
                       </div>
-                      <div class="info-item">
-                        <span class="info-label">Inicio del curso</span>
-                        <span class="info-value">${classStartDateLabel}</span>
-                      </div>
-                      <div class="info-item">
-                        <span class="info-label">Fin del curso</span>
-                        <span class="info-value">${classEndDateLabel}</span>
-                      </div>
                     </div>
-                    ${isExamOnly ? '' : '<button class="btn btn-secondary" id="change-schedule-btn">Cambiar pr&aacute;cticas</button>'}
-                    ${this.renderTheorySchedule(schedule.theory)}
+                  ${isExamOnly ? '' : '<button class="btn btn-secondary mt-4" id="change-schedule-btn">Cambiar Horario</button>'}
                   </div>
                 ` : `
                   <p style="color: var(--gray-500); margin-bottom: 1rem;">No tiene horario asignado</p>
@@ -454,34 +482,6 @@ class StudentProfileView extends Component {
     return layout;
   }
 
-  renderTheorySchedule(theory) {
-    const modalityLabels = {
-      presencial_regular: 'Presencial · lunes a viernes',
-      presencial_intensivo: Number(String(theory?.startTime || '').slice(0, 2)) >= 13
-        ? 'Intensivo · turno de tarde'
-        : 'Intensivo · turno de mañana',
-      virtual: 'Teoría virtual',
-    };
-    const modality = modalityLabels[theory?.modality] || 'Por confirmar';
-    const period = theory?.startDate && theory?.endDate
-      ? `${DateHelper.format(theory.startDate, 'DD/MM/YYYY')} al ${DateHelper.format(theory.endDate, 'DD/MM/YYYY')}`
-      : theory?.modality === 'virtual' ? 'Sin fechas presenciales' : 'Pendiente de asignación';
-    const time = theory?.startTime && theory?.endTime
-      ? `${theory.startTime}–${theory.endTime}`
-      : theory?.modality === 'virtual' ? 'Sin horario fijo' : 'Por confirmar';
-    return `
-      <section class="student-profile-theory-schedule">
-        <div class="student-profile-schedule-heading"><strong>Teor&iacute;a</strong></div>
-        <div class="info-grid">
-          <div class="info-item"><span class="info-label">Modalidad</span><span class="info-value">${modality}</span></div>
-          <div class="info-item"><span class="info-label">Fechas</span><span class="info-value">${period}</span></div>
-          <div class="info-item"><span class="info-label">Hora</span><span class="info-value">${time}</span></div>
-          <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${theory?.instructor || 'Por asignar'}</span></div>
-        </div>
-        <button type="button" class="btn btn-secondary" id="change-theory-schedule-btn">Cambiar teor&iacute;a</button>
-      </section>`;
-  }
-
   async mount() {
     const studentId = this.props.studentId;
 
@@ -498,9 +498,6 @@ class StudentProfileView extends Component {
 
         btn.classList.add('active');
         document.querySelector(`.tab-pane[data-tab="${tabName}"]`)?.classList.add('active');
-        if (tabName === 'documents') this.loadDocumentsTab();
-        if (tabName === 'history') this.loadHistoryTab();
-        if (tabName === 'financial') this.loadFinancialTab();
       });
     });
 
@@ -508,145 +505,20 @@ class StudentProfileView extends Component {
     document.getElementById('edit-student-btn')?.addEventListener('click', () => {
       this.openEditStudentModal(studentId);
     });
-    if (new URLSearchParams(window.location.search).get('changeSchedule')==='1' && authService.can('SCHEDULE_CHANGE')) {
-      this.openScheduleModal(studentId,{allowInitial:false});
-    }
-
-    document.getElementById('register-branch-admin-attendance')?.addEventListener('click', async event => {
-      const button = event.currentTarget;
-      const phase = button.dataset.phase === 'EXIT' ? 'salida' : 'entrada';
-      if (!window.confirm(`¿Confirmas la ${phase} del estudiante en este momento?`)) return;
-      try {
-        button.disabled = true;
-        button.textContent = 'Registrando...';
-        await ApiService.registerBranchAdminAttendance(studentId);
-        window.dispatchEvent(new PopStateEvent('popstate'));
-      } catch (error) {
-        button.disabled = false;
-        button.textContent = phase === 'salida' ? 'Registrar salida' : 'Registrar entrada';
-        window.alert(error.message || 'No se pudo registrar la asistencia.');
-      }
-    });
 
     document.getElementById('reset-student-access-btn')?.addEventListener('click', () => {
       this.openResetStudentAccessModal(studentId);
     });
 
-    document.getElementById('disable-student-btn')?.addEventListener('click', async event => {
-      if (event.currentTarget.dataset.disabled !== 'true') return this.openDisableStudentModal(studentId);
-      if (this.student?.registrationType === 'REGULAR') {
-        return this.openEditStudentModal(studentId);
-      }
-      const button = event.currentTarget;
-      button.disabled = true;
-      try {
-        const result = await StudentService.enableStudent(studentId);
-        if (!result.success) return window.alert(result.error || 'No se pudo habilitar el estudiante.');
-        window.dispatchEvent(new PopStateEvent('popstate'));
-      } finally { button.disabled = false; }
+    document.getElementById('disable-student-btn')?.addEventListener('click', () => {
+      this.openDisableStudentModal(studentId);
     });
 
     document.getElementById('delete-student-btn')?.addEventListener('click', () => {
       this.openDeleteStudentModal(studentId);
     });
 
-    document.getElementById('save-notes-btn')?.addEventListener('click', () => {
-      const notes = document.getElementById('notes-textarea').value;
-      StudentService.updateStudent(studentId, { notes });
-      alert('Observaciones guardadas');
-    });
-
-    document.getElementById('select-schedule-btn')?.addEventListener('click', () => this.openScheduleModal(studentId, { allowInitial: true }));
-    document.getElementById('change-schedule-btn')?.addEventListener('click', () => this.openScheduleModal(studentId, { allowInitial: false }));
-    document.getElementById('change-theory-schedule-btn')?.addEventListener('click', () => this.openTheoryScheduleModal(studentId));
-
-    this.updateNotificationBadge();
-    const root = document.querySelector('.student-profile');
-    this.stopProfileChanges?.();
-    this.stopProfileChanges = subscribeStudentChanges(studentId, topics => {
-      if (!root?.isConnected) return;
-      const sections = affectedStudentSections(topics);
-      clearStudentReadCache(studentId, sections);
-      if (!sections || sections.includes('detail')) {
-        void this.refreshVisibleProfile(root);
-        return;
-      }
-      if (sections.includes('payments') || sections.includes('balance')) void this.queueProfileRead(async () => { await this.financialLoadPromise; if (!root.isConnected) return; clearStudentReadCache(studentId, ['payments','balance']); this.financialLoaded = false; await this.loadFinancialTab(); });
-      if (sections.includes('documents') && authService.can('DOCUMENT_VIEW')) void this.queueProfileRead(async () => { await this.documentsLoadPromise; if (!root.isConnected) return; clearStudentReadCache(studentId, ['documents']); this.documentsLoaded = false; await this.loadDocumentsTab(); });
-      if (sections.includes('history')) void this.queueProfileRead(async () => { await this.historyLoadPromise; if (!root.isConnected) return; clearStudentReadCache(studentId, ['history']); this.historyLoaded = false; await this.loadHistoryTab(); });
-    });
-    window.clearTimeout(this.backgroundTimer);
-    this.backgroundTimer = window.setTimeout(async () => {
-      for (const load of [() => authService.can('PAYMENT_VIEW') && this.loadFinancialTab(),
-        () => this.loadHistoryTab(), () => authService.can('DOCUMENT_VIEW') && this.loadDocumentsTab()]) {
-        if (!root?.isConnected) return;
-        await this.queueProfileRead(() => root?.isConnected && load());
-      }
-    }, 600);
-  }
-
-  unmount() {
-    this.bloodCardScanner?.dispose(); this.bloodCardScanner=null;
-    this.bloodCardPreviewRequest=(this.bloodCardPreviewRequest||0)+1;
-    if (this.bloodCardPreviewUrl) URL.revokeObjectURL(this.bloodCardPreviewUrl);
-    this.bloodCardPreviewUrl=null;
-    this.stopProfileChanges?.();
-    window.clearTimeout(this.backgroundTimer);
-    super.unmount();
-  }
-
-  appendReadPagination(pane,page,hasMore,onChange) {
-    const navigation=document.createElement('nav');navigation.className='student-pagination';
-    const previous=document.createElement('button');previous.type='button';previous.className='btn btn-secondary';previous.textContent='Anterior';previous.disabled=page<=1;previous.onclick=()=>onChange(page-1);
-    const label=document.createElement('span');label.textContent='Pagina '+page;
-    const next=document.createElement('button');next.type='button';next.className='btn btn-secondary';next.textContent='Siguiente';next.disabled=!hasMore;next.onclick=()=>onChange(page+1);
-    navigation.append(previous,label,next);pane.append(navigation);
-  }
-
-  queueProfileRead(load) {
-    this.backgroundWork = (this.backgroundWork || Promise.resolve()).catch(() => {}).then(load);
-    return this.backgroundWork;
-  }
-
-  readSection(section, load) {
-    const user = authService.getCurrentUser();
-    const scope = [apiClient.getToken(), user?.branch_id, user?.scope, user?.roles, user?.permissions];
-    return readStudentCached(scope, this.props.studentId, section, load);
-  }
-
-  async refreshVisibleProfile(root) {
-    if (this.refreshingProfile) { this.refreshAgain = true; return; }
-    this.refreshingProfile = true;
-    const tab = root.querySelector('.tab-button.active')?.dataset.tab || 'personal';
-    const draftNotes = root.querySelector('#notes-textarea')?.value;
-    try {
-      const html = await this.render();
-      if (!root.isConnected) return;
-      const template = document.createElement('template'); template.innerHTML = html;
-      const replacement = template.content.querySelector('.student-profile');
-      if (!replacement) return;
-      root.replaceWith(replacement);
-      await this.mount();
-      if (draftNotes !== undefined && replacement.querySelector('#notes-textarea')) replacement.querySelector('#notes-textarea').value = draftNotes;
-      replacement.querySelector(`.tab-button[data-tab="${tab}"]`)?.click();
-    } catch (error) { console.warn('No se pudo actualizar el expediente:', error.message); }
-    finally {
-      this.refreshingProfile = false;
-      if (this.refreshAgain) { this.refreshAgain = false; const current = document.querySelector('.student-profile'); if (current?.isConnected) void this.refreshVisibleProfile(current); }
-    }
-  }
-
-  setupFinancialListeners(studentId) {
-    document.querySelectorAll('[data-transfer-constancy]').forEach(button => button.addEventListener('click', async () => {
-      const { showTransferReceipt } = await import('../../services/TransferReceipt.js');
-      await showTransferReceipt(button.dataset.transferConstancy);
-    }));
     document.getElementById('record-payment-btn')?.addEventListener('click', event => {
-      if (this.paymentEnrollments?.length>1) {
-        window.history.pushState(null,null,`/cash/pending?search=${encodeURIComponent(this.student.cedula)}`);
-        window.dispatchEvent(new PopStateEvent('popstate'));
-        return;
-      }
       this.openPaymentModal({
         studentId,
         cedula: event.currentTarget.dataset.cedula,
@@ -659,282 +531,6 @@ class StudentProfileView extends Component {
         paymentId: button.dataset.paymentId,
         amount: Number(button.dataset.paymentAmount || 0),
       }));
-    });
-
-  }
-
-  renderFinancialPane(payments, balanceInfo) {
-    const student = this.student;
-    const totalPaid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    const pendingBalance = Math.max(0, Number(balanceInfo?.balance || 0));
-    const pendingVerification = Math.max(0, Number(balanceInfo?.pendingVerification || 0));
-    const pendingTransfers = balanceInfo?.pendingTransfers || [];
-    const paidAmount = Number(balanceInfo?.paid ?? totalPaid);
-    this.paymentEnrollments = balanceInfo?.enrollments || [];
-    const canProcessPayments = authService.can('PAYMENT_CREATE');
-    const canVoidPayments = authService.can('PAYMENT_VOID');
-    return `          <!-- Financial -->
-          <div class="tab-pane" data-tab="financial">
-            <div class="card">
-              <div class="card-header">
-                <h3 class="card-title">Estado Financiero</h3>
-              </div>
-              <div class="card-body">
-                <div class="financial-info">
-                  <div class="financial-item">
-                    <span>Total Pagado</span>
-                    <span class="financial-value" style="color: var(--success);">$${paidAmount.toFixed(2)}</span>
-                  </div>
-                  <div class="financial-item">
-                    <span>Estado</span>
-                    <span class="badge ${this.getStatusBadgeClass(student.status)}">
-                      ${this.getStatusLabel(student.status)}
-                    </span>
-                  </div>
-                </div>
-
-                ${pendingVerification > 0 ? `<div class="financial-info mt-4">
-                  <div class="financial-item"><span>Transferencias pendientes de aprobaci&oacute;n</span><strong class="financial-value">$${pendingVerification.toFixed(2)}</strong></div>
-                  <div class="financial-item"><span>Saldo contable</span><strong class="financial-value">$${pendingBalance.toFixed(2)}</strong></div>
-                  <div class="financial-item"><span>Saldo si se aprueban</span><strong class="financial-value">$${Math.max(0,pendingBalance-pendingVerification).toFixed(2)}</strong></div>
-                </div><div class="mt-4">${pendingTransfers.map(transfer=>`<p><strong>$${Number(transfer.amount).toFixed(2)}</strong> &middot; ${transfer.status==='AWAITING_APPROVAL'?'Pendiente de aprobaci&oacute;n':'Pendiente de verificaci&oacute;n'}${transfer.reference ? ` &middot; Referencia: ${escapeHtml(transfer.reference)}` : ''} &middot; Registrada por: ${escapeHtml(transfer.created_by_name || 'No registrado')} <button type="button" class="btn btn-small btn-secondary" data-transfer-constancy="${escapeHtml(transfer.id)}">Ver constancia</button></p>`).join('')}</div>` : ''}
-
-                ${this.paymentEnrollments.length>1 ? `<div class="cash-table-wrap mt-4"><table class="table"><thead><tr><th>Curso</th><th>Pagado</th><th>Saldo</th></tr></thead><tbody>${this.paymentEnrollments.map(enrollment=>`<tr><td>${escapeHtml(enrollment.course)}</td><td>$${Number(enrollment.paid).toFixed(2)}</td><td>$${Number(enrollment.balance).toFixed(2)}</td></tr>`).join('')}</tbody></table></div>` : ''}
-                ${pendingBalance > 0 && canProcessPayments ? `
-                  <button class="btn btn-primary mt-4" id="record-payment-btn"
-                    data-cedula="${student.cedula}" data-balance="${pendingBalance}">
-                    Procesar pago ($${pendingBalance.toFixed(2)} pendiente)
-                  </button>
-                ` : pendingBalance === 0 ? `
-                  <p class="mt-4" style="color: var(--success); font-weight: 600;">Pago completado. No existen valores pendientes.</p>
-                ` : `
-                  <p class="mt-4" style="color: var(--gray-500);">Saldo pendiente: $${pendingBalance.toFixed(2)}. Debe procesarlo el personal de caja.</p>
-                `}
-
-                ${payments.length > 0 ? `
-                  <div class="payments-history mt-4">
-                    <h4>Historial de Pagos</h4>
-                    ${payments.map(payment => `
-                      <div class="payment-item">
-                        <div>
-                          <div class="payment-concept">${escapeHtml(payment.concept || 'Pago registrado')}</div>
-                          ${payment.course_name ? `<div class="payment-date">${escapeHtml(payment.course_name)}</div>` : ''}
-                          ${this.renderPaymentMethod(payment)}
-                          <div class="payment-date">Cobrado por: ${escapeHtml(payment.received_by_name || 'No registrado')}</div>
-                          ${String(payment.status || '').toUpperCase()==='VOIDED' ? `<div class="payment-date">Anulado por: ${escapeHtml(payment.voided_by_name || 'No registrado')}</div>` : ''}
-                          <div class="payment-date">${DateHelper.format(payment.created_at || payment.date, 'DD/MM/YYYY HH:MM')}</div>
-                        </div>
-                        <div style="display:flex; align-items:center; gap:.75rem;">
-                          <div style="font-weight: 600; color: var(--success);">$${Number(payment.amount || 0).toFixed(2)}</div>
-                          ${payment.void_pending ? '<span class="badge badge-warning">Anulación pendiente</span>' : canVoidPayments && String(payment.status || 'ACTIVE').toUpperCase() === 'ACTIVE' ? `
-                            <button type="button" class="btn btn-small btn-danger void-payment-btn"
-                              data-payment-id="${payment.id}" data-payment-amount="${Number(payment.amount || 0).toFixed(2)}">
-                              Anular
-                            </button>
-                          ` : ''}
-                        </div>
-                      </div>
-                    `).join('')}
-                  </div>
-                ` : ''}
-              </div>
-            </div>
-          </div>
-
-`;
-  }
-
-  async loadFinancialTab() {
-    if (!authService.can('PAYMENT_VIEW')) return;
-    if (this.financialLoaded || this.financialLoadPromise) return this.financialLoadPromise;
-    const pane = document.querySelector('.tab-pane[data-tab="financial"]');
-    if (!pane) return;
-    pane.setAttribute('aria-busy', 'true');
-    pane.textContent = 'Cargando estado financiero...';
-    this.financialLoadPromise = (async () => {
-      try {
-        // Sequential reads keep background work bounded. Do not replace failures with a zero balance.
-        const paymentsResult = await this.readSection('payments:' + this.financialPage, () => apiClient.get('/students/' + encodeURIComponent(this.props.studentId) + '/payments?paginated=true&page=' + this.financialPage));
-        if (!pane.isConnected) return;
-        if (!paymentsResult.success) throw new Error('No se pudieron cargar los pagos.');
-        const balanceResult = await this.readSection('balance', () => ApiService.getStudentBalance(this.props.studentId));
-        if (!balanceResult.success) throw new Error('No se pudo cargar el saldo.');
-        if (!pane.isConnected) return;
-        const template = document.createElement('template');
-        template.innerHTML = this.renderFinancialPane(paymentsResult.data.items, balanceResult.data);
-        pane.replaceChildren(...template.content.querySelector('[data-tab="financial"]').childNodes);
-        this.setupFinancialListeners(this.props.studentId);
-        this.appendReadPagination(pane,this.financialPage,paymentsResult.data.hasMore,page=>{this.financialPage=page;this.financialLoaded=false;void this.loadFinancialTab();});
-        this.financialLoaded = true;
-      } catch (error) {
-        if (!pane.isConnected) return;
-        pane.textContent = error.message || 'No se pudo cargar el estado financiero.';
-        const retry = document.createElement('button');
-        retry.type = 'button'; retry.className = 'btn btn-secondary'; retry.textContent = 'Reintentar';
-        retry.onclick = () => this.loadFinancialTab(); pane.append(retry);
-      } finally {
-        this.financialLoadPromise = null;
-        if (pane.isConnected) pane.removeAttribute('aria-busy');
-      }
-    })();
-    return this.financialLoadPromise;
-  }
-
-  renderDocumentsPane(documents) {
-    return `
-          <!-- Documents -->
-          <div class="tab-pane" data-tab="documents">
-            <div class="card">
-              <div class="card-header">
-                <h3 class="card-title">Documentación</h3>
-              </div>
-              <div class="card-body">
-                <div class="form-row" style="margin-bottom: 1.5rem;">
-                  ${authService.can('DOCUMENT_CREATE') ? '<button type="button" class="btn btn-secondary" data-scanner-test>Escanear cédula y carnet</button>' : ''}
-                  ${this.renderCedulaPdfUpload(documents)}
-                  <div style="flex:1; min-width:min(100%,220px);" id="profile-study-document">
-                    <label class="registration-bachiller-check">
-                      <input type="checkbox" id="profile-cedula-bachiller"
-                        ${documents.some(doc => doc.type === 'certificado_bachiller' && doc.file_url && doc.observations === 'La cedula indica bachiller. No requiere certificado de estudio.') ? 'checked disabled' : ''}>
-                      La cédula indica bachiller
-                    </label>
-                    <div id="profile-study-document-status" role="status">
-                      ${this.renderDocumentUpload('certificado_bachiller', 'Certificado de estudio', 'application/pdf,image/*', documents)}
-                    </div>
-                  </div>
-                </div>
-                ${documents.length > 0 ? `
-                  <div class="documents-list">
-                    ${documents.map(doc => `
-                      <div class="document-item">
-                        <div class="document-info">
-                          <div class="document-name">${doc.name}</div>
-                        </div>
-                        <div class="document-actions">
-                          ${doc.file_url ? `<a class="btn btn-small btn-secondary view-document-btn" href="#" data-file-url="${doc.file_url}">Ver archivo</a>` : ''}
-                          <label class="btn btn-small btn-secondary" style="cursor:pointer;">
-                            Editar
-                            <input type="file" class="replace-document-input" data-document-type="${doc.type}"
-                              accept="application/pdf,image/jpeg,image/png" hidden>
-                          </label>
-                          <button type="button" class="btn btn-small btn-danger delete-document-btn"
-                            data-document-id="${doc.id}" data-document-name="${doc.name}">
-                            Eliminar
-                          </button>
-                        </div>
-                      </div>
-                    `).join('')}
-                  </div>
-                ` : `
-                  <p style="color: var(--gray-500); text-align: center;">No hay documentos</p>
-                `}
-              </div>
-            </div>
-          </div>
-    `;
-  }
-
-  async loadHistoryTab() {
-    if (this.historyLoaded || this.historyLoadPromise) return this.historyLoadPromise;
-    const pane = document.querySelector('.tab-pane[data-tab="history"] .card-body');
-    if (!pane) return;
-    pane.setAttribute('aria-busy','true');
-    pane.textContent = 'Cargando historial...';
-    this.historyLoadPromise = (async () => {
-      try {
-        const result = await this.readSection('history:' + this.historyPage, () => apiClient.get('/students/' + encodeURIComponent(this.props.studentId) + '/history?paginated=true&page=' + this.historyPage));
-        if (!result.success) throw new Error('No se pudo cargar el historial');
-        const history = result.data.items;
-        if (!pane.isConnected) return;
-        pane.innerHTML = history.length ? `<div class="timeline">${history.map(item =>
-          `<div class="timeline-item"><div class="timeline-time">${DateHelper.format(item.timestamp,'HH:MM')}</div><div class="timeline-content">${escapeHtml(item.action)}</div><div class="timeline-date">${DateHelper.format(item.timestamp,'DD/MM/YYYY')}</div></div>`).join('')}</div>` : '<p>Sin historial</p>';
-        this.appendReadPagination(pane,this.historyPage,result.data.hasMore,page=>{this.historyPage=page;this.historyLoaded=false;void this.loadHistoryTab();});
-        this.historyLoaded = true;
-        import('../../services/InstructorChangeFeedback.js').then(module=>module.renderAdminInstructorFeedback(this.props.studentId,pane)).catch(error=>console.warn('Seguimiento:',error.message));
-      } catch (error) {
-        if (!pane.isConnected) return;
-        pane.textContent = 'No se pudo cargar el historial. ';
-        const retry = document.createElement('button');
-        retry.className = 'btn btn-secondary'; retry.textContent = 'Reintentar';
-        retry.onclick = () => this.loadHistoryTab(); pane.appendChild(retry);
-      } finally {
-        this.historyLoadPromise = null;
-        if (pane.isConnected) pane.removeAttribute('aria-busy');
-      }
-    })();
-    return this.historyLoadPromise;
-  }
-
-  async loadDocumentsTab() {
-    if (this.documentsLoaded || this.documentsLoadPromise) return this.documentsLoadPromise;
-    this.bloodCardScanner?.dispose(); this.bloodCardScanner=null;
-    this.bloodCardPreviewRequest=(this.bloodCardPreviewRequest||0)+1;
-    if (this.bloodCardPreviewUrl) URL.revokeObjectURL(this.bloodCardPreviewUrl);
-    this.bloodCardPreviewUrl=null;
-    const pane = document.querySelector('.tab-pane[data-tab="documents"]');
-    if (!pane) return;
-    pane.setAttribute('aria-busy','true');
-    pane.textContent = 'Cargando documentos...';
-    this.documentsLoadPromise = (async () => {
-      try {
-        const result = await this.readSection('documents', () => apiClient.get('/students/' + encodeURIComponent(this.props.studentId) + '/documents?metadata=true'));
-        if (!result.success) throw new Error(result.error || 'No se pudieron cargar los documentos.');
-        if (!pane.isConnected) return;
-        const template = document.createElement('template');
-        template.innerHTML = this.renderDocumentsPane(result.data.filter(document => document.type !== 'foto'));
-        pane.replaceChildren(...template.content.querySelector('[data-tab="documents"]').childNodes);
-        this.setupDocumentListeners(this.props.studentId);
-        this.documentsLoaded = true;
-      } catch (error) {
-        if (!pane.isConnected) return;
-        pane.textContent = error.message || 'No se pudieron cargar los documentos.';
-        const retry = document.createElement('button');
-        retry.type = 'button'; retry.className = 'btn btn-secondary'; retry.textContent = 'Reintentar';
-        retry.addEventListener('click', () => this.loadDocumentsTab());
-        pane.append(retry);
-      } finally {
-        pane.removeAttribute('aria-busy');
-        this.documentsLoadPromise = null;
-      }
-    })();
-    return this.documentsLoadPromise;
-  }
-
-  setupDocumentListeners(studentId) {
-    document.getElementById('profile-scan-missing-blood-card')?.addEventListener('click', () => {
-      if (!authService.can('DOCUMENT_UPDATE')) return;
-      const host = document.getElementById('profile-blood-card-scanner');
-      if (!host || host.querySelector('[data-local-scanner-dialog]')) return;
-      this.bloodCardScanner = openScannerDeviceDialog({ container:host,photos:true,bloodOnly:true,
-        onBloodCard:fileUrl => this.previewBloodCardAppend(studentId,fileUrl),
-        onInvalidate:() => { this.bloodCardPreviewRequest=(this.bloodCardPreviewRequest||0)+1; this.bloodCardPreviewUrl && URL.revokeObjectURL(this.bloodCardPreviewUrl); this.bloodCardPreviewUrl=null; document.querySelector('[data-profile-card-preview]')?.remove(); },
-      });
-    });
-    document.querySelector('[data-scanner-test]')?.addEventListener('click', () => {
-      if (authService.can('DOCUMENT_CREATE')) openScannerDeviceDialog({photos:true});
-    });
-    document.getElementById('profile-cedula-bachiller')?.addEventListener('change', async event => {
-      const checkbox = event.currentTarget;
-      if (!checkbox.checked) return;
-      checkbox.disabled = true;
-      try {
-        const response = await ApiService.createDocument(studentId, {
-          type: 'certificado_bachiller', cedulaIndicatesBachiller: true,
-        });
-        if (!response.success) throw new Error(response.error || 'No se pudo guardar la confirmacion.');
-        const status = document.getElementById('profile-study-document-status');
-        if (status) status.innerHTML = this.renderDocumentUpload(
-          'certificado_bachiller', 'Certificado de estudio', 'application/pdf,image/*',
-          [{ ...response.data, type: 'certificado_bachiller' }],
-        );
-        window.dispatchEvent(new CustomEvent('erp:dataChanged', {
-          detail: { collection: 'documents', action: 'upload' },
-        }));
-      } catch (error) {
-        checkbox.checked = false;
-        checkbox.disabled = false;
-        alert(error.message || 'No se pudo guardar la confirmacion.');
-      }
     });
 
     document.querySelectorAll('.document-upload-input').forEach(input => {
@@ -1023,9 +619,11 @@ class StudentProfileView extends Component {
         event.target.disabled = true;
         if (status) status.textContent = 'Actualizando el PDF consolidado...';
         const fileUrl = await this.readFileAsDataUrl(file);
-        await this.previewBloodCardAppend(studentId,fileUrl);
-        if (status) status.textContent = 'Vista previa lista. Guarda el documento combinado para completar el expediente.';
-        event.target.disabled = false;
+        const response = await ApiService.appendBloodCardToRegistrationPdf(studentId, { fileUrl });
+        if (!response.success) throw new Error('No se pudo actualizar el PDF.');
+        if (status) status.textContent = 'Carnet agregado correctamente al PDF.';
+        window.history.replaceState(null, null, `/student-profile/${studentId}`);
+        window.dispatchEvent(new PopStateEvent('popstate'));
       } catch (error) {
         event.target.disabled = false;
         if (status) status.textContent = error.message || 'No se pudo agregar el carnet.';
@@ -1034,9 +632,24 @@ class StudentProfileView extends Component {
 
     this.setupDocumentPreviews();
     this.setupCedulaPdfUpload(studentId);
+    document.getElementById('mobile-cedula-capture')?.addEventListener('click', () => {
+      this.openMobileDocumentCaptureModal(studentId, 'cedula');
+    });
     document.getElementById('mobile-blood-card-capture')?.addEventListener('click', () => {
       this.openBloodCardCompletionCapture(studentId);
     });
+
+    document.getElementById('save-notes-btn')?.addEventListener('click', () => {
+      const notes = document.getElementById('notes-textarea').value;
+      StudentService.updateStudent(studentId, { notes });
+      alert('Observaciones guardadas');
+    });
+
+    const openScheduleModal = () => this.openScheduleModal(studentId);
+    document.getElementById('select-schedule-btn')?.addEventListener('click', openScheduleModal);
+    document.getElementById('change-schedule-btn')?.addEventListener('click', openScheduleModal);
+
+    this.updateNotificationBadge();
   }
 
   closeProfileModal(refresh = false) {
@@ -1063,7 +676,7 @@ class StudentProfileView extends Component {
           <button type="button" class="modal-close" data-close-student-action>&times;</button>
         </div>
         <div class="modal-body">
-          <p>El estudiante se oculta de los listados operativos y del instructor. Sus horarios se liberan y su acceso se desactiva. El expediente se conserva para habilitarlo desde el filtro Inhabilitados.</p>
+          <p>El expediente se conserva, pero el estudiante queda marcado como inhabilitado y su cuenta de portal se desactiva.</p>
           <div class="credential-error" id="student-action-error" hidden></div>
         </div>
         <div class="modal-footer">
@@ -1193,18 +806,120 @@ class StudentProfileView extends Component {
   }
 
   async openEditStudentModal(studentId) {
-    if (!authService.can('STUDENT_UPDATE')) return;
-    const editData = () => { window.history.pushState(null, null, `/students/new?edit=${encodeURIComponent(studentId)}`); window.dispatchEvent(new PopStateEvent('popstate')); };
-    if (!authService.can('SCHEDULE_CHANGE')) { editData(); return; }
-    const modal=document.getElementById('profile-action-modal');
-    if (!modal) { editData(); return; }
-    const name=`${this.student?.firstName || ''} ${this.student?.lastName || ''}`.trim();
-    modal.innerHTML=`<section class="modal profile-edit-choice-modal" role="dialog" aria-modal="true" aria-labelledby="profile-edit-choice-title"><header class="modal-header"><div><h3 class="modal-title" id="profile-edit-choice-title">Editar estudiante</h3>${name?`<p class="profile-edit-choice-name">${escapeHtml(name)}</p>`:''}</div><button type="button" class="modal-close" data-close-modal aria-label="Cerrar">&times;</button></header><div class="modal-body profile-edit-choices"><button type="button" class="profile-edit-choice" data-edit-personal><span class="profile-edit-choice-icon"><i data-lucide="user-round-pen" aria-hidden="true"></i></span><span class="profile-edit-choice-label">Datos del estudiante</span><i data-lucide="chevron-right" aria-hidden="true"></i></button><button type="button" class="profile-edit-choice profile-edit-choice--schedule" data-edit-pending><span class="profile-edit-choice-icon"><i data-lucide="calendar-clock" aria-hidden="true"></i></span><span class="profile-edit-choice-label">Clases pendientes<small>Horario e instructor</small></span><i data-lucide="chevron-right" aria-hidden="true"></i></button></div><footer class="modal-footer"><button type="button" class="btn btn-secondary" data-close-modal>Cancelar</button></footer></section>`;
-    modal.classList.add('active');this.bindProfileModalClose(modal);
-    modal.querySelector('[data-edit-personal]').onclick=editData;
-    modal.querySelector('[data-edit-pending]').onclick=()=>this.openScheduleModal(studentId,{allowInitial:false,allowInstructorFeedback:true});
-    window.lucide?.createIcons();
-    modal.querySelector('[data-edit-personal]').focus();
+    const modal = document.getElementById('profile-action-modal');
+    const student = this.student || await StudentService.getStudent(studentId);
+    if (!modal || !student) return;
+
+    const bloodTypes = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
+    modal.innerHTML = `
+      <div class="modal profile-edit-student-modal">
+        <div class="modal-header">
+          <h3 class="modal-title">Editar estudiante</h3>
+          <button class="modal-close" data-close-modal>×</button>
+        </div>
+        <div class="modal-body">
+          <form id="edit-student-form" class="form" novalidate>
+            <div class="form-row">
+              <div class="form-group" style="flex:1; min-width:180px;">
+                <label class="form-label required">Nombre</label>
+                <input type="text" class="form-input" name="firstName" value="${student.firstName || ''}" required>
+              </div>
+              <div class="form-group" style="flex:1; min-width:180px;">
+                <label class="form-label required">Apellido</label>
+                <input type="text" class="form-input" name="lastName" value="${student.lastName || ''}" required>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group" style="flex:1; min-width:180px;">
+                <label class="form-label required">Cédula</label>
+                <input type="text" class="form-input" name="cedula" value="${student.cedula || ''}" required>
+              </div>
+              <div class="form-group" style="flex:1; min-width:180px;">
+                <label class="form-label">Fecha de nacimiento</label>
+                <input type="date" class="form-input" name="birthDate" value="${student.birthDate || ''}">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group" style="flex:1; min-width:180px;">
+                <label class="form-label">Email</label>
+                <input type="email" class="form-input" name="email" value="${student.email || ''}">
+              </div>
+              <div class="form-group" style="flex:1; min-width:180px;">
+                <label class="form-label">Teléfono</label>
+                <input type="text" class="form-input" name="phone" value="${student.phone || ''}">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Dirección</label>
+              <input type="text" class="form-input" name="address" value="${student.address || ''}">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Tipo de sangre</label>
+              <select class="form-input" name="bloodType">
+                ${bloodTypes.map(type => `<option value="${type}" ${student.bloodType === type ? 'selected' : ''}>${type}</option>`).join('')}
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Curso</label>
+              <input type="text" class="form-input" name="course" value="${student.course || ''}">
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal>Cancelar</button>
+          <button type="button" class="btn btn-secondary" id="edit-student-reschedule-btn">Reagendar</button>
+          <button type="button" class="btn btn-primary" id="edit-student-save-btn">Guardar cambios</button>
+        </div>
+      </div>
+    `;
+    modal.classList.add('active');
+    this.bindProfileModalClose(modal);
+
+    modal.querySelector('#edit-student-reschedule-btn')?.addEventListener('click', () => {
+      this.openCourseRescheduleModal(studentId);
+    });
+
+    modal.querySelector('#edit-student-save-btn')?.addEventListener('click', async () => {
+      const form = modal.querySelector('#edit-student-form');
+      if (!form || !form.reportValidity()) return;
+
+      const formData = new FormData(form);
+      const updates = {
+        firstName: (formData.get('firstName') || '').toString().trim(),
+        lastName: (formData.get('lastName') || '').toString().trim(),
+        cedula: (formData.get('cedula') || '').toString().trim(),
+        birthDate: (formData.get('birthDate') || '').toString() || null,
+        email: (formData.get('email') || '').toString().trim() || null,
+        phone: (formData.get('phone') || '').toString().trim() || null,
+        address: (formData.get('address') || '').toString().trim() || null,
+        bloodType: (formData.get('bloodType') || '').toString().trim() || null,
+        course: (formData.get('course') || '').toString().trim() || null,
+      };
+
+      const button = modal.querySelector('#edit-student-save-btn');
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Guardando...';
+      }
+
+      try {
+        const updatedStudent = await StudentService.updateStudent(studentId, updates);
+        if (!updatedStudent) throw new Error('No se pudo actualizar el estudiante.');
+        this.student = updatedStudent;
+        this.closeProfileModal(true);
+      } catch (error) {
+        if (button) {
+          button.disabled = false;
+          button.textContent = 'Guardar cambios';
+        }
+        alert(error.message || 'No se pudieron guardar los cambios.');
+      }
+    });
   }
 
   async openCourseRescheduleModal(studentId) {
@@ -1215,16 +930,17 @@ class StudentProfileView extends Component {
       const currentResult = await ApiService.getStudentScheduleChangeOptions(studentId);
       const current = currentResult.success ? currentResult.data : null;
       if (!current) throw new Error(currentResult.error || 'No se encontró el curso actual.');
-      if (!current.canRescheduleCourse) throw new Error('Este curso solo puede reagendarse hasta dos dias habiles despues de su inicio.');
+      if (!current.canRescheduleCourse) throw new Error('Este curso ya inició y no puede reagendarse a otro curso.');
       const optionsResult = await ApiService.getCourseEnrollmentOptions({
         branch_id: current.branchId,
         course_id: current.courseId,
         modality: current.modality || 'normal',
-        reschedule_from_start_date: current.startDate,
       });
+      const today = new Date().toISOString().slice(0, 10);
       const currentInstructorIds = new Set((current.currentAssignments || []).map(assignment => String(assignment.instructorId)));
       const cycles = (optionsResult.success ? optionsResult.data : [])
         .filter(cycle => cycle.startDate >= current.startDate
+          && cycle.startDate >= today
           && (String(cycle.id) !== String(current.id)
             || (cycle.instructors || []).some(instructor => !currentInstructorIds.has(String(instructor.id)))))
         .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)));
@@ -1257,7 +973,7 @@ class StudentProfileView extends Component {
         optionsHost.innerHTML = '<div class="schedule-empty">Consultando disponibilidad…</div>';
         const instructorId = instructorSelect.value;
         if (!instructorId) { optionsHost.innerHTML = '<div class="schedule-empty">Este curso no tiene instructores disponibles.</div>'; return; }
-        const result = await ApiService.getCourseEnrollmentOptions({branch_id:current.branchId,course_id:current.courseId,modality:current.modality||'normal',instructor_id:instructorId,reschedule_from_start_date:current.startDate});
+        const result = await ApiService.getCourseEnrollmentOptions({branch_id:current.branchId,course_id:current.courseId,modality:current.modality||'normal',instructor_id:instructorId});
         const availableCycle = (result.success ? result.data : []).find(cycle => String(cycle.id) === String(selectedCycle.id));
         const slots = (availableCycle?.slots || []).map(slot => {
           const dates = Object.entries(slot.occupancyByDate || {});
@@ -1315,14 +1031,6 @@ class StudentProfileView extends Component {
                 <option value="tarjeta">Tarjeta</option>
               </select>
             </div>
-            <div class="form-group" id="profile-payment-reference-group" hidden>
-              <label class="form-label required">N&uacute;mero de comprobante / transferencia</label>
-              <input class="form-input" name="reference" maxlength="120" placeholder="N&uacute;mero del comprobante">
-            </div>
-            <div class="form-group" id="profile-payment-card-batch-group" hidden>
-              <label class="form-label required">Lote de tarjeta</label>
-              <input class="form-input" name="cardBatch" maxlength="80" placeholder="Ej. 000123">
-            </div>
           </form>
         </div>
         <div class="modal-footer">
@@ -1333,30 +1041,11 @@ class StudentProfileView extends Component {
     `;
     modal.classList.add('active');
     this.bindProfileModalClose(modal);
-    const form = modal.querySelector('#profile-payment-form');
-    const methodInput = form?.elements.method;
-    const referenceGroup = modal.querySelector('#profile-payment-reference-group');
-    const referenceInput = form?.elements.reference;
-    const cardBatchGroup = modal.querySelector('#profile-payment-card-batch-group');
-    const cardBatchInput = form?.elements.cardBatch;
-    const updatePaymentFields = () => {
-      const method = String(methodInput?.value || '').toLowerCase();
-      const isTransfer = method === 'transferencia';
-      const isCard = method === 'tarjeta';
-      referenceGroup.hidden = !isTransfer;
-      referenceInput.required = isTransfer;
-      cardBatchGroup.hidden = !isCard;
-      cardBatchInput.required = isCard;
-      if (!isTransfer) referenceInput.value = '';
-      if (!isCard) cardBatchInput.value = '';
-    };
-    methodInput?.addEventListener('change', updatePaymentFields);
-    updatePaymentFields();
 
     modal.querySelector('#profile-pay-submit')?.addEventListener('click', async () => {
+      const form = modal.querySelector('#profile-payment-form');
       if (!form.reportValidity()) return;
-      const values = new FormData(form);
-      const amount = Number(values.get('amount'));
+      const amount = Number(new FormData(form).get('amount'));
       if (amount > balance) {
         alert(`El monto no puede superar el saldo pendiente de $${balance.toFixed(2)}.`);
         return;
@@ -1368,9 +1057,7 @@ class StudentProfileView extends Component {
         studentId,
         cedula,
         amount,
-        method: values.get('method'),
-        reference: values.get('reference'),
-        cardBatch: values.get('cardBatch'),
+        method: new FormData(form).get('method'),
         cashier: JSON.parse(sessionStorage.getItem('erp_session') || '{}').username || 'caja',
         notify: false,
       });
@@ -1378,11 +1065,6 @@ class StudentProfileView extends Component {
         submit.disabled = false;
         submit.textContent = 'Registrar pago';
         alert(result.error || 'No se pudo registrar el pago.');
-        return;
-      }
-      if (result.pendingTransfer) {
-        alert('La transferencia se registro y permanecera pendiente hasta su verificacion.');
-        this.closeProfileModal(true);
         return;
       }
       await this.showReceiptInProfileModal(result.receipt?.id);
@@ -1451,10 +1133,12 @@ class StudentProfileView extends Component {
           <div class="modal-footer">
             <button class="btn btn-secondary" data-close-modal>Cerrar</button>
             <button class="btn btn-primary" id="profile-receipt-print">Imprimir comprobante</button>
+            <button class="btn btn-secondary" id="profile-receipt-pdf">Descargar comprobante PDF</button>
           </div>
         </div>
       `;
       this.bindProfileModalClose(modal, true);
+      modal.querySelector('#profile-receipt-pdf')?.addEventListener('click', event => downloadReceiptPDF(receiptId, { button: event.currentTarget }));
       modal.querySelector('#profile-receipt-print')?.addEventListener('click', () => {
         const printWindow = window.open('', '_blank', 'width=460,height=720');
         if (!printWindow) {
@@ -1479,82 +1163,13 @@ class StudentProfileView extends Component {
     };
   }
 
-  async openTheoryScheduleModal(studentId) {
-    const modal = document.getElementById('profile-action-modal');
-    if (!modal) return;
-    modal.innerHTML = '<div class="modal"><div class="modal-body">Consultando horarios de teor&iacute;a...</div></div>';
-    modal.classList.add('active');
-    try {
-      const student = this.student || {};
-      const enrollment = (student.enrollments || []).find(item => item.status === 'activo')
-        || (student.enrollments || [])[0];
-      if (!enrollment || !student.branchId) throw new Error('El estudiante no tiene una matrícula activa.');
-      const response = await ApiService.getTheoryEnrollmentOptions({
-        branch_id: student.branchId,
-        course_id: enrollment.course_id,
-      });
-      const options = response.success ? response.data || [] : [];
-      const current = this.studentSchedule?.theory || {};
-      const currentSelection = current.modality === 'presencial_intensivo'
-        ? (String(current.startTime || '').slice(0, 5) >= '13:00' ? 'presencial_intensivo_13' : 'presencial_intensivo_08')
-        : current.modality || 'por_confirmar';
-      const dateLabel = value => value ? DateHelper.format(`${String(value).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY') : '';
-      const renderOption = option => {
-        const startDate = option.full ? option.nextAvailableStartDate : option.startDate;
-        const endDate = option.full ? option.nextAvailableEndDate : option.endDate;
-        const available = Number(option.full ? option.nextAvailable : option.available);
-        return `<label class="enrollment-modality-button ${option.unavailable ? 'theory-capacity-unavailable' : ''}">
-          <input type="radio" name="profileTheoryChange" value="${escapeHtml(option.value)}"
-            ${option.value === currentSelection ? 'checked' : ''} ${option.unavailable ? 'disabled' : ''}>
-          <strong>${escapeHtml(option.value === 'presencial_regular' ? 'Presencial · lunes a viernes' : option.startTime >= '13:00' ? 'Intensivo · turno de tarde' : 'Intensivo · turno de mañana')}</strong>
-          <span>${option.unavailable ? escapeHtml(option.message || 'No disponible') : `${dateLabel(startDate)} al ${dateLabel(endDate)} · ${option.startTime}–${option.endTime} · ${available} cupos`}</span>
-        </label>`;
-      };
-      modal.innerHTML = `
-        <div class="modal profile-schedule-modal" role="dialog" aria-modal="true">
-          <div class="modal-header"><h3 class="modal-title">Cambiar horario de teor&iacute;a</h3><button class="modal-close" data-close-modal>&times;</button></div>
-          <div class="modal-body">
-            <div class="theory-schedule-selector" id="profile-theory-change-options">
-              <label class="enrollment-modality-button"><input type="radio" name="profileTheoryChange" value="por_confirmar" ${currentSelection === 'por_confirmar' ? 'checked' : ''}><strong>Por confirmar</strong><span>La modalidad se definir&aacute; despu&eacute;s</span></label>
-              ${options.map(renderOption).join('')}
-              <label class="enrollment-modality-button"><input type="radio" name="profileTheoryChange" value="virtual" ${currentSelection === 'virtual' ? 'checked' : ''}><strong>Teor&iacute;a virtual</strong><span>Sin horario fijo</span></label>
-            </div>
-            <div class="form-error" id="profile-theory-change-error"></div>
-          </div>
-          <div class="modal-footer"><button class="btn btn-secondary" data-close-modal>Cancelar</button><button class="btn btn-primary" id="confirm-profile-theory-change">Guardar teor&iacute;a</button></div>
-        </div>`;
-      this.bindProfileModalClose(modal);
-      const host = modal.querySelector('#profile-theory-change-options');
-      host.querySelectorAll('input').forEach(input => input.addEventListener('change', () => {
-        host.querySelectorAll('.enrollment-modality-button').forEach(label => label.classList.toggle('active', label.contains(input)));
-      }));
-      host.querySelector('input:checked')?.closest('.enrollment-modality-button')?.classList.add('active');
-      modal.querySelector('#confirm-profile-theory-change')?.addEventListener('click', async event => {
-        const selection = modal.querySelector('[name="profileTheoryChange"]:checked')?.value;
-        const errorHost = modal.querySelector('#profile-theory-change-error');
-        if (!selection) { errorHost.textContent = 'Selecciona un horario de teoría.'; return; }
-        try {
-          event.currentTarget.disabled = true;
-          await ApiService.changeStudentTheory(studentId, selection);
-          this.closeProfileModal(true);
-        } catch (error) {
-          event.currentTarget.disabled = false;
-          errorHost.textContent = error.message || 'No se pudo cambiar el horario de teoría.';
-        }
-      });
-    } catch (error) {
-      modal.innerHTML = `<div class="modal"><div class="modal-header"><h3 class="modal-title">Cambiar horario de teor&iacute;a</h3><button class="modal-close" data-close-modal>&times;</button></div><div class="modal-body"><div class="form-error">${escapeHtml(error.message || 'No se pudieron cargar los horarios.')}</div></div></div>`;
-      this.bindProfileModalClose(modal);
-    }
-  }
-
-  async openScheduleModal(studentId, { allowInitial = false, allowInstructorFeedback = false } = {}) {
+  async openScheduleModal(studentId) {
     const modal = document.getElementById('profile-action-modal');
     if (!modal) return;
     modal.innerHTML = '<div class="modal"><div class="modal-body">Cargando horarios disponibles…</div></div>';
     modal.classList.add('active');
     try {
-      return await this.openCourseCycleScheduleModal(studentId, modal, '', { allowInstructorFeedback });
+      return await this.openCourseCycleScheduleModal(studentId, modal);
       const result = await ApiService.getSchedules();
       const schedules = result.success ? result.data : [];
       const schedulesByDay = this.groupSchedulesByDay(schedules);
@@ -1602,13 +1217,10 @@ class StudentProfileView extends Component {
     } catch (error) {
       const hasNoCurrentSchedule = error?.status === 404
         && /horario asignado|curso vigente/i.test(error.message || '');
-      if (hasNoCurrentSchedule && allowInitial) {
+      if (hasNoCurrentSchedule) {
         return this.openInitialCourseScheduleModal(studentId, modal);
       }
-      const message = hasNoCurrentSchedule
-        ? 'No se puede cambiar el horario porque el estudiante todav&iacute;a no tiene instructor ni d&iacute;as pr&aacute;cticos asignados.'
-        : (error.message || 'No se pudieron cargar los horarios.');
-      modal.innerHTML = `<div class="modal"><div class="modal-header"><h3 class="modal-title">Cambiar horarios</h3><button class="modal-close" data-close-modal>&times;</button></div><div class="modal-body"><div class="form-error">${message}</div></div><div class="modal-footer"><button class="btn btn-secondary" data-close-modal>Cerrar</button></div></div>`;
+      modal.innerHTML = `<div class="modal"><div class="modal-body"><div class="form-error">${error.message || 'No se pudieron cargar los horarios.'}</div></div><div class="modal-footer"><button class="btn btn-secondary" data-close-modal>Cerrar</button></div></div>`;
       this.bindProfileModalClose(modal);
     }
   }
@@ -1652,10 +1264,6 @@ class StudentProfileView extends Component {
               <label class="form-label">Horario de teoría *</label>
               <div class="theory-schedule-selector" id="profile-theory-options"></div>
             </div>
-            <div class="form-group" style="margin-top:1rem;">
-              <label class="form-label" for="profile-initial-schedule-notes">Observaciones <small>(opcional)</small></label>
-              <textarea class="form-textarea" id="profile-initial-schedule-notes" rows="3" maxlength="500" placeholder="Ejemplo: detalle especial, referencia interna o novedad del horario.">${escapeHtml(student.notes || '')}</textarea>
-            </div>
           ` : '<div class="student-empty">No hay un próximo curso disponible para esta sucursal.</div>'}
           <div class="form-error" id="profile-schedule-error"></div>
         </div>
@@ -1684,16 +1292,13 @@ class StudentProfileView extends Component {
 
     modal.querySelectorAll('[data-initial-schedule]').forEach(button => {
       button.addEventListener('click', () => {
-        this.selectInitialProfileScheduleRow(modal, button);
+        modal.querySelectorAll('[data-initial-schedule]').forEach(item => item.classList.remove('selected'));
+        button.classList.add('selected');
         const cycle = cycles.find(item => item.id === button.dataset.cycleId);
         renderTheoryOptions(cycle);
         modal.querySelector('#profile-schedule-error').textContent = '';
       });
     });
-    modal.querySelectorAll('.calendar-window-btn').forEach(button => {
-      button.addEventListener('click', () => this.shiftProfileCalendarWindow(button.closest('.enrollment-calendar'), Number(button.dataset.direction)));
-    });
-    modal.querySelectorAll('.enrollment-calendar').forEach(calendar => this.updateProfileCalendarWindow(calendar));
 
     modal.querySelector('#confirm-initial-profile-schedule')?.addEventListener('click', async event => {
       const button = event.currentTarget;
@@ -1733,12 +1338,6 @@ class StudentProfileView extends Component {
         };
         button.disabled = true;
         button.textContent = 'Asignando...';
-        const notes = modal.querySelector('#profile-initial-schedule-notes')?.value.trim() || '';
-        if (notes !== String(student.notes || '').trim()) {
-          const notesResponse = await ApiService.updateStudent(studentId, { notes });
-          if (!notesResponse.success) throw new Error(notesResponse.error || 'No se pudo guardar la observación.');
-          this.student.notes = notes;
-        }
         const response = await ApiService.reserveCourseCycleSchedule({ studentId, schedulePlan });
         if (!response.success) throw new Error(response.error || 'No se pudo asignar el horario.');
         this.closeProfileModal(true);
@@ -1750,75 +1349,33 @@ class StudentProfileView extends Component {
     });
   }
 
-  selectInitialProfileScheduleRow(modal, button) {
-    modal.querySelectorAll('[data-initial-schedule]').forEach(item => {
-      const sameRow = item.dataset.cycleId === button.dataset.cycleId
-        && item.dataset.startTime === button.dataset.startTime
-        && item.dataset.endTime === button.dataset.endTime;
-      item.classList.toggle('selected', sameRow && !item.disabled);
-    });
-  }
-
   renderInitialCycleOption(cycle) {
-    const dateKeys = [...new Set((cycle.slots || []).flatMap(slot => Object.keys(slot.occupancyByDate || {})))].sort();
-    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
-    const days = dateKeys.map(date => {
-      const parsed = new Date(`${date}T12:00:00`);
-      return { date, name: dayNames[parsed.getDay()], label: date.slice(5).split('-').reverse().join('/') };
-    });
-    const slots = [...(cycle.slots || [])].sort((first, second) => String(first.startTime).localeCompare(String(second.startTime)));
-    const rows = slots.map(slot => {
-      const dates = Object.entries(slot.occupancyByDate || {});
+    const slots = (cycle.slots || []).map(slot => {
+      const dates = Object.values(slot.occupancyByDate || {});
       const required = Math.max(Number(cycle.durationBusinessDays) || 0, 1);
-      const availableDates = dates.filter(([, item]) => Number(item.available || 0) > 0);
-      const available = availableDates.length >= required
-        ? Math.min(...availableDates.map(([, item]) => Number(item.available || 0)))
+      const available = dates.length >= required
+        ? Math.min(...dates.map(item => Number(item.available || 0)))
         : 0;
       return `
-        <button type="button" class="enrollment-calendar-time profile-initial-time ${available > 0 ? '' : 'disabled'}"
+        <button type="button" class="schedule-option profile-initial-slot ${available > 0 ? '' : 'disabled'}"
           data-initial-schedule data-cycle-id="${cycle.id}" data-start-time="${slot.startTime}" data-end-time="${slot.endTime}"
           ${available > 0 ? '' : 'disabled'}>
-          ${slot.startTime} - ${slot.endTime}
-        </button>
-        ${days.map((day, dayIndex) => {
-          const occupancy = slot.occupancyByDate?.[day.date] || {};
-          const dayAvailable = Number(occupancy.available || 0);
-          const selectable = available > 0 && dayAvailable > 0;
-          return `<button type="button" class="schedule-option profile-initial-calendar-cell ${selectable ? '' : 'disabled'}"
-            data-initial-schedule data-cycle-id="${cycle.id}" data-start-time="${slot.startTime}" data-end-time="${slot.endTime}"
-            data-date="${day.date}" data-day-index="${dayIndex}" ${selectable ? '' : 'disabled'}>
-            <span class="schedule-option-status ${selectable ? 'available' : 'full'}">${selectable ? `${dayAvailable} cupo${dayAvailable === 1 ? '' : 's'}` : 'Completo'}</span>
-          </button>`;
-        }).join('')}`;
+          <strong>${slot.startTime} - ${slot.endTime}</strong>
+          <span class="schedule-option-status ${available > 0 ? 'available' : 'full'}">${available > 0 ? `${available} cupo${available === 1 ? '' : 's'}` : 'Completo'}</span>
+        </button>`;
     }).join('');
     return `
-      <section class="profile-initial-cycle enrollment-calendar" data-day-window-start="0" data-day-count="${days.length}">
-        <div class="profile-initial-cycle-head enrollment-calendar-head">
+      <section class="profile-initial-cycle">
+        <div class="profile-initial-cycle-head">
           <div><strong>${cycle.modality === 'intensivo' ? 'Intensivo' : 'Normal'} · ${cycle.code}</strong><span>${cycle.startDate} al ${cycle.endDate}</span></div>
-          <div class="calendar-window-controls">
-            <button type="button" class="calendar-window-btn" data-direction="-1" aria-label="Dias anteriores">&lt;</button>
-            <span class="calendar-window-label"></span>
-            <button type="button" class="calendar-window-btn" data-direction="1" aria-label="Dias siguientes">&gt;</button>
-          </div>
         </div>
-        <div class="schedule-rotation-message">Selecciona una hora para aplicarla a todos los d&iacute;as disponibles del curso.</div>
-        <div class="enrollment-calendar-grid" style="--cycle-count:${Math.min(days.length, 5)}">
-          <div class="enrollment-calendar-heading">Hora</div>
-          ${days.map((day, dayIndex) => `<div class="enrollment-calendar-heading" data-day-index="${dayIndex}"><strong>${day.name}</strong><span>${day.label}</span></div>`).join('')}
-          ${rows}
-        </div>
+        <div class="profile-initial-slot-grid">${slots}</div>
       </section>`;
   }
 
-  async openCourseCycleScheduleModal(studentId, modal, instructorId = '', { allowInstructorFeedback = false } = {}) {
-    const previousObservation=modal.querySelector('#profile-schedule-observation')?.value || '';
-    const result = await ApiService.getStudentScheduleChangeOptions(studentId, instructorId);
-    if (!modal.isConnected) return;
+  async openCourseCycleScheduleModal(studentId, modal) {
+    const result = await ApiService.getStudentScheduleChangeOptions(studentId);
     const cycle = result.success ? result.data : null;
-    if (cycle) {
-      const today = new Intl.DateTimeFormat('en-CA', {timeZone:'America/Guayaquil',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-      cycle.currentAssignments = (cycle.currentAssignments || []).filter(item => item.canMove !== false && item.date >= today);
-    }
     modal.innerHTML = `
       <div class="modal profile-schedule-modal">
         <div class="modal-header">
@@ -1826,7 +1383,7 @@ class StudentProfileView extends Component {
           <button class="modal-close" data-close-modal>×</button>
         </div>
         <div class="modal-body">
-          ${cycle ? `${this.renderCurrentPracticeAssignments(cycle)}${allowInstructorFeedback ? `<label class="form-group"><span class="form-label">Nuevo instructor para las clases pendientes</span><select class="form-input" id="pending-class-instructor" data-current-instructor-id="${escapeHtml(cycle.currentInstructorId || cycle.instructor?.id || '')}">${(cycle.instructors || [cycle.instructor]).map(item=>`<option value="${escapeHtml(item.id)}" ${String(item.id)===String(cycle.selectedInstructorId)?'selected':''}>${escapeHtml(item.name)}</option>`).join('')}</select></label>` : `<p class="form-group"><span class="form-label">Instructor</span><strong>${escapeHtml(cycle.instructor?.name || cycle.currentAssignments?.find(item=>item.instructorName)?.instructorName || 'Sin instructor asignado')}</strong></p>`}${this.renderProfileScheduleCalendar(cycle)}
+          ${cycle ? `${this.renderProfileScheduleCalendar(cycle)}
             <label class="profile-schedule-observation" for="profile-schedule-observation">
               <span>Observación del cambio <strong>*</strong></span>
               <textarea id="profile-schedule-observation" class="form-textarea" maxlength="1000" rows="3"
@@ -1841,41 +1398,18 @@ class StudentProfileView extends Component {
         </div>
       </div>
     `;
-    if (modal.querySelector('#profile-schedule-observation')) modal.querySelector('#profile-schedule-observation').value=previousObservation;
     this.bindProfileModalClose(modal);
-    const destinationCalendar = modal.querySelector('.enrollment-calendar');
-    if (destinationCalendar && cycle) destinationCalendar.dataset.pendingAssignments = JSON.stringify(cycle.currentAssignments);
-    modal.querySelector('#pending-class-instructor')?.addEventListener('change',async event=>{
-      const select=event.currentTarget;select.disabled=true;
-      modal.querySelector('#confirm-profile-schedule').disabled=true;
-      try {await this.openCourseCycleScheduleModal(studentId,modal,select.value,{allowInstructorFeedback});}
-      catch(error){select.disabled=false;modal.querySelector('#profile-schedule-error').textContent=error.message||'No se pudo consultar la disponibilidad. Vuelve a elegir el instructor.';modal.querySelector('#confirm-profile-schedule').disabled=true;}
-    });
     if (cycle) this.mountProfileScheduleModal(modal, studentId);
-  }
-
-  renderCurrentPracticeAssignments(cycle) {
-    const assignments = cycle.currentAssignments || [];
-    return `<section class="profile-current-practices"><h3>Próximas clases pendientes (${assignments.length})</h3><div class="profile-pending-calendar">${assignments.map(item => `<article><strong>${escapeHtml(item.date.split('-').reverse().join('/'))}</strong><span>${escapeHtml(item.startTime)} - ${escapeHtml(item.endTime)}</span><small>${escapeHtml(item.instructorName || 'Sin instructor')}</small></article>`).join('') || '<p>No hay clases pendientes para cambiar.</p>'}</div></section>`;
   }
 
   renderProfileScheduleCalendar(cycle) {
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const availableDates = [...new Set([
-      ...(cycle.currentAssignments || []).map(item => item.date),
-      ...(cycle.slots || []).flatMap(slot => Object.keys(slot.occupancyByDate || {})),
-    ])].filter(date => date >= today).sort();
-    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
-    const days = availableDates.map(date => {
-      const parsed = new Date(`${date}T12:00:00`);
-      return { date, name: dayNames[parsed.getDay()], label: date.slice(5).split('-').reverse().join('/') };
-    });
+    const days = this.getProfileBusinessDays(cycle.startDate, cycle.endDate)
+      .filter(day => day.date >= today);
     const slots = [...(cycle.slots || [])]
       .sort((first, second) => String(first.startTime || '').localeCompare(String(second.startTime || '')));
-    const instructorName = cycle.instructor?.name
-      || (cycle.currentAssignments || []).find(item => item.instructorName)?.instructorName
-      || '';
+    const instructorName = (cycle.currentAssignments || []).find(item => item.instructorName)?.instructorName || '';
     return `
       <div class="enrollment-calendar" data-course="${cycle.vehicleType}" data-cycle-id="${cycle.id}" data-day-window-start="0" data-day-count="${days.length}">
         <div class="enrollment-calendar-head">
@@ -1891,7 +1425,7 @@ class StudentProfileView extends Component {
             </div>
           </div>
         </div>
-        <div class="schedule-rotation-message">Instructor: <strong>${escapeHtml(instructorName || 'Sin instructor asignado')}</strong> · <span data-pending-count>0 de ${(cycle.currentAssignments || []).length} clases seleccionadas</span></div>
+        <div class="schedule-rotation-message">Puedes cambiar uno, varios o todos los d&iacute;as siguientes. El instructor se mantendr&aacute;${instructorName ? `: <strong>${instructorName}</strong>` : ''}.</div>
         <div class="enrollment-calendar-grid" style="--cycle-count: ${Math.min(days.length, 5)};">
           <div class="enrollment-calendar-heading">Hora</div>
           ${days.map((day, dayIndex) => `
@@ -1915,14 +1449,14 @@ class StudentProfileView extends Component {
   renderProfileScheduleCell(cycle, slot, day, dayIndex) {
     const availability = slot.occupancyByDate?.[day.date] || {};
     const available = Number(availability.available ?? slot.available ?? 0);
-    const assignments = (cycle.currentAssignments || []).filter(item => item.date === day.date);
-    const isCurrent = assignments.some(item => item.startTime === slot.startTime && item.endTime === slot.endTime);
+    const assignment = (cycle.currentAssignments || []).find(item => item.date === day.date);
+    const isCurrent = Boolean(assignment
+      && assignment.startTime === slot.startTime
+      && assignment.endTime === slot.endTime);
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const isPast = day.date < today;
-    const source=assignments.find(item=>item.startTime===slot.startTime&&item.endTime===slot.endTime);
-    const changingInstructor=Boolean(source&&cycle.selectedInstructorId&&source.instructorId!==cycle.selectedInstructorId);
-    const disabled = isPast || (source?.canMove===false) || ((!isCurrent||changingInstructor) && available <= 0);
+    const disabled = available <= 0 || !assignment || isPast || isCurrent;
     const time = `${slot.startTime} - ${slot.endTime}`;
     const payload = JSON.stringify({
       id: `cycle:${cycle.id}:${slot.startTime}-${slot.endTime}`,
@@ -1932,19 +1466,17 @@ class StudentProfileView extends Component {
       dayLabel: day.name,
       dayIndex,
       course: cycle.vehicleType,
-      assignmentId: isCurrent ? assignments.find(item => item.startTime === slot.startTime && item.endTime === slot.endTime)?.id : null,
-      changingInstructor,
     }).replace(/"/g, '&quot;');
     return `
       <button type="button"
-        class="schedule-option ${day.isExamDay ? 'exam-day' : ''} ${isCurrent&&!changingInstructor ? 'current' : ''} ${disabled ? 'disabled' : ''}"
+        class="schedule-option ${day.isExamDay ? 'exam-day' : ''} ${isCurrent ? 'current' : ''} ${disabled ? 'disabled' : ''}"
         data-schedule="${payload}"
         data-time="${time}"
         data-date="${day.date}"
         data-day-index="${dayIndex}"
         ${disabled ? 'disabled' : ''}>
-        <span class="schedule-option-status ${isCurrent&&!changingInstructor ? 'current' : available>0 ? 'available' : 'full'}">${isCurrent&&!changingInstructor ? 'Horario actual' : available>0 ? 'Disponible' : slot.occupancyByDate?.[day.date] ? 'Ocupado / bloqueado' : 'No configurado'}</span>
-        <span class="schedule-option-capacity">${source?.canMove===false ? 'Clase iniciada o realizada' : isCurrent&&!changingInstructor ? 'Seleccionado' : `${available} cupo${available === 1 ? '' : 's'} disponible${available === 1 ? '' : 's'}`}</span>
+        <span class="schedule-option-status ${isCurrent ? 'available' : (disabled ? 'full' : 'available')}">${isCurrent ? 'Actual' : (isPast ? 'Pasado' : (!assignment ? 'Sin asignación' : (available <= 0 ? 'Completo' : 'Disponible')))}</span>
+        <span class="schedule-option-capacity">${available}/${slot.capacity} cupos</span>
       </button>
     `;
   }
@@ -1961,15 +1493,10 @@ class StudentProfileView extends Component {
       const button = event.currentTarget;
       const calendar = modal.querySelector('.enrollment-calendar');
       const selections = this.getProfileScheduleSelections(calendar);
-      const pending = JSON.parse(calendar?.dataset.pendingAssignments || '[]');
       const observationField = modal.querySelector('#profile-schedule-observation');
       const observation = observationField?.value.trim() || '';
       const error = modal.querySelector('#profile-schedule-error');
       if (error) error.textContent = '';
-      if (!pending.length || selections.length !== pending.length) {
-        if (error) error.textContent = `Selecciona exactamente ${pending.length} clases para trasladar todas las pendientes.`;
-        return;
-      }
       if (!selections.length) {
         if (error) error.textContent = 'Debes seleccionar un horario disponible.';
         return;
@@ -1982,21 +1509,12 @@ class StudentProfileView extends Component {
       try {
         button.disabled = true;
         button.textContent = 'Guardando...';
-        const instructorSelect = modal.querySelector('#pending-class-instructor');
-        const selectedInstructorId = instructorSelect?.value;
         const response = await ApiService.changeStudentScheduleDay({
           studentId,
-          instructorId: selectedInstructorId && selectedInstructorId !== instructorSelect.dataset.currentInstructorId
-            ? selectedInstructorId
-            : undefined,
-          allowInstructorFeedback,
-          allowInstructorChange: allowInstructorFeedback,
           cycleId: selections[0].cycleId,
-          replaceAllPending: true,
           changes: selections.map(selection => ({
             date: selection.date,
             time: selection.time,
-            assignmentId: selection.assignmentId,
           })),
           observation,
         });
@@ -2015,67 +1533,10 @@ class StudentProfileView extends Component {
     const calendar = option.closest('.enrollment-calendar');
     const error = modal.querySelector('#profile-schedule-error');
     if (error) error.textContent = '';
-    if (calendar.dataset.pendingAssignments) {
-      const pending = JSON.parse(calendar.dataset.pendingAssignments);
-      if (option.classList.contains('selected')) option.classList.remove('selected');
-      else {
-        const sameDate = calendar.querySelector(`.schedule-option.selected[data-date="${option.dataset.date}"]`);
-        if (!sameDate && calendar.querySelectorAll('.schedule-option.selected').length >= pending.length) {
-          if (error) error.textContent = `Solo faltan ${pending.length} clases. Quita una selección para cambiarla.`;
-          return;
-        }
-        sameDate?.classList.remove('selected');
-        option.classList.add('selected');
-      }
-      const selected = [...calendar.querySelectorAll('.schedule-option.selected')].sort((a,b) => a.dataset.date.localeCompare(b.dataset.date));
-      const remaining = [...pending];
-      const pairs = selected.map(cell => {
-        const index = remaining.findIndex(source => source.date === cell.dataset.date);
-        return {cell, source:index >= 0 ? remaining.splice(index,1)[0] : null};
-      });
-      pairs.forEach(pair => {
-        const source = pair.source || remaining.shift();
-        pair.cell.dataset.schedule = JSON.stringify({...JSON.parse(pair.cell.dataset.schedule), assignmentId:source.id});
-      });
-      calendar.querySelector('[data-pending-count]').textContent = `${selected.length} de ${pending.length} clases seleccionadas`;
-      return;
-    }
-    const destination=JSON.parse(option.dataset.schedule || '{}');
-    if(destination.changingInstructor&&destination.assignmentId&&!calendar.dataset.moveOrigin){option.classList.toggle('selected');return;}
-    if (option.classList.contains('current') && !calendar.dataset.moveOrigin) {
-      const source = JSON.parse(option.dataset.schedule || '{}');
-      if (source.changingInstructor) { option.classList.toggle('selected'); return; }
-      if (!source.assignmentId) {
-        if (error) error.textContent = 'Vuelve a abrir el calendario para cargar la clase actual';
-        return;
-      }
-      calendar.querySelectorAll('.move-origin').forEach(cell => cell.classList.remove('move-origin'));
-      option.classList.add('move-origin');
-      calendar.dataset.moveOrigin = JSON.stringify(source);
-      if (error) error.textContent = `Clase seleccionada: ${source.date} ${source.time}. Selecciona su nuevo cupo.`;
-      return;
-    }
     if (option.classList.contains('selected')) {
       option.classList.remove('selected');
       return;
     }
-    let source;
-    try { source = JSON.parse(calendar.dataset.moveOrigin || 'null'); } catch (_) { source = null; }
-    if (!source) {
-      const currentCells = [...calendar.querySelectorAll(`.schedule-option.current[data-date="${option.dataset.date}"]`)];
-      if (currentCells.length === 1) source = JSON.parse(currentCells[0].dataset.schedule || '{}');
-    }
-    if (!source?.assignmentId) {
-      if (error) error.textContent = 'Selecciona primero la clase actual en rojo que deseas trasladar';
-      return;
-    }
-    calendar.querySelectorAll('.schedule-option.selected').forEach(cell => {
-      const selection = JSON.parse(cell.dataset.schedule || '{}');
-      if (selection.assignmentId === source.assignmentId) cell.classList.remove('selected');
-    });
-    option.dataset.schedule = JSON.stringify({ ...JSON.parse(option.dataset.schedule || '{}'), assignmentId: source.assignmentId });
-    delete calendar.dataset.moveOrigin;
-    calendar.querySelectorAll('.move-origin').forEach(cell => cell.classList.remove('move-origin'));
     calendar.querySelectorAll(`.schedule-option.selected[data-date="${option.dataset.date}"]`)
       .forEach(cell => cell.classList.remove('selected'));
     option.classList.add('selected');
@@ -2151,15 +1612,6 @@ class StudentProfileView extends Component {
 
   renderDocumentUpload(type, label, accept, documents) {
     const uploaded = documents.find(document => document.type === type && document.file_url);
-    if (uploaded && type === 'certificado_bachiller' && uploaded.observations === 'La cedula indica bachiller. No requiere certificado de estudio.') {
-      return `
-        <div class="form-group" style="flex: 1; min-width: 220px;">
-          <label class="form-label">${label}</label>
-          <small style="display:block; color:#047857; font-weight:700;">Cumplido: la cédula indica bachiller</small>
-          <small>No requiere certificado de estudio.</small>
-        </div>
-      `;
-    }
     if (uploaded) {
       return `
         <div class="form-group" style="flex: 1; min-width: 220px;">
@@ -2178,39 +1630,6 @@ class StudentProfileView extends Component {
     `;
   }
 
-  async previewBloodCardAppend(studentId,fileUrl) {
-    if (!authService.can('DOCUMENT_UPDATE')) throw new Error('No tienes permiso para completar documentos.');
-    const request = this.bloodCardPreviewRequest = (this.bloodCardPreviewRequest||0)+1;
-    const pane = document.querySelector('.tab-pane[data-tab="documents"] .card-body');
-    const response = await ApiService.appendBloodCardToRegistrationPdf(studentId,{fileUrl,preview:true});
-    if (!response.success) throw new Error(response.error || 'No se pudo preparar el PDF combinado.');
-    if (request !== this.bloodCardPreviewRequest || !pane?.isConnected) return;
-    if (!/^data:application\/pdf;base64,/.test(response.data?.fileUrl||'')) throw new Error('Vista previa no valida.');
-    const blob = await (await fetch(response.data.fileUrl)).blob();
-    if (request !== this.bloodCardPreviewRequest || !pane.isConnected) return;
-    if (this.bloodCardPreviewUrl) URL.revokeObjectURL(this.bloodCardPreviewUrl);
-    this.bloodCardPreviewUrl = URL.createObjectURL(blob);
-    document.querySelector('[data-profile-card-preview]')?.remove();
-    const preview = document.createElement('section'); preview.dataset.profileCardPreview='';
-    preview.innerHTML = '<h3>Vista previa: cedula y carnet en una hoja A4</h3><p>Comprueba que los textos de ambos documentos se lean antes de guardar. El expediente todavia no se ha modificado.</p><iframe title="Documento combinado" style="width:100%;height:500px;border:1px solid #ddd"></iframe><button type="button" class="btn btn-primary" data-save-card>Guardar documento combinado</button><button type="button" class="btn btn-secondary" data-cancel-card>Cancelar</button><p role="status"></p>';
-    preview.querySelector('iframe').src = this.bloodCardPreviewUrl; pane.append(preview);
-    preview.querySelector('[data-cancel-card]').onclick=()=>{ this.bloodCardPreviewRequest++; URL.revokeObjectURL(this.bloodCardPreviewUrl); this.bloodCardPreviewUrl=null; preview.remove(); };
-    preview.querySelector('[data-save-card]').onclick=async event=>{
-      if (!authService.can('DOCUMENT_UPDATE') || request!==this.bloodCardPreviewRequest) return;
-      if (!window.confirm('Se actualizara el PDF de cedula con el carnet en una sola hoja. ¿Deseas guardarlo?')) return;
-      const button=event.currentTarget, cancel=preview.querySelector('[data-cancel-card]'); button.disabled=cancel.disabled=true;
-      try {
-        const saved=await ApiService.appendBloodCardToRegistrationPdf(studentId,{fileUrl,expectedSourceHash:response.data.sourceHash});
-        if (!saved.success) throw new Error(saved.error||'No se pudo guardar el documento.');
-        preview.querySelector('[role=status]').textContent='Carnet agregado. Expediente actualizado.';
-        this.bloodCardScanner?.dispose(); this.bloodCardScanner=null;
-        clearStudentReadCache(studentId,['documents']); this.documentsLoaded=false;
-        await this.loadDocumentsTab();
-      } catch(error) { preview.querySelector('[role=status]').textContent=error.message;button.disabled=cancel.disabled=false; }
-    };
-    preview.scrollIntoView({block:'nearest',behavior:'smooth'});
-  }
-
   renderCedulaPdfUpload(documents) {
     const uploaded = documents.find(document => document.type === 'cedula' && document.file_url);
     const bloodCard = documents.find(document => document.type === 'carnet_tipo_sangre' && document.file_url);
@@ -2219,14 +1638,12 @@ class StudentProfileView extends Component {
         <div class="form-group" style="flex: 1 1 100%;">
           <label class="form-label">Cedula de identidad y carnet de tipo sanguineo</label>
           <small style="display:block; color:#047857; font-weight:700;">
-            ${bloodCard ? 'Cedula y carnet cargados' : 'Cedula cargada; falta agregar el carnet'}
+            ${bloodCard ? 'Documento consolidado completo' : 'Cedula cargada; falta agregar el carnet'}
           </small>
           ${uploaded.file_url ? `<a class="btn btn-small btn-secondary view-document-btn" style="margin-top:.5rem; display:inline-block" href="#" data-file-url="${uploaded.file_url}">Ver PDF actual</a>` : ''}
-          ${!bloodCard && authService.can('DOCUMENT_UPDATE') ? `
+          ${!bloodCard ? `
             <label class="form-label" style="display:block; margin-top:1rem;">Agregar carnet al PDF existente</label>
             <input type="file" class="form-input append-blood-card-input" accept="application/pdf,image/jpeg,image/png">
-            <button type="button" class="btn btn-primary" id="profile-scan-missing-blood-card" style="margin-top:.65rem;">Escanear carnet y completar PDF</button>
-            <div id="profile-blood-card-scanner"></div>
             <button type="button" class="btn btn-primary" id="mobile-blood-card-capture" style="margin-top:.65rem;">
               Capturar carnet desde telefono
             </button>
@@ -2240,11 +1657,20 @@ class StudentProfileView extends Component {
     return `
       <div class="form-group" style="flex: 1 1 100%;">
         <label class="form-label">Cédula de identidad (PDF escaneado)</label>
-        <input type="file" class="form-input" id="cedula-pdf-file" accept="application/pdf,.pdf">
-        ${!bloodCard ? `<label class="form-label" style="display:flex;align-items:center;gap:.6rem;margin-top:.75rem;"><input type="checkbox" id="cedula-pdf-includes-blood-card">Este PDF incluye la c&eacute;dula y el carnet de tipo de sangre</label>` : ''}
-        <button type="button" class="btn btn-primary" id="upload-cedula-pdf" style="margin-top:.65rem;">Subir PDF de c&eacute;dula</button>
+        <div class="form-row">
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label">Foto del anverso</label>
+            <input type="file" class="form-input" id="cedula-front" accept="image/*">
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label">Foto del reverso</label>
+            <input type="file" class="form-input" id="cedula-back" accept="image/*">
+          </div>
+        </div>
+        <button type="button" class="btn btn-secondary" id="generate-cedula-pdf">Generar PDF de cédula</button>
+        <button type="button" class="btn btn-primary" id="mobile-cedula-capture" style="margin-left:.5rem;">Capturar desde telefono</button>
         <small id="cedula-pdf-status" style="display:block; margin-top:.5rem; color:var(--gray-500);">
-          Selecciona el PDF escaneado de la c&eacute;dula.
+          ${uploaded ? `PDF cargado: ${uploaded.name}` : 'Sube ambas fotos; el sistema generará el PDF.'}
         </small>
         ${uploaded ? `<a class="btn btn-small btn-secondary view-document-btn" style="margin-top:.5rem; display:inline-block" href="#" data-file-url="${uploaded.file_url}">Ver PDF actual</a>` : ''}
       </div>
@@ -2252,44 +1678,36 @@ class StudentProfileView extends Component {
   }
 
   setupCedulaPdfUpload(studentId) {
-    const fileInput = document.getElementById('cedula-pdf-file');
-    const button = document.getElementById('upload-cedula-pdf');
+    const frontInput = document.getElementById('cedula-front');
+    const backInput = document.getElementById('cedula-back');
+    const button = document.getElementById('generate-cedula-pdf');
     const status = document.getElementById('cedula-pdf-status');
-    if (!fileInput || !button || !status) return;
-
-    const combined = document.getElementById('cedula-pdf-includes-blood-card');
-    combined?.addEventListener('change', () => {
-      button.textContent = combined.checked ? 'Subir PDF de cedula y carnet' : 'Subir PDF de cedula';
-    });
+    if (!frontInput || !backInput || !button) return;
 
     button.addEventListener('click', async () => {
-      const file = fileInput.files?.[0];
-      if (!file) {
-        status.textContent = 'Selecciona el PDF de la cedula.';
+      const front = frontInput.files?.[0];
+      const back = backInput.files?.[0];
+      if (!front || !back) {
+        status.textContent = 'Selecciona las fotos del anverso y reverso.';
         return;
       }
-      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-        status.textContent = 'El documento debe ser un archivo PDF.';
-        return;
-      }
-      if (file.size > 9 * 1024 * 1024) {
-        status.textContent = 'El PDF no puede superar 9 MB.';
+      if (front.size > 5 * 1024 * 1024 || back.size > 5 * 1024 * 1024) {
+        status.textContent = 'Cada imagen debe pesar como máximo 5 MB.';
         return;
       }
       try {
         button.disabled = true;
-        const includesBloodCard = Boolean(combined?.checked);
-        status.textContent = 'Subiendo PDF de cedula...';
-        const fileUrl = await this.readFileAsDataUrl(file);
+        status.textContent = 'Generando PDF de cédula…';
+        const pdfBlob = await this.createCedulaPdf(front, back);
+        const fileUrl = await this.readFileAsDataUrl(pdfBlob);
         const response = await ApiService.createDocument(studentId, {
-          type: includesBloodCard ? 'registro_documentos' : 'cedula', name: file.name, fileUrl,
-          includesBloodCard,
+          type: 'cedula', name: `cedula-${studentId}.pdf`, fileUrl,
         });
-        if (!response.success) throw new Error('No se pudo guardar el PDF de cedula.');
-        status.textContent = includesBloodCard ? 'Cedula y carnet guardados con el mismo PDF.' : 'PDF de cedula cargado correctamente.';
-        window.dispatchEvent(new CustomEvent('erp:dataChanged', { detail: { collection: 'documents', action: 'cedula-pdf-uploaded' } }));
+        if (!response.success) throw new Error('No se pudo guardar el PDF de cédula.');
+        status.textContent = 'PDF de cédula generado y guardado correctamente.';
+        window.dispatchEvent(new CustomEvent('erp:dataChanged', { detail: { collection: 'documents', action: 'cedula-pdf-created' } }));
       } catch (error) {
-        status.textContent = error.message || 'No se pudo subir el PDF.';
+        status.textContent = error.message || 'No se pudo generar el PDF.';
       } finally {
         button.disabled = false;
       }
@@ -2303,7 +1721,7 @@ class StudentProfileView extends Component {
     modal.innerHTML = '<div class="modal"><div class="modal-body">Generando QR para este estudiante...</div></div>';
     let timer = null;
     const close = (refresh = false) => {
-      timer?.();
+      if (timer) window.clearInterval(timer);
       this.closeProfileModal(refresh);
     };
 
@@ -2315,7 +1733,7 @@ class StudentProfileView extends Component {
       const uploadUrl = localOrigin && token.localUploadUrl
         ? token.localUploadUrl
         : `${window.location.origin}/mobile-upload/${token.token}`;
-      const qrUrl = await renderQrDataUrl(uploadUrl, { width: 220, margin: 12 });
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(uploadUrl)}`;
 
       modal.innerHTML = `
         <div class="modal mobile-capture-modal">
@@ -2342,11 +1760,11 @@ class StudentProfileView extends Component {
       `;
       modal.querySelectorAll('[data-close-blood-card]').forEach(button => button.addEventListener('click', () => close(false)));
 
-      timer = subscribeRealtime(['documents'],async () => {
+      timer = window.setInterval(async () => {
         try {
           const result = await ApiService.getMobileDocumentUploadResult(token.token);
           if (!result.success || !result.data?.completed) return;
-          timer?.();
+          window.clearInterval(timer);
           timer = null;
           const fileUrl = result.data.fileUrl;
           const status = modal.querySelector('#blood-card-capture-status');
@@ -2382,7 +1800,7 @@ class StudentProfileView extends Component {
           const status = modal.querySelector('#blood-card-capture-status');
           if (status) status.textContent = error.message || 'No se pudo consultar la captura.';
         }
-      }, () => modal.isConnected && modal.classList.contains('active'));
+      }, 2000);
     } catch (error) {
       modal.innerHTML = `
         <div class="modal">
@@ -2422,7 +1840,7 @@ class StudentProfileView extends Component {
       const uploadUrl = localOrigin && token.localUploadUrl
         ? token.localUploadUrl
         : `${window.location.origin}/mobile-upload/${token.token}`;
-      const qrUrl = await renderQrDataUrl(uploadUrl, { width: 220, margin: 12 });
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(uploadUrl)}`;
 
       modal.innerHTML = `
         <div class="modal mobile-capture-modal">
@@ -2451,16 +1869,16 @@ class StudentProfileView extends Component {
         </div>
       `;
       this.bindProfileModalClose(modal, true);
-      resultTimer = subscribeRealtime(['documents'],async () => {
+      resultTimer = window.setInterval(async () => {
         if (!modal.classList.contains('active')) {
-          resultTimer?.();
+          window.clearInterval(resultTimer);
           resultTimer = null;
           return;
         }
         try {
           const result = await ApiService.getMobileDocumentUploadResult(token.token);
           if (!result.success || !result.data?.completed || !result.data.fileUrl) return;
-          resultTimer?.();
+          window.clearInterval(resultTimer);
           resultTimer = null;
           const status = modal.querySelector('#individual-document-capture-status');
           if (status) status.textContent = 'Documento recibido. Revisa la vista previa antes de cerrar.';
@@ -2490,9 +1908,9 @@ class StudentProfileView extends Component {
           const status = modal.querySelector('#individual-document-capture-status');
           if (status) status.textContent = pollError.message || 'No se pudo consultar el documento recibido.';
         }
-      }, () => modal.isConnected && modal.classList.contains('active'));
+      }, 2000);
     } catch (error) {
-      resultTimer?.();
+      if (resultTimer) window.clearInterval(resultTimer);
       modal.innerHTML = `
         <div class="modal mobile-capture-modal">
           <div class="modal-header">
@@ -2515,17 +1933,11 @@ class StudentProfileView extends Component {
     document.querySelectorAll('.view-document-btn').forEach(link => {
       link.addEventListener('click', async event => {
         event.preventDefault();
-        let dataUrl = link.dataset.fileUrl;
+        const dataUrl = link.dataset.fileUrl;
         if (!dataUrl) return;
 
         const preview = window.open('', '_blank');
         try {
-          if (/^\/api\/students\/[^/]+\/documents\/[^/]+\/content$/.test(dataUrl)) {
-            const result = await apiClient.get(dataUrl.replace(/^\/api/,''));
-            if (!result.success || !result.data?.file_url) throw new Error('Archivo no disponible');
-            dataUrl = result.data.file_url;
-          }
-          if (!/^data:(application\/pdf|image\/(jpeg|png));base64,/i.test(dataUrl) && !/^https?:\/\//i.test(dataUrl)) throw new Error('Archivo no valido');
           const response = await fetch(dataUrl);
           const file = await response.blob();
           const fileUrl = URL.createObjectURL(file);
@@ -2669,14 +2081,6 @@ class StudentProfileView extends Component {
       reader.onerror = () => reject(new Error('No se pudo leer el archivo seleccionado.'));
       reader.readAsDataURL(file);
     });
-  }
-
-  renderPaymentMethod(payment) {
-    const method = String(payment.payment_method || payment.method || '').trim().toLowerCase();
-    const labels = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta', cheque: 'Cheque', deposito: 'Depósito' };
-    const batch = payment.card_batch || payment.cardBatch;
-    const reference = payment.reference || payment.payment_reference;
-    return `<div class="payment-date">Método de pago: ${escapeHtml(labels[method] || method || 'Sin registro')}${batch ? ` · Lote: ${escapeHtml(batch)}` : ''}${reference ? ` · Referencia: ${escapeHtml(reference)}` : ''}</div>`;
   }
 
   getStatusLabel(status) {

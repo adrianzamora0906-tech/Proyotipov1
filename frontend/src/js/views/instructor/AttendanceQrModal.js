@@ -1,6 +1,5 @@
 import '../../lib/qrcode.browser.js';
 import PracticalSessionService from '../../services/practicalSessionService.js';
-import { subscribeRealtime } from '../../core/realtime/RealtimeClient.js';
 
 function generateQrDataUrl(value) {
   return new Promise((resolve, reject) => {
@@ -26,19 +25,12 @@ function encodeOfflinePayload(payload) {
 
 export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENTRY') {
   const isExit = phase === 'EXIT';
-  if (isExit) {
-    const { data: session } = await PracticalSessionService.getSession(sessionId);
-    if (session.isExamOnly) onConfirmed = () => {
-      window.history.pushState({}, '', `/instructor/evaluations?session=${encodeURIComponent(sessionId)}&enrollment=${encodeURIComponent(session.enrollmentId)}`);
-      window.dispatchEvent(new PopStateEvent('popstate'));
-    };
-  }
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay active attendance-qr-overlay';
   overlay.innerHTML = `
     <div class="modal attendance-qr-modal">
       <div class="modal-header">
-        <div><h3 class="modal-title">${isExit ? 'Registrar salida' : 'Registrar entrada'}</h3><p class="card-subtitle">QR y codigo seguro que cambian cada 15 segundos</p></div>
+        <div><h3 class="modal-title">${isExit ? 'Registrar salida' : 'Registrar entrada'}</h3><p class="card-subtitle">QR seguro que cambia cada 30 segundos</p></div>
         <button type="button" class="modal-close" data-close-attendance>&times;</button>
       </div>
       <div class="modal-body attendance-qr-body">
@@ -46,11 +38,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
         <img class="attendance-qr-image" data-attendance-qr hidden alt="Codigo QR temporal para asistencia">
         <strong data-attendance-title hidden>QR de un solo uso</strong>
         <p data-attendance-help hidden>El estudiante debe escanear el codigo vigente desde su propia sesion para registrar ${isExit ? 'su salida' : 'su entrada'}.</p>
-        <div class="attendance-countdown" data-attendance-countdown hidden>Cambia en <strong data-attendance-seconds>15</strong> segundos</div>
-        <div class="attendance-code-fallback" data-attendance-code hidden>
-          <span>Si tu navegador no permite la camara, el estudiante puede escribir este codigo:</span>
-          <strong data-attendance-numeric-code>000000</strong>
-        </div>
+        <div class="attendance-countdown" data-attendance-countdown hidden>Cambia en <strong data-attendance-seconds>30</strong> segundos</div>
         <div class="attendance-waiting" data-attendance-status>Generando codigo...</div>
       </div>
       <div class="modal-footer"><button type="button" class="btn btn-secondary" data-close-attendance>Cancelar</button></div>
@@ -62,9 +50,8 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
   let rotationTimer = null;
   let closed = false;
   let refreshing = false;
-  let mileageFormVisible = false;
   const clearTimers = () => {
-    pollTimer?.();
+    if (pollTimer) window.clearInterval(pollTimer);
     if (countdownTimer) window.clearInterval(countdownTimer);
     if (rotationTimer) window.clearTimeout(rotationTimer);
     pollTimer = countdownTimer = rotationTimer = null;
@@ -76,61 +63,6 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
   };
   overlay.querySelectorAll('[data-close-attendance]').forEach(button => button.addEventListener('click', close));
 
-  const showMileageForm = (required = true) => {
-    if (closed || isExit || mileageFormVisible) return;
-    mileageFormVisible = true;
-    clearTimers();
-    const body = overlay.querySelector('.attendance-qr-body');
-    body.innerHTML = `
-      <div class="attendance-waiting attendance-success">Entrada confirmada por el estudiante.</div>
-      <strong>Registrar kilometraje inicial</strong>
-      <p>Ingresa el kilometraje que marca el vehiculo antes de iniciar la practica.</p>
-      <form data-start-mileage-form>
-        <label for="start-mileage">Kilometraje inicial${required ? '' : ' (opcional)'}</label>
-        <input id="start-mileage" name="startMileage" type="text" inputmode="numeric"
-          pattern="[0-9]{3,7}" minlength="3" maxlength="7" title="Ingresa entre 3 y 7 digitos" autocomplete="off" placeholder="Ej. 45820" ${required ? 'required' : ''}>
-        <div class="attendance-error" data-start-mileage-error aria-live="polite"></div>
-        <button type="submit" class="btn btn-primary">Guardar e iniciar</button>
-        ${required ? '' : '<button type="button" class="btn btn-secondary" data-skip-mileage>Continuar sin kilometraje</button>'}
-      </form>`;
-    const form = body.querySelector('[data-start-mileage-form]');
-    const input = form.elements.startMileage;
-    form.querySelector('[data-skip-mileage]')?.addEventListener('click', () => {
-      close();
-      onConfirmed?.();
-    });
-    input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, 7); });
-    form.addEventListener('submit', async event => {
-      event.preventDefault();
-      const error = body.querySelector('[data-start-mileage-error]');
-      const button = form.querySelector('button[type="submit"]');
-      if (!/^\d{3,7}$/.test(input.value)) {
-        error.textContent = 'Ingresa el kilometraje con 3 a 7 digitos, usando solo numeros.';
-        input.focus();
-        return;
-      }
-      try {
-        button.disabled = true;
-        button.textContent = 'Guardando...';
-        error.textContent = '';
-        await PracticalSessionService.registerStartMileage(sessionId, input.value);
-        body.innerHTML = '<div class="attendance-waiting attendance-success">Kilometraje registrado. La clase ha iniciado.</div>';
-        window.setTimeout(() => {
-          if (!closed) {
-            close();
-            onConfirmed?.();
-          }
-        }, 900);
-      } catch (requestError) {
-        error.textContent = requestError.message || 'No se pudo registrar el kilometraje.';
-        button.disabled = false;
-        button.textContent = 'Guardar e iniciar';
-        input.focus();
-      }
-    });
-    input.focus();
-  };
-
   const refreshChallenge = async () => {
     if (closed || refreshing) return;
     refreshing = true;
@@ -139,27 +71,14 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       if (closed) return;
       const challenge = response.data;
       if (challenge.alreadyConfirmed) {
-        if (isExit) {
-          close();
-          onConfirmed?.();
-        } else {
-          const current = await PracticalSessionService.getAttendanceQrStatus(sessionId, phase);
-          if (current.data.requiresStartMileage) showMileageForm();
-          else {
-            close();
-            onConfirmed?.();
-          }
-        }
+        close();
+        onConfirmed?.();
         return;
       }
       const localOrigin = ['localhost', '127.0.0.1'].includes(window.location.hostname);
       const attendanceUrl = localOrigin && challenge.localAttendanceUrl
         ? challenge.localAttendanceUrl
         : `${window.location.origin}/attendance.html?token=${encodeURIComponent(challenge.token)}`;
-      const codeFallback = overlay.querySelector('[data-attendance-code]');
-      const numericCode = overlay.querySelector('[data-attendance-numeric-code]');
-      if (numericCode) numericCode.textContent = challenge.numericCode || '------';
-      if (codeFallback) codeFallback.hidden = false;
       const image = overlay.querySelector('[data-attendance-qr]');
       image.src = await generateQrDataUrl(attendanceUrl);
       image.hidden = false;
@@ -170,7 +89,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       const status = overlay.querySelector('[data-attendance-status]');
       status.className = 'attendance-waiting';
       status.textContent = 'Esperando al estudiante...';
-      let seconds = Number(challenge.expiresInSeconds) || 15;
+      let seconds = Number(challenge.expiresInSeconds) || 30;
       overlay.querySelector('[data-attendance-seconds]').textContent = seconds;
       if (countdownTimer) window.clearInterval(countdownTimer);
       countdownTimer = window.setInterval(() => {
@@ -179,7 +98,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
         if (target) target.textContent = seconds;
       }, 1000);
       if (rotationTimer) window.clearTimeout(rotationTimer);
-      rotationTimer = window.setTimeout(refreshChallenge, (Number(challenge.expiresInSeconds) || 15) * 1000);
+      rotationTimer = window.setTimeout(refreshChallenge, (Number(challenge.expiresInSeconds) || 30) * 1000);
     } catch (error) {
       const status = overlay.querySelector('[data-attendance-status]');
       if (isNetworkError(error)) {
@@ -196,8 +115,6 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
           nonce: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         };
         const attendanceUrl = `${window.location.origin}/attendance.html?offline=${encodeURIComponent(encodeOfflinePayload(payload))}`;
-        const codeFallback = overlay.querySelector('[data-attendance-code]');
-        if (codeFallback) codeFallback.hidden = true;
         const image = overlay.querySelector('[data-attendance-qr]');
         image.src = await generateQrDataUrl(attendanceUrl);
         image.hidden = false;
@@ -224,16 +141,12 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
     }
   };
 
-  pollTimer = subscribeRealtime(['schedules'],async () => {
+  pollTimer = window.setInterval(async () => {
     if (closed) return;
     try {
       const response = await PracticalSessionService.getAttendanceQrStatus(sessionId, phase);
       const confirmed = isExit ? response.data.exitConfirmed : response.data.started;
       if (!confirmed) return;
-      if (!isExit && response.data.canRegisterStartMileage) {
-        showMileageForm(response.data.requiresStartMileage);
-        return;
-      }
       clearTimers();
       const status = overlay.querySelector('[data-attendance-status]');
       if (status) {
@@ -252,7 +165,7 @@ export async function openAttendanceQrModal(sessionId, onConfirmed, phase = 'ENT
       const status = overlay.querySelector('[data-attendance-status]');
       if (status && !isNetworkError(error)) status.textContent = error.message || 'No se pudo consultar la asistencia.';
     }
-  }, () => !closed && overlay.isConnected);
+  }, 1500);
 
   if (isExit) {
     try {

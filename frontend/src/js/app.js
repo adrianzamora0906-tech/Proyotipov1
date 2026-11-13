@@ -15,8 +15,8 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=manos-restauradas-20261014";
 import DashboardView from "./views/dashboard/DashboardView.js?v=actualizacion-parcial-20261014";
-import StudentsView from "./views/students/StudentsView.js?v=reservas-seleccion-visible-20261112";
-import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=responsables-cobro-20261028";
+import StudentsView from "./views/students/StudentsView.js?v=orden-registro-20261112";
+import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=edicion-completa-20261113";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=estudiantes-orden-hora-20261015";
 import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";

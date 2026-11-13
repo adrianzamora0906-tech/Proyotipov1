@@ -22,7 +22,7 @@ import { authService } from '../../core/auth/AuthService.js';
 import ApiService from '../../core/api/apiService.js';
 import { createDocumentImageSheet } from '../../services/DocumentImageSheet.js';
 import { isCedulaOcrPilotUser } from '../../services/CedulaOcrPilot.js';
-import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js';
+import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js?v=arrastrar-cedula-20261112';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -6322,14 +6322,11 @@ class StudentsView extends Component {
     let previousBranch = null;
     return students.map(student => {
       const registrationBranch = student.salesBranchName || student.registeredByBranchName || 'Sucursal no registrada';
-      const registrationCity = student.salesBranchCity || student.registeredByCityName || 'Ciudad no registrada';
       const groupTitle = this.groupBy === 'instructor'
         ? (student.instructorName || 'Sin instructor') !== previousBranch
           ? `<div class="student-branch-group">Instructor: ${escapeHtml(student.instructorName || 'Sin instructor')}</div>`
           : ''
-        : registrationBranch !== previousBranch
-          ? `<div class="student-branch-group">${escapeHtml(registrationCity)} · ${escapeHtml(registrationBranch)}</div>`
-          : '';
+        : '';
       previousBranch = this.groupBy === 'instructor' ? (student.instructorName || 'Sin instructor') : registrationBranch;
       return `${groupTitle}
         <div class="table-row clickable-row" data-student-id="${escapeHtml(student.id)}" style="cursor:pointer;">
@@ -6338,7 +6335,7 @@ class StudentsView extends Component {
           <div class="table-cell">${escapeHtml(student.createdByName || 'No registrado')}</div>
           <div class="table-cell">${escapeHtml(registrationBranch)}</div>
           <div class="table-cell">${escapeHtml(student.instructorName || 'Sin instructor')}</div>
-          <div class="table-cell">${DateHelper.format(student.createdAt, 'DD/MM/YYYY')}</div>
+          <div class="table-cell">${escapeHtml(this.formatReservationCreatedAt(student.createdAt))}</div>
           <div class="table-cell"><span class="badge ${this.getStatusBadgeClass(student.status)}">${this.getStatusLabel(student.status)}</span></div>
         </div>`;
     }).join('');

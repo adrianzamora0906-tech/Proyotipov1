@@ -79,6 +79,13 @@ class StudentProfileView extends Component {
     const classStartDateLabel = classStartDate
       ? DateHelper.format(`${String(classStartDate).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY')
       : 'Sin fecha asignada';
+    const escapeProfileText = value => String(value ?? '').replace(/[&<>"']/g, char => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[char]);
+    const registeredAt = student.createdAt ? new Date(student.createdAt) : null;
+    const registeredAtLabel = registeredAt && !Number.isNaN(registeredAt.getTime())
+      ? new Intl.DateTimeFormat('es-EC', { timeZone: 'America/Guayaquil', dateStyle: 'short', timeStyle: 'medium' }).format(registeredAt)
+      : 'Sin registrar';
     const isExamOnly = schedule?.type === 'exam_only' || schedule?.appointmentType === 'EXAM_ONLY';
     const isAdditionalPracticeOnly = student.registrationType === 'ADDITIONAL_PRACTICE'
       || ((student.additionalPractices || []).length > 0 && !(student.enrollments || []).length);
@@ -187,6 +194,14 @@ class StudentProfileView extends Component {
                   <div class="info-item">
                     <span class="info-label">Nombre Completo</span>
                     <span class="info-value">${student.firstName} ${student.lastName}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Inscrito por</span>
+                    <span class="info-value">${escapeProfileText(student.createdByName || 'Sin registrar')}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Fecha y hora de registro</span>
+                    <span class="info-value">${escapeProfileText(registeredAtLabel)}</span>
                   </div>
                   <div class="info-item">
                     <span class="info-label">Cédula</span>
@@ -503,7 +518,15 @@ class StudentProfileView extends Component {
 
     // Buttons
     document.getElementById('edit-student-btn')?.addEventListener('click', () => {
-      this.openEditStudentModal(studentId);
+      const student = this.student;
+      const practiceOnly = student?.registrationType === 'ADDITIONAL_PRACTICE'
+        || ((student?.additionalPractices || []).length > 0 && !(student?.enrollments || []).length);
+      if (authService.can('STUDENT_UPDATE') && !practiceOnly) {
+        window.history.pushState(null, null, `/students/new?edit=${encodeURIComponent(studentId)}`);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      } else {
+        this.openEditStudentModal(studentId);
+      }
     });
 
     document.getElementById('reset-student-access-btn')?.addEventListener('click', () => {

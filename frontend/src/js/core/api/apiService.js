@@ -103,6 +103,10 @@ class ApiService {
     return apiClient.get(`/students/additional-practices/availability?${new URLSearchParams(params)}`);
   }
 
+  static async previewAdditionalPracticeSchedule(data) {
+    return apiClient.post('/students/additional-practices/schedule-preview', data);
+  }
+
   static async updateStudent(id, data) {
     return apiClient.put(`/students/${id}`, data);
   }

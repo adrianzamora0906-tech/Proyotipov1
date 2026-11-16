@@ -781,6 +781,8 @@ class StudentProfileView extends Component {
   }
 
   renderDocumentsPane(documents) {
+    const complete = ['cedula', 'carnet_tipo_sangre', 'certificado_bachiller']
+      .every(type => documents.some(document => document.type === type && document.file_url));
     return `
           <!-- Documents -->
           <div class="tab-pane" data-tab="documents">
@@ -789,7 +791,7 @@ class StudentProfileView extends Component {
                 <h3 class="card-title">Documentación</h3>
               </div>
               <div class="card-body">
-                <div class="form-row" style="margin-bottom: 1.5rem;">
+                ${!complete ? `<div class="form-row" style="margin-bottom: 1.5rem;">
                   ${authService.can('DOCUMENT_CREATE') ? '<button type="button" class="btn btn-secondary" data-scanner-test>Escanear cédula y carnet</button>' : ''}
                   ${this.renderCedulaPdfUpload(documents)}
                   <div style="flex:1; min-width:min(100%,220px);" id="profile-study-document">
@@ -802,7 +804,7 @@ class StudentProfileView extends Component {
                       ${this.renderDocumentUpload('certificado_bachiller', 'Certificado de estudio', 'application/pdf,image/*', documents)}
                     </div>
                   </div>
-                </div>
+                </div>` : ''}
                 ${documents.length > 0 ? `
                   <div class="documents-list">
                     ${documents.map(doc => `

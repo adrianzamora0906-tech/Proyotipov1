@@ -4178,7 +4178,7 @@ class StudentsView extends Component {
 
   mountInlineRegistrationCapture() {
     const form = document.getElementById('student-modal-form');
-    if (!form || !authService.can('DOCUMENT_CREATE') || this.recordEditContext || this.activatingReservation
+    if (!form || !authService.can('DOCUMENT_CREATE') || this.activatingReservation
       || form.querySelector('[name="registrationMode"]:checked')?.value !== 'regular') return;
     if (form.querySelector('[data-inline-registration-capture] [data-local-scanner-dialog]')) return;
     this.registrationCapture?.dispose();
@@ -4196,6 +4196,7 @@ class StudentsView extends Component {
     // La captura integrada reemplaza los controles duplicados; conservar los
     // campos en el formulario permite guardar los PDF con el flujo existente.
     pane.querySelectorAll(':scope > .student-modal-section-title, :scope > .registration-capture-alternatives, :scope > .registration-bachiller-check, :scope > .registration-certificate-field, :scope > #registration-documents-status').forEach(element => {
+      if (this.recordEditContext && (element.matches('.registration-bachiller-check') || element.id === 'registration-documents-status')) return;
       element.style.display = 'none';
     });
     const isCurrent = () => form.isConnected && authService.can('DOCUMENT_CREATE') && form.querySelector('[name="registrationMode"]:checked')?.value === 'regular';
@@ -4216,7 +4217,7 @@ class StudentsView extends Component {
         form.elements.registrationDocumentsMobileFileUrl.value = fileUrl;
         form.elements.registrationDocumentsMobileIncludesBloodCard.value = String(includesBloodCard);
         form.elements.registrationDocumentsPdfFile.value = '';
-        document.getElementById('registration-documents-status').textContent = 'PDF preparado. Se guardará al confirmar el registro.';
+        document.getElementById('registration-documents-status').textContent = this.recordEditContext ? 'PDF preparado. Se guardará al confirmar los cambios.' : 'PDF preparado. Se guardará al confirmar el registro.';
       },
       onData: values => {
         if (!isCurrent() || !this.isScanRegistrationPilot()) return;

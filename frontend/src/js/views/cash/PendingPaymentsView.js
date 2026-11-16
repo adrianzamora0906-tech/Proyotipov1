@@ -3,6 +3,7 @@ import SidebarLayout from '../../layouts/SidebarLayout.js';
 import PaymentService from '../../services/PaymentService.js?v=voucher-pago-20260824';
 import StudentService from '../../services/StudentService.js';
 import ApiService from '../../core/api/apiService.js';
+import { downloadReceiptPDF } from '../../services/ReceiptPdf.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
 import { paymentVoidInbox } from '../../services/PaymentVoidInbox.js';
@@ -598,6 +599,7 @@ class PendingPaymentsView extends Component {
         <div class="modal-body">${html}</div>
         <div class="modal-footer">
           <button class="btn btn-secondary" id="receipt-close-btn">Cerrar</button>
+          <button class="btn btn-secondary" id="receipt-pdf">Descargar comprobante PDF</button>
           <button class="btn btn-primary" id="receipt-print">Imprimir voucher</button>
         </div>
       </div>
@@ -614,6 +616,7 @@ class PendingPaymentsView extends Component {
     modal.querySelector('#receipt-close')?.addEventListener('click', close);
     modal.querySelector('#receipt-close-btn')?.addEventListener('click', close);
     modal.querySelector('#receipt-print')?.addEventListener('click', () => this.printReceipt(html));
+    modal.querySelector('#receipt-pdf')?.addEventListener('click', event => downloadReceiptPDF(receiptId, { button: event.currentTarget }));
     modal.addEventListener('click', (event) => {
       if (event.target === modal) close();
     });

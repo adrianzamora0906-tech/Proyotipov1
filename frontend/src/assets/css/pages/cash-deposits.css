@@ -24,5 +24,10 @@
 .cash-deposits table { width: 100%; border-collapse: collapse; }
 .cash-deposits th, .cash-deposits td { padding: 12px; text-align: left; border-bottom: 1px solid #edf0f5; font-size: 13px; }
 .cash-deposits th { color: #64748b; background: #f8fafc; }
+.cash-movement-badge { display: inline-block; padding: 5px 8px; border-radius: 6px; background: #edf2f7; color: #344256; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.cash-movement-badge.is-transfer { background: #e7f7ef; color: #087443; }
+.cash-movement-badge.is-cash { background: #eaf1ff; color: #2459a6; }
+.cash-deposits td strong, .cash-deposits td small { display: block; }
+.cash-deposits td small { margin-top: 3px; color: #64748b; font-size: 12px; }
 @media (max-width: 1000px) { .cash-deposits .cash-deposit-workspace { grid-template-columns: 1fr; } }
 @media (max-width: 480px) { .cash-deposit-entry, .cash-deposit-records { padding: 18px; } .cash-deposits .cash-deposit-form { grid-template-columns: 1fr; } }

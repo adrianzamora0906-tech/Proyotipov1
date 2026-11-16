@@ -5,6 +5,14 @@ const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Guayaq
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const money = value => new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
 const bankName = value => ({ PICHINCHA: 'Banco Pichincha', GUAYAQUIL: 'Banco Guayaquil' })[value] || 'Sin banco registrado';
+const movementRow = row => {
+  const transfer = row.movement_type === 'STUDENT_TRANSFER';
+  const person = transfer
+    ? `<strong>${escape(row.student_name)}</strong><small>Cédula ${escape(row.identification)}</small><small>Registró: ${escape(row.registered_by_name)}</small>`
+    : escape(row.registered_by_name);
+  const movementDate = new Date(`${row.movement_date}T12:00:00Z`).toLocaleDateString('es-EC', { timeZone: 'America/Guayaquil' });
+  return `<tr><td><span class="cash-movement-badge ${transfer ? 'is-transfer' : 'is-cash'}">${transfer ? 'Transferencia confirmada' : 'Depósito de efectivo'}</span></td><td>${person}</td><td>${escape(row.branch_name)}</td><td>${escape(row.bank_name || bankName(row.bank_code))}</td><td>${money(row.amount)}</td><td>${escape(row.note || '—')}</td><td>${escape(movementDate)}</td></tr>`;
+};
 
 export function cashDepositPanel() {
   return `<section class="card cash-panel cash-deposits" aria-labelledby="cash-deposits-title">
@@ -19,7 +27,7 @@ export function cashDepositPanel() {
       </form>` : ''}
       <p id="cash-deposit-message" role="status" aria-live="polite"></p>
       </section>
-      <section class="cash-deposit-records"><div class="cash-deposit-block-heading"><span class="cash-deposit-step">2</span><div><h3>Historial de envíos</h3><p>Consulta los movimientos de tu sucursal.</p></div></div>
+      <section class="cash-deposit-records"><div class="cash-deposit-block-heading"><span class="cash-deposit-step">2</span><div><h3>Movimientos en banco</h3><p>Consulta depósitos de efectivo y transferencias confirmadas de estudiantes.</p></div></div>
       <div class="cash-deposit-filters"><label>Desde<input class="form-input" type="date" id="cash-deposit-from" value="${today()}" required></label><label>Hasta<input class="form-input" type="date" id="cash-deposit-to" value="${today()}" required></label><label>Banco<select class="form-select" id="cash-deposit-bank"><option value="">Todos los bancos</option><option value="PICHINCHA">Banco Pichincha</option><option value="GUAYAQUIL">Banco Guayaquil</option></select></label><label class="cash-deposit-person-filter">Persona<input class="form-input" type="search" id="cash-deposit-person" maxlength="100" placeholder="Nombre o usuario"></label><strong id="cash-deposit-total"></strong></div>
       <div id="cash-deposit-history" aria-live="polite">Cargando envíos…</div>
       </section>
@@ -59,8 +67,8 @@ export function mountCashDepositPanel() {
       const result = await apiClient.get(`/payments/deposit-dispatches?${params}`);
       if (current !== request || !history.isConnected) return;
       if (!result.success) throw new Error(result.error || 'No se pudo consultar el historial');
-      total.textContent = `Total enviado: ${money(result.data.total)} · Pichincha: ${money(result.data.bankTotals?.PICHINCHA)} · Guayaquil: ${money(result.data.bankTotals?.GUAYAQUIL)}`;
-      history.innerHTML = result.data.rows.length ? `<div class="cash-search-table-wrap"><table class="cash-search-table"><thead><tr><th>Registrado por</th><th>Sucursal</th><th>Banco</th><th>Monto enviado</th><th>Observación</th><th>Fecha de registro</th></tr></thead><tbody>${result.data.rows.map(row => `<tr><td>${escape(row.registered_by_name)}</td><td>${escape(row.branch_name)}</td><td>${escape(bankName(row.bank))}</td><td>${money(row.amount)}</td><td>${escape(row.note || '—')}</td><td>${escape(new Date(row.created_at).toLocaleString('es-EC', { timeZone: 'America/Guayaquil' }))}</td></tr>`).join('')}</tbody></table></div>` : '<p>No hay envíos registrados en este rango.</p>';
+      total.textContent = `Total movimientos: ${money(result.data.total)} · Efectivo depositado: ${money(result.data.cashTotal)} · Transferencias de estudiantes: ${money(result.data.studentTransferTotal)} · Pichincha: ${money(result.data.bankTotals?.PICHINCHA)} · Guayaquil: ${money(result.data.bankTotals?.GUAYAQUIL)} · Banco no identificado: ${money(result.data.bankTotals?.OTHER)}`;
+      history.innerHTML = result.data.rows.length ? `<div class="cash-search-table-wrap"><table class="cash-search-table"><thead><tr><th>Tipo</th><th>Persona / registrado por</th><th>Sucursal</th><th>Banco destino</th><th>Monto</th><th>Referencia / observación</th><th>Fecha del movimiento</th></tr></thead><tbody>${result.data.rows.map(movementRow).join('')}</tbody></table></div>` : '<p>No hay movimientos registrados en este rango.</p>';
     } catch (error) { if (current === request && history.isConnected) history.textContent = error.message; }
   };
   const applyFilters = () => {

@@ -129,7 +129,7 @@ class CashOperationsView extends Component {
         })
         .map(
           (x) =>
-            `<article class="cash-ops-item"><div><strong>${esc(x.student_name)}</strong><small>Cédula: ${esc(x.identification)}</small><small>Comprobante: ${esc(x.reference || 'Sin referencia')} · ${esc(x.bank || 'Sin banco')}</small></div><div><strong class="transfer-amount">${money(x.amount)}</strong><small>${this.transferDateLabel(x)}</small></div><div class="cash-ops-state"><span class="cash-ops-badge ${esc(this.needsLegacyApproval(x) ? 'AWAITING_APPROVAL' : x.status)}">${esc(this.transferStatus(x))}</span><div class="cash-ops-actions">${this.transferActions(x)}</div>${x.approved_at ? `<small>${date(x.approved_at)}</small>` : ''}</div></article>`,
+        `<article class="cash-ops-item"><div><strong>${esc(x.student_name)}</strong><small>Cédula: ${esc(x.identification)}</small><small>Comprobante: ${esc(x.reference || 'Sin referencia')} · ${esc(x.confirmed_bank || x.bank || 'Sin banco')}</small></div><div><strong class="transfer-amount">${money(x.amount)}</strong><small>${this.transferDateLabel(x)}</small></div><div class="cash-ops-state"><span class="cash-ops-badge ${esc(this.needsLegacyApproval(x) ? 'AWAITING_APPROVAL' : x.status)}">${esc(this.transferStatus(x))}</span><div class="cash-ops-actions">${this.transferActions(x)}</div>${x.approved_at ? `<small>${date(x.approved_at)}</small>` : ''}</div></article>`,
         )
         .join("") ||
       '<div class="cash-ops-empty"><strong>No hay transferencias para mostrar</strong></div>'
@@ -147,7 +147,7 @@ class CashOperationsView extends Component {
       })
       .map((item) => `<tr class="cash-ops-row ${pending(item) ? 'cash-ops-row--pending' : ''}">
         <td data-label="Estudiante"><strong>${esc(item.student_name)}</strong><small>C&#233;dula ${esc(item.identification)}</small></td>
-        <td data-label="Comprobante"><strong>${esc(item.reference || 'Sin referencia')}</strong><small>${esc(item.bank || 'Sin banco')}</small></td>
+        <td data-label="Comprobante"><strong>${esc(item.reference || 'Sin referencia')}</strong><small>${esc(item.confirmed_bank || item.bank || 'Sin banco')}</small></td>
         <td data-label="Importe"><strong class="transfer-amount">${money(item.amount)}</strong></td>
         <td data-label="Fecha">${esc(this.transferDateLabel(item))}</td>
         <td data-label="Estado"><span class="cash-ops-badge ${esc(this.needsLegacyApproval(item) ? 'AWAITING_APPROVAL' : item.status)}">${esc(this.transferStatus(item))}</span>${item.approved_at ? `<small>${date(item.approved_at)}</small>` : ''}${item.void_request_pending ? '<small class="cash-ops-void-note">Anulación solicitada</small>' : ''}</td>
@@ -170,7 +170,7 @@ class CashOperationsView extends Component {
   matchesTransfer(transfer) {
     const filters = this.transferFilters || {};
     const search = String(filters.search || '').trim().toLocaleLowerCase('es');
-    if (search && ![transfer.student_name, transfer.identification, transfer.reference, transfer.bank].some(value => String(value || '').toLocaleLowerCase('es').includes(search))) return false;
+    if (search && ![transfer.student_name, transfer.identification, transfer.reference, transfer.bank, transfer.confirmed_bank].some(value => String(value || '').toLocaleLowerCase('es').includes(search))) return false;
     const approval = transfer.status === 'AWAITING_APPROVAL' || this.needsLegacyApproval(transfer);
     if (filters.state === 'approval' && !approval) return false;
     if (filters.state === 'confirmation' && transfer.status !== 'PENDING') return false;
@@ -347,6 +347,7 @@ class CashOperationsView extends Component {
     const approval = stage === 'approval';
     if (!transfer || !authService.can(approval ? 'TRANSFER_APPROVE' : 'TRANSFER_VERIFY')) return;
     const rejected = decision === 'REJECTED';
+    const selectingBank = !approval && !rejected && decision === 'CONFIRMED';
     const label = rejected ? 'Rechazar transferencia' : approval ? 'Aprobar transferencia' : 'Confirmar transferencia';
     const effect = rejected ? 'El saldo no se modificará.' : this.needsLegacyApproval(transfer)
       ? 'Pago ya aplicado. Esta aprobación registra la revisión sin modificar el saldo.'
@@ -359,12 +360,14 @@ class CashOperationsView extends Component {
     const host = this.modal({
       title: label,
       save: rejected ? 'Rechazar' : approval ? 'Aprobar' : 'Confirmar',
-      body: `<p class="transfer-review-value">${money(transfer.amount)}</p><div class="transfer-review-name">${esc(transfer.student_name)}</div><dl class="transfer-review-details"><div><dt>Cédula</dt><dd>${esc(transfer.identification)}</dd></div><div><dt>Comprobante</dt><dd>${esc(transfer.reference || 'Sin referencia')}</dd></div><div><dt>Banco</dt><dd>${esc(transfer.bank || 'No especificado')}</dd></div><div><dt>Fecha de transferencia</dt><dd>${this.transferDateLabel(transfer)}</dd></div><div><dt>Confirmación</dt><dd>${date(transfer.reviewed_at)}</dd></div><div><dt>Estado</dt><dd>${esc(this.transferStatus(transfer))}</dd></div></dl>${proof}<div class="alert alert-info">${effect}</div><form id="transfer-review-form"><label class="transfer-review-note">${rejected ? 'Motivo del rechazo' : 'Observación (opcional)'}<textarea name="note" class="form-input" maxlength="1000" ${rejected ? 'required' : ''}></textarea></label></form>`,
+      body: `<p class="transfer-review-value">${money(transfer.amount)}</p><div class="transfer-review-name">${esc(transfer.student_name)}</div><dl class="transfer-review-details"><div><dt>Cédula</dt><dd>${esc(transfer.identification)}</dd></div><div><dt>Comprobante</dt><dd>${esc(transfer.reference || 'Sin referencia')}</dd></div><div><dt>Banco informado</dt><dd>${esc(transfer.bank || 'No especificado')}</dd></div>${approval && transfer.confirmed_bank ? `<div><dt>Banco confirmado</dt><dd>${transfer.confirmed_bank === 'PICHINCHA' ? 'Banco Pichincha' : 'Banco Guayaquil'}</dd></div>` : ''}<div><dt>Fecha de transferencia</dt><dd>${this.transferDateLabel(transfer)}</dd></div><div><dt>Confirmación</dt><dd>${date(transfer.reviewed_at)}</dd></div><div><dt>Estado</dt><dd>${esc(this.transferStatus(transfer))}</dd></div></dl>${proof}<div class="alert alert-info">${effect}</div><form id="transfer-review-form">${selectingBank ? `<label class="transfer-review-note">Banco donde se depositó<select name="bank" class="form-select" required><option value="">Selecciona el banco real</option><option value="PICHINCHA">Banco Pichincha</option><option value="GUAYAQUIL">Banco Guayaquil</option></select></label>${transfer.suggested_bank ? `<small class="transfer-bank-hint">Sugerido por el curso (${esc(transfer.course_name || '')}): ${transfer.suggested_bank === 'PICHINCHA' ? 'Banco Pichincha' : 'Banco Guayaquil'}. Confirma el comprobante; puedes elegir el otro banco.</small>` : ''}` : ''}<label class="transfer-review-note">${rejected ? 'Motivo del rechazo' : 'Observación (opcional)'}<textarea name="note" class="form-input" maxlength="1000" ${rejected ? 'required' : ''}></textarea></label></form>`,
     });
     host.querySelector('#cash-op-save').onclick = async () => {
       const form = host.querySelector('#transfer-review-form');
       if (!form.reportValidity()) return;
       const note = String(new FormData(form).get('note') || '').trim();
+      const bank = selectingBank ? String(new FormData(form).get('bank') || '') : null;
+      if (selectingBank && !['PICHINCHA', 'GUAYAQUIL'].includes(bank)) { host.querySelector('#cash-op-error').textContent = 'Selecciona el banco donde se depositó la transferencia.'; return; }
       if (rejected && !note) { host.querySelector('#cash-op-error').textContent = 'Escribe el motivo del rechazo.'; return; }
       const button = host.querySelector('#cash-op-save');
       button.disabled = true;
@@ -372,7 +375,7 @@ class CashOperationsView extends Component {
       host.querySelectorAll('[data-close]').forEach(control => { control.disabled = true; });
       try {
         const review = approval ? ApiService.approveTransferVerification.bind(ApiService) : ApiService.reviewTransferVerification.bind(ApiService);
-        const result = await review(id, decision, note);
+        const result = await review(id, decision, note, bank);
         Object.assign(transfer, result.data.transfer);
         host.querySelectorAll('[data-close]').forEach(control => { control.disabled = false; });
         host.querySelector('[data-close]').click();

@@ -240,8 +240,8 @@ class ApiService {
     return apiClient.post('/payments/transfer-verifications', data);
   }
 
-  static async reviewTransferVerification(id, decision, note = '') {
-    return apiClient.put(`/payments/transfer-verifications/${id}/review`, { decision, note });
+  static async reviewTransferVerification(id, decision, note = '', bank = null) {
+    return apiClient.put(`/payments/transfer-verifications/${id}/review`, { decision, note, bank });
   }
 
   static async approveTransferVerification(id, decision, note = '') {

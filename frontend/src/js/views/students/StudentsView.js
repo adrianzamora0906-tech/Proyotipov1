@@ -19,7 +19,7 @@ import DateHelper from '../../helpers/DateHelper.js';
 import { isHalloweenPromotionActive } from '../../helpers/HalloweenPromotion.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
-import ApiService from '../../core/api/apiService.js';
+import ApiService from '../../core/api/apiService.js?v=indicaciones-manuales-20261116';
 import { createDocumentImageSheet } from '../../services/DocumentImageSheet.js';
 import { isCedulaOcrPilotUser } from '../../services/CedulaOcrPilot.js';
 import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js';
@@ -6040,7 +6040,7 @@ class StudentsView extends Component {
     const instructorSummary = student.assignedInstructor?.name
       ? `<div class="student-registration-success__notice"><strong>Instructor asignado</strong><small>${escapeHtml(student.assignedInstructor.name)}</small></div>`
       : '';
-    layer.innerHTML = `<section class="branch-modal student-registration-success" role="dialog" aria-modal="true" aria-labelledby="student-access-title"><button type="button" class="student-registration-success__close" id="close-student-access" aria-label="Cerrar modal">×</button><div class="student-registration-success__icon">✓</div><div class="student-registration-success__title"><span>Registro completado</span><h2 id="student-access-title">Estudiante y acceso creados</h2><p>El estudiante, su horario, instructor y cuenta fueron registrados correctamente.</p></div>${instructorSummary}<div class="student-registration-success__notice"><strong>Credenciales de ingreso</strong><small>Entrégalas al estudiante. La contraseña deberá cambiarse al ingresar por primera vez.</small></div><div class="student-access-credentials"><label>Usuario<strong>${escapeHtml(student.access.username)}</strong></label><label>Contraseña temporal<strong>${escapeHtml(student.access.temporaryPassword)}</strong></label></div><p class="student-copy-status" id="student-copy-status" aria-live="polite"></p><div class="student-registration-success__actions"><button type="button" class="btn btn-light" id="copy-student-access">Copiar credenciales</button><button type="button" class="btn btn-primary" id="accept-student-access">Abrir expediente</button></div></section>`;
+    layer.innerHTML = `<section class="branch-modal student-registration-success" role="dialog" aria-modal="true" aria-labelledby="student-access-title"><button type="button" class="student-registration-success__close" id="close-student-access" aria-label="Cerrar modal">×</button><div class="student-registration-success__icon">✓</div><div class="student-registration-success__title"><span>Registro completado</span><h2 id="student-access-title">Estudiante y acceso creados</h2><p>El estudiante, su horario, instructor y cuenta fueron registrados correctamente.</p></div>${instructorSummary}<div class="student-registration-success__notice"><strong>Credenciales de ingreso</strong><small>Entrégalas al estudiante. La contraseña deberá cambiarse al ingresar por primera vez.</small></div><div class="student-access-credentials"><label>Usuario<strong>${escapeHtml(student.access.username)}</strong></label><label>Contraseña temporal<strong>${escapeHtml(student.access.temporaryPassword)}</strong></label></div><p class="student-copy-status" id="student-copy-status" aria-live="polite"></p><p class="form-error" id="student-indications-error" role="alert"></p><div class="student-registration-success__actions"><button type="button" class="btn btn-light" id="copy-student-access">Copiar credenciales</button>${student.enrollment_id ? '<button type="button" class="btn btn-secondary" id="send-registration-indications">Enviar indicaciones</button>' : ''}<button type="button" class="btn btn-primary" id="accept-student-access">Abrir expediente</button></div></section>`;
     document.body.appendChild(layer);
     document.body.style.overflow = 'hidden';
     const closeAccessModal = () => {
@@ -6048,6 +6048,20 @@ class StudentsView extends Component {
       this.closeStudentModal();
     };
     layer.querySelector('#close-student-access').onclick = closeAccessModal;
+    layer.querySelector('#send-registration-indications')?.addEventListener('click', async event => {
+      const button=event.currentTarget;
+      if (button.disabled) return;
+      const status=layer.querySelector('#student-indications-error');
+      button.disabled=true;
+      if (status) status.textContent='';
+      try {
+        const result=await ApiService.sendRegistrationIndications(student.id,student.enrollment_id);
+        if (!result.success) throw new Error(result.error || 'No se pudieron enviar las indicaciones.');
+      } catch (error) {
+        if (status) status.textContent=error.data?.error?.message || error.message || 'No se pudieron enviar las indicaciones.';
+        button.disabled=false;
+      }
+    });
     layer.querySelector('#copy-student-access').onclick = async event => {
       const text = `Usuario: ${student.access.username}\nContraseña temporal: ${student.access.temporaryPassword}`;
       const status = layer.querySelector('#student-copy-status');

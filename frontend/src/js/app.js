@@ -15,7 +15,7 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=manos-restauradas-20261014";
 import DashboardView from "./views/dashboard/DashboardView.js?v=actualizacion-parcial-20261014";
-import StudentsView from "./views/students/StudentsView.js?v=fecha-hora-reserva-20261030";
+import StudentsView from "./views/students/StudentsView.js?v=indicaciones-manuales-20261116";
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=documentos-completos-20261116";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=estudiantes-orden-hora-20261015";
@@ -29,7 +29,7 @@ import CashDepositsView from "./views/cash/CashDepositsView.js";
 import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";
 import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=segunda-matricula-20261015";
 import CashHistoryView from "./views/cash/CashHistoryView.js";
-import CashOperationsView from "./views/cash/CashOperationsView.js?v=constancia-transferencia-20261016";
+import CashOperationsView from "./views/cash/CashOperationsView.js?v=banco-curso-20261116";
 import InstructorDashboardView from "./views/instructor/InstructorDashboardView.js?v=conteo-formacion-20261027";
 import InstructorAgendaView from "./views/instructor/InstructorAgendaView.js?v=estudiantes-por-formacion-20261027";
 import InstructorTheoryView from "./views/instructor/InstructorTheoryView.js?v=dashboard-profesor-teoria-20260907";

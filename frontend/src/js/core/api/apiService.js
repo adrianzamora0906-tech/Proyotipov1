@@ -12,6 +12,10 @@ class ApiService {
   static async updateWeekendGroup(cycleId, instructorId, data) {
     return apiClient.put(`/course-cycles/${encodeURIComponent(cycleId)}/weekend-group/${encodeURIComponent(instructorId)}`, data);
   }
+  static async sendRegistrationIndications(studentId, enrollmentId) {
+    return apiClient.post(`/students/${encodeURIComponent(studentId)}/registration-indications`, {enrollmentId});
+  }
+
   // ── AUTH ──
   static async login(username, password, proof = {}) {
     return apiClient.login(username, password, proof);

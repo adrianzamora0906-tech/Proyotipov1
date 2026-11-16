@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v118-single-email-verification';
+const CACHE_NAME = 'sportmancar-offline-v119-banco-confirmacion';
 const APP_SHELL = [
   '/',
   '/index.html',

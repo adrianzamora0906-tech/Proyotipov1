@@ -715,6 +715,9 @@ export default class AdminBranchesView extends Component {
     const initials = `${user.first_name?.[0] || ''}${user.last_name?.[0] || ''}`.toUpperCase() || 'U';
     const isInstructor = (user.roles || []).some(role => role.code === 'INSTRUCTOR');
     const isSystemAdmin = (user.roles || []).some(role => role.code === 'ADMIN_SYSTEM');
+    const canSuspendInstructor = isInstructor && permissionService.can('USER_DISABLE') && !isSystemAdmin
+      && String(user.id) !== String(authService.getCurrentUser()?.userId);
+    const hasInstructorLoad = (Number(user.active_assigned_student_count) || 0) + (Number(user.future_schedule_student_count) || 0) + (Number(user.active_session_count) || 0) > 0;
     const canResetAccess = permissionService.can('USER_RESET_ACCESS') && !isSystemAdmin;
     const currentUserIsSystemAdmin = authService.getCurrentUser()?.roles?.includes('ADMIN_SYSTEM');
     const canManageRole = (permissionService.can('ROLE_MANAGE') || currentUserIsSystemAdmin) && !isSystemAdmin;
@@ -734,6 +737,7 @@ export default class AdminBranchesView extends Component {
       </div><div class="user-profile-modal__notice user-profile-modal__role-notice" id="edit-user-role-notice" hidden>Al cambiar la función se cerrarán las sesiones y se retirarán los permisos individuales anteriores. Los nuevos accesos se podrán otorgar desde el botón Accesos.</div></section>` : ''}
       <section class="user-profile-modal__section user-profile-modal__security"><div class="user-profile-modal__section-title"><strong>Seguridad de acceso</strong><span>${isSystemAdmin?'La credencial principal está protegida.':'Genera una credencial individual y de un solo uso.'}</span></div>${canResetAccess?'<button type="button" class="btn btn-primary" id="generate-user-temporary-password">Generar clave temporal</button><div class="user-profile-modal__notice">La contraseña actual dejará de funcionar, se cerrarán las sesiones abiertas y el usuario deberá cambiar la nueva clave al ingresar.</div>':'<div class="user-profile-modal__notice">La contraseña del Administrador del sistema no puede cambiarse desde esta interfaz.</div>'}</section>
       ${isInstructor ? `<section class="user-profile-modal__section"><div class="user-profile-modal__section-title"><strong>Disponibilidad del instructor</strong><span>Define los días y bloques en que puede recibir clases.</span></div><button type="button" class="btn btn-primary" id="configure-instructor-availability">Configurar disponibilidad</button></section>` : ''}
+      ${canSuspendInstructor ? `<section class="user-profile-modal__section"><div class="user-profile-modal__section-title"><strong>Estado del instructor</strong><span>${user.active ? "Suspende el acceso y las nuevas asignaciones." : "El acceso y las nuevas asignaciones están suspendidos."}</span></div><button type="button" class="btn btn-secondary" id="toggle-instructor-suspension" ${user.active && hasInstructorLoad ? "disabled" : ""}>${user.active ? "Suspender instructor" : "Reactivar instructor"}</button>${user.active && hasInstructorLoad ? "<div class=\"user-profile-modal__notice\">Reasigna o finaliza las clases y estudiantes activos antes de suspender.</div>" : ""}</section>` : ""}
       <div id="edit-user-profile-status" class="branch-status" aria-live="polite"></div>
       <div class="branch-modal-actions"><button type="button" class="btn close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar perfil</button></div>
     </form></div>`;
@@ -751,6 +755,25 @@ export default class AdminBranchesView extends Component {
     roleSelect?.addEventListener('change', syncRoleFields);
     syncRoleFields();
     modal.querySelector('#configure-instructor-availability')?.addEventListener('click', () => this.openBranchInstructorAvailability(user, body));
+    modal.querySelector('#toggle-instructor-suspension')?.addEventListener('click', async event => {
+      const activate = !user.active;
+      const message = activate
+        ? '¿Reactivar el acceso y las asignaciones de este instructor?'
+        : '¿Suspender al instructor? Se cerrarán sus sesiones y no recibirá nuevas asignaciones.';
+      if (!window.confirm(message)) return;
+      const button = event.currentTarget;
+      const status = modal.querySelector('#edit-user-profile-status');
+      try {
+        button.disabled = true;
+        await AdminService.setActive(user.id, activate, activate ? 'Reactivación desde perfil' : 'Suspensión desde perfil');
+        close();
+        await this.renderStaff(body);
+      } catch (error) {
+        button.disabled = false;
+        status.textContent = error.message || 'No se pudo cambiar el estado del instructor.';
+        status.classList.add('dashboard-error');
+      }
+    });
     modal.querySelector('#generate-user-temporary-password')?.addEventListener('click',async event=>{
       if(!window.confirm(`Se cerrarán las sesiones de ${user.first_name} y su contraseña actual dejará de funcionar. ¿Continuar?`))return;
       const button=event.currentTarget;

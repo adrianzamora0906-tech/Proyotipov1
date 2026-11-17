@@ -32,14 +32,23 @@ export default class AdminService {
   static atmAuthorizationBranches() {
     return apiClient.get("/admin/atm-authorizations/branches");
   }
+  static saveAtmAgencyResponse(id, data) {
+    return apiClient.post(`/admin/atm-authorizations/${encodeURIComponent(id)}/agency-response`, data);
+  }
+  static downloadAtmAgencyResponse(id) {
+    return apiClient.downloadGet(`/admin/atm-authorizations/${encodeURIComponent(id)}/agency-response/pdf`);
+  }
+  static authorizedAtmCourses(params = {}) {
+    return apiClient.get(`/admin/atm-authorizations/authorized-courses${query(params)}`);
+  }
   static downloadAtmAuthorization(id, attachment = "") {
     return apiClient.downloadGet(`/admin/atm-authorizations/${id}/download${attachment ? `?attachment=${attachment}` : ""}`);
   }
   static exportPermitStudents(params = {}) {
-    return apiClient.downloadGet(`/admin/atm-authorizations/permit-students/export${query(params)}`);
+    return apiClient.download('/admin/atm-authorizations/permit-students/export', params);
   }
   static exportPermitStudentIdentifications(params = {}) {
-    return apiClient.downloadGet(`/admin/atm-authorizations/permit-students/identifications.zip${query(params)}`);
+    return apiClient.download('/admin/atm-authorizations/permit-students/identifications.zip', params);
   }
   static permitCourseOptions(params = {}) {
     return apiClient.get(`/admin/atm-authorizations/permit-courses${query(params)}`);

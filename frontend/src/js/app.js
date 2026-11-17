@@ -46,7 +46,7 @@ import AdminSecurityView from "./views/admin/AdminSecurityView.js?v=tipo-instruc
 import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js?v=actualizacion-parcial-20261014";
 import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=suspender-instructor-20261116";
 import ManagerReportsView from "./views/manager/ManagerReportsView.js?v=periodo-compacto-20261023";
-import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=compras-confirmadas-20261020";
+import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=atm-20261117";
 import AdminSettingsView from "./views/admin/AdminSettingsView.js?v=feriados-periodos-20261026";
 import AdminReferralCampaignView from "./views/admin/AdminReferralCampaignView.js";
 import ManagerWorkspaceView from "./views/manager/ManagerWorkspaceView.js";

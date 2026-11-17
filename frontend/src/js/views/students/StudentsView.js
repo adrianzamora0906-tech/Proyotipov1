@@ -5235,7 +5235,9 @@ class StudentsView extends Component {
       if (!input) continue;
       const result = Validator.validate(input.value.trim(), rules);
       if (!result.isValid) {
-        input.parentElement.querySelector('.form-error').textContent = result.errors[0];
+        const errorTarget = input.closest('.form-group')?.querySelector('.form-error')
+          || input.parentElement?.querySelector('.form-error');
+        if (errorTarget) errorTarget.textContent = result.errors[0];
         firstError ||= result.errors[0];
         hasErrors = true;
       }
@@ -5942,7 +5944,9 @@ class StudentsView extends Component {
     const collectPayment = authService.can('PAYMENT_CREATE') && formData.get('collectPayment') === 'on';
     const method = collectPayment ? formData.get('paymentMethod') : 'pendiente';
     if (collectPayment && !method) {
-      document.getElementById('payment-method-error').textContent = 'Selecciona la forma de pago.';
+      const methodError = document.getElementById('payment-method-error');
+      if (methodError) methodError.textContent = 'Selecciona la forma de pago.';
+      this.showModalAlert('error', 'Selecciona la forma de pago.');
       this.goToModalStep(4);
       return;
     }

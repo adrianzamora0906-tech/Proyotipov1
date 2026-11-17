@@ -19,10 +19,10 @@ import DateHelper from '../../helpers/DateHelper.js';
 import { isHalloweenPromotionActive } from '../../helpers/HalloweenPromotion.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
-import ApiService from '../../core/api/apiService.js';
+import ApiService from '../../core/api/apiService.js?v=practicas-guardar-20261116';
 import { createDocumentImageSheet } from '../../services/DocumentImageSheet.js';
 import { isCedulaOcrPilotUser } from '../../services/CedulaOcrPilot.js';
-import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js?v=arrastrar-cedula-20261112';
+import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js?v=escaner-edicion-20261113';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -1018,31 +1018,16 @@ class StudentsView extends Component {
                 ${observationsField('regular-enrollment-observations-field')}
                 </div>
                 <div class="additional-practice-only additional-practice-schedule" hidden>
-                  <div class="student-modal-section-title"><h3>Programar prácticas adicionales</h3></div>
-                  <div class="form-row">
-                    <div class="form-group"><label class="form-label required">Instructor</label><select class="form-select" name="additionalPracticeInstructor"><option value="">Seleccionar instructor...</option></select><div class="form-error" id="additional-practice-instructor-error"></div></div>
-                    <div class="form-group"><label class="form-label required">Mostrar días desde</label><input type="date" class="form-input" name="additionalPracticeStartDate"><div class="form-error" id="additional-practice-date-error"></div></div>
+                  <div class="form-group">
+                    <label class="form-label" for="additional-practice-course-preview">Curso</label>
+                    <select class="form-select" id="additional-practice-course-preview">
+                      <option value="">Selecciona carro o moto...</option>
+                      <option value="carro">Clase B - Autom&oacute;vil</option>
+                      <option value="moto">Clase A - Moto</option>
+                    </select>
                   </div>
-                  <div class="form-row">
-                    <div class="additional-practice-time-section">
-                      <span class="form-label required">Horario diario</span>
-                      <div class="additional-practice-time-grid" role="group" aria-label="Selecciona una franja horaria">
-                        ${[['06:00','07:40'],['08:00','09:40'],['10:00','11:40'],['12:00','13:40'],['14:00','15:40'],['16:00','17:40'],['18:00','19:40'],['20:00','21:40']].map(([start,end]) => `<button type="button" class="additional-practice-time-option" data-additional-practice-time="${start}" aria-pressed="false"><strong>${start} – ${end}</strong><span>Seleccionar</span></button>`).join('')}
-                      </div>
-                      <input type="hidden" name="additionalPracticeTime" value="">
-                      <div class="form-error" id="additional-practice-time-error"></div>
-                    </div>
-                    <div class="form-group"><label class="form-label required">Duración</label><select class="form-select" name="additionalPracticeDays"><option value="">Seleccionar...</option>${[3,4,5,6,7,8].map(days => `<option value="${days}">${days} días</option>`).join('')}</select></div>
-                  </div>
-                  <section class="additional-practice-days-section">
-                    <div class="additional-practice-days-heading"><strong>Selecciona los días de práctica</strong><span id="additional-practice-days-count">0 seleccionados</span></div>
-                    <div id="additional-practice-days-grid" class="additional-practice-days-grid" role="group" aria-label="Días disponibles para prácticas"></div>
-                  </section>
-                  <input type="hidden" name="additionalPracticeDates" value="[]">
-                  <div class="form-row additional-practice-price-row">
-                    <div class="additional-practice-price-card"><span>Total de la práctica</span><strong id="additional-practice-total">$0,00</strong><small id="additional-practice-rate">La tarifa se calcula según el historial.</small></div>
-                  </div>
-                  <div id="additional-practice-availability" class="additional-practice-availability" hidden></div>
+                  <div id="additional-practice-calendar-preview" hidden></div>
+
                 </div>
                 ${observationsField('additional-practice-only additional-practice-observations-field')}
               </section>
@@ -1299,6 +1284,13 @@ class StudentsView extends Component {
     form?.querySelector('[name="additionalPracticeDays"]')?.addEventListener('change', () => this.renderAdditionalPracticeDateOptions());
     form?.querySelector('[name="additionalPracticeStartDate"]')?.addEventListener('change', () => this.renderAdditionalPracticeDateOptions());
     form?.querySelector('[name="additionalPracticeFormerStudent"]')?.addEventListener('change', () => this.updateAdditionalPracticePrice());
+    form?.querySelector('#additional-practice-course-preview')?.addEventListener('change', () => {
+      this.additionalPracticeCalendarOffset = 0;
+      this.additionalPracticeCalendarCycleIndex = 0;
+      this.additionalPracticeSelections = [];
+      this.additionalPracticeCalendarInstructor = null;
+      this.loadAdditionalPracticeCalendar();
+    });
     form?.querySelectorAll('[data-additional-practice-time]').forEach(button => button.addEventListener('click', () => {
       if (button.hidden) return;
       const input = form.querySelector('[name="additionalPracticeTime"]');
@@ -1830,13 +1822,20 @@ class StudentsView extends Component {
 
   updateAdditionalPracticePrice() {
     const form = document.getElementById('student-modal-form');
-    const days = Number(form?.querySelector('[name="additionalPracticeDays"]')?.value || 0);
+    const days = Array.isArray(this.additionalPracticeSelections)
+      ? this.additionalPracticeSelections.length
+      : Number(form?.querySelector('[name="additionalPracticeDays"]')?.value || 0);
     const former = this.isFormerAdditionalPracticeStudent();
     const rate = former ? 17 : 20;
     const total = days === 8 ? 136 : days * rate;
     const totalNode = document.getElementById('additional-practice-total');
     const rateNode = document.getElementById('additional-practice-rate');
-    if (totalNode) totalNode.textContent = `$${total.toFixed(2).replace('.', ',')}`;
+    if (totalNode) totalNode.textContent = `${total.toFixed(2).replace('.', ',')}`;
+    const previewFormer = document.getElementById('additional-practice-preview-former');
+    const formerInput = form?.querySelector('[name="additionalPracticeFormerStudent"]');
+    if (previewFormer && formerInput) { previewFormer.checked = former; previewFormer.disabled = formerInput.disabled; }
+    const previewTotal = document.getElementById('additional-practice-preview-total');
+    if (previewTotal) previewTotal.textContent = `Total estimado: ${total.toFixed(2).replace('.', ',')} · ${former ? 'exestudiante' : 'persona externa'}`;
     if (rateNode) rateNode.textContent = days === 8 ? 'Paquete fijo de 8 días para todos.' : `${former ? 'Exestudiante' : 'Persona externa'}: $${rate} por día.`;
     const payment = form?.querySelector('[name="paymentAmount"]');
     if (payment && days) payment.value = total.toFixed(2);
@@ -1884,6 +1883,151 @@ class StudentsView extends Component {
     }
     const benefitLabel = benefit === 'COMBO' ? 'Combo' : benefit === 'POLICE' ? 'Policía' : 'Estudiante universitario';
     summary.innerHTML = `Valor del curso: <strong>$${price.toFixed(2)}</strong> · Descuento: <strong>$${Math.min(discount, maximumDiscount).toFixed(2)}</strong> · Total final: <strong>$${Math.max(price - discount, minimumFinalAmount).toFixed(2)}</strong>${hasApplicableBenefit ? ` · Convenio: <strong>${benefitLabel}</strong>` : (isCarCourse ? ' · Mínimo permitido: <strong>$175.00</strong>' : '')}`;
+  }
+
+  async loadAdditionalPracticeCalendar() {
+    const form = document.getElementById('student-modal-form');
+    const host = document.getElementById('additional-practice-calendar-preview');
+    const type = form?.querySelector('#additional-practice-course-preview')?.value;
+    if (!host) return;
+    host.hidden = !type;
+    if (!type) { host.innerHTML = ''; return; }
+    const branch = form?.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId();
+    if (!branch) { host.textContent = 'Selecciona una sucursal.'; return; }
+    const request = this.additionalPracticeCalendarRequest = (this.additionalPracticeCalendarRequest || 0) + 1;
+    host.textContent = 'Consultando horarios...';
+    try {
+      const params = { branch_id: branch, vehicle_type: type, modality: 'normal', include_occupied: 'true' };
+      const instructor = this.additionalPracticeCalendarInstructor;
+      const base = await ApiService.getCourseEnrollmentOptions(params);
+      const baseSchedules = base?.success ? this.flattenEnrollmentOptions(base.data || []) : [];
+      const first = baseSchedules.find(item => (item.instructors || []).length);
+      const selectedInstructor = instructor || first?.instructors?.[0]?.id || null;
+      let schedules = baseSchedules;
+      if (selectedInstructor) {
+        const filtered = await ApiService.getCourseEnrollmentOptions({ ...params, instructor_id: selectedInstructor });
+        if (!filtered?.success) throw new Error('No se pudo consultar al instructor');
+        schedules = this.mergeEnrollmentSchedules(baseSchedules, this.flattenEnrollmentOptions(filtered.data || []), selectedInstructor);
+      }
+      if (request !== this.additionalPracticeCalendarRequest || !host.isConnected) return;
+      this.additionalPracticeCalendarInstructor = selectedInstructor;
+      const previousInstructor = this.scheduleInstructorFilterId;
+      this.scheduleInstructorFilterId = selectedInstructor;
+      host.innerHTML = this.renderCourseCalendar(type, schedules.filter(item => this.getScheduleCourseKey(item.course) === type), 'normal');
+      this.scheduleInstructorFilterId = previousInstructor;
+      const cycleSet = host.querySelector('.enrollment-cycle-set');
+      const calendars = cycleSet ? [...cycleSet.querySelectorAll(':scope > .enrollment-calendar')] : [];
+      if (calendars.length) {
+        let cycleIndex = Math.min(Math.max(0, this.additionalPracticeCalendarCycleIndex || 0), calendars.length - 1);
+        const nav = document.createElement('nav');
+        nav.className = 'calendar-window-controls';
+        nav.setAttribute('aria-label', 'Cambiar fechas disponibles');
+        nav.innerHTML = '<button type="button" class="calendar-window-btn" data-practice-cycle="-1">← Anterior</button><span data-practice-cycle-label></span><button type="button" class="calendar-window-btn" data-practice-cycle="1">Próximo →</button>';
+        host.prepend(nav);
+        const showCycle = () => {
+          calendars.forEach((calendar,index) => { calendar.style.display = index === cycleIndex ? 'block' : 'none'; });
+          this.additionalPracticeCalendarCycleIndex = cycleIndex;
+          nav.querySelector('[data-practice-cycle-label]').textContent = `Fechas ${cycleIndex + 1} de ${calendars.length}`;
+          nav.querySelector('[data-practice-cycle="-1"]').disabled = cycleIndex === 0;
+          nav.querySelector('[data-practice-cycle="1"]').disabled = cycleIndex === calendars.length - 1;
+          this.updateCalendarWindow(calendars[cycleIndex]);
+        };
+        nav.querySelectorAll('[data-practice-cycle]').forEach(button => button.addEventListener('click', () => {
+          cycleIndex = Math.min(Math.max(0, cycleIndex + Number(button.dataset.practiceCycle)), calendars.length - 1);
+          showCycle();
+        }));
+        showCycle();
+      }
+      if (type === 'moto') {
+        host.querySelectorAll('.enrollment-calendar-row').forEach(row => {
+          const time = row.querySelector('.enrollment-calendar-time');
+          const start = time?.textContent.match(/\d{1,2}:\d{2}/)?.[0];
+          if (!start) return;
+          const [hour,minute] = start.split(':').map(Number);
+          const endMinutes = hour * 60 + minute + 150;
+          if (endMinutes >= 1440) { row.hidden = true; return; }
+          const end = String(Math.floor(endMinutes / 60)).padStart(2,'0') + ':' + String(endMinutes % 60).padStart(2,'0');
+          time.textContent = start + ' – ' + end;
+          row.querySelectorAll('.schedule-option[data-time]').forEach(cell => {
+            cell.dataset.time = start + ' - ' + end;
+            const status=cell.querySelector('.schedule-option-status');
+            const capacity=cell.querySelector('.schedule-option-capacity');
+            if(status && !cell.disabled) status.textContent='Por verificar';
+            if(capacity && !cell.disabled) capacity.textContent='150 minutos';
+          });
+        });
+      }
+      host.querySelectorAll('.enrollment-calendar-head').forEach(element => { element.hidden = true; });
+      host.querySelectorAll('.schedule-rotation-toggle,[data-instructor-availability-toggle]').forEach(element => { element.hidden = true; });
+      host.querySelectorAll('.enrollment-cycle-instructors strong').forEach(element => { element.textContent = 'Disponibilidad por instructor'; });
+      const selections = this.additionalPracticeSelections ||= [];
+      const summary = document.createElement('p');
+      summary.setAttribute('aria-live', 'polite');
+      const price = document.createElement('strong');
+      price.id = 'additional-practice-preview-total';
+      price.style.display = 'block';
+      price.style.margin = '8px 0';
+      const priceRow = document.createElement('div');
+      priceRow.style.display = 'flex';
+      priceRow.style.flexWrap = 'wrap';
+      priceRow.style.alignItems = 'center';
+      priceRow.style.justifyContent = 'space-between';
+      priceRow.style.gap = '8px 16px';
+      const formerLabel = document.createElement('label');
+      formerLabel.style.display = 'inline-flex';
+      formerLabel.style.alignItems = 'center';
+      formerLabel.style.gap = '8px';
+      formerLabel.innerHTML = '<input type="checkbox" id="additional-practice-preview-former"> Ya fue estudiante de la escuela';
+      formerLabel.querySelector('input').addEventListener('change', event => {
+        const original = form.querySelector('[name="additionalPracticeFormerStudent"]');
+        if (!original) return;
+        original.checked = event.target.checked;
+        original.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      priceRow.append(price, formerLabel);
+      host.prepend(summary, priceRow);
+      const refreshSelection = () => {
+        this.updateAdditionalPracticePrice();
+        host.querySelectorAll('.schedule-option[data-date][data-time]').forEach(cell => {
+          const selected = selections.some(item => item.date === cell.dataset.date && item.time === cell.dataset.time);
+          cell.classList.toggle('selected', selected);
+          const color = selections.length >= 3 ? '#16a34a' : '#dc2626';
+          cell.style.borderColor = selected ? color : '';
+          cell.style.boxShadow = selected ? `inset 0 0 0 2px ${color}` : '';
+          cell.style.backgroundColor = selected ? (selections.length >= 3 ? '#ecfdf5' : '#fef2f2') : '';
+          cell.setAttribute('aria-pressed', String(selected));
+        });
+      };
+      host.querySelectorAll('.schedule-option[data-date][data-time]').forEach(cell => {
+        if (cell.disabled || cell.classList.contains('disabled') || cell.dataset.dailyAvailable === '0') return;
+        cell.setAttribute('aria-pressed', 'false');
+        cell.addEventListener('click', () => {
+          const date = cell.dataset.date, time = cell.dataset.time;
+          const index = selections.findIndex(item => item.date === date && item.time === time);
+          if (index >= 0) selections.splice(index,1);
+          else {
+            const sameDay = selections.findIndex(item => item.date === date);
+            if (sameDay >= 0) selections.splice(sameDay,1);
+            if (selections.length >= 8) { this.showModalAlert('error','Puedes seleccionar hasta 8 días de práctica.'); return; }
+            selections.push({ date,time });
+          }
+          refreshSelection();
+        });
+      });
+      refreshSelection();
+      host.querySelectorAll('.calendar-window-btn[data-direction]').forEach(button => button.addEventListener('click', () => this.shiftCalendarWindow(button.closest('.enrollment-calendar'), Number(button.dataset.direction))));
+      host.querySelectorAll('.enrollment-calendar').forEach(calendar => this.updateCalendarWindow(calendar));
+      host.querySelectorAll('[data-course-instructor-id]').forEach(button => button.addEventListener('click', () => {
+        if (this.additionalPracticeCalendarInstructor !== button.dataset.courseInstructorId && this.additionalPracticeSelections?.length) {
+          this.additionalPracticeSelections = [];
+          this.showModalAlert('info', 'Se limpió la selección al cambiar de instructor.');
+        }
+        this.additionalPracticeCalendarInstructor = button.dataset.courseInstructorId;
+        this.loadAdditionalPracticeCalendar();
+      }));
+    } catch (error) {
+      if (request === this.additionalPracticeCalendarRequest) host.textContent = error.message || 'No se pudieron consultar los horarios.';
+    }
   }
 
   scheduleAdditionalPracticeAvailability() {
@@ -3550,7 +3694,10 @@ class StudentsView extends Component {
       }
       if (!context.canFinance && form.elements.discountAmount) form.elements.discountAmount.disabled = true;
       if (!context.canSchedule && form.elements.course_id) form.elements.course_id.disabled = true;
-      form.querySelector('[name="firstName"]')?.focus();
+      const editSection = new URLSearchParams(window.location.search).get('editSection');
+      if (editSection === 'datos') this.goToModalStep(2);
+      else if (editSection === 'horario') this.goToModalStep(1);
+      if (editSection !== 'horario') form.querySelector('[name="firstName"]')?.focus();
     } catch (error) {
       this.preparingRecordEdit = false;
       if (!document.getElementById('student-modal-overlay')?.classList.contains('active')) this.openStudentModal();
@@ -3779,6 +3926,9 @@ class StudentsView extends Component {
     clearTimeout(this.additionalPracticeLookupTimer);
     clearTimeout(this.additionalPracticeResolutionTimer);
     form?.reset();
+    const practicePreview = document.getElementById('additional-practice-calendar-preview');
+    if (practicePreview) { practicePreview.hidden = true; practicePreview.innerHTML = ''; }
+    this.additionalPracticeSelections = [];
     // REGLA PROTEGIDA: cerrar el modal siempre descarta el borrador completo.
     // form.reset() no basta para opciones agregadas dinamicamente ni para el
     // estado visual/interno de los calendarios de horarios.
@@ -3969,6 +4119,13 @@ class StudentsView extends Component {
     if (this.scheduleSelectionChecking) return;
     if (document.getElementById('student-modal-form')?.dataset.initializing === 'true') return;
     const currentStep = this.getCurrentModalStep();
+    if (currentStep === 1 && document.querySelector('#student-modal-form [name="additionalPractice"]')?.checked) {
+      const count = this.additionalPracticeSelections?.length || 0;
+      if (count < 3 || count > 8 || !this.additionalPracticeCalendarInstructor) {
+        this.showModalAlert('error', 'Selecciona un instructor y entre 3 y 8 días de práctica.');
+        return;
+      }
+    }
     if (currentStep === 1 && !this.validateScheduleFirstStep()) return;
     if (currentStep === 2 && !this.validateStudentFields()) return;
     if (currentStep === 2 && !this.validateExistingStudentCourse()) return;
@@ -4205,7 +4362,7 @@ class StudentsView extends Component {
 
   mountInlineRegistrationCapture() {
     const form = document.getElementById('student-modal-form');
-    if (!form || !authService.can('DOCUMENT_CREATE') || this.recordEditContext || this.activatingReservation
+    if (!form || !authService.can('DOCUMENT_CREATE') || this.activatingReservation
       || form.querySelector('[name="registrationMode"]:checked')?.value !== 'regular') return;
     if (form.querySelector('[data-inline-registration-capture] [data-local-scanner-dialog]')) return;
     this.registrationCapture?.dispose();
@@ -4223,6 +4380,7 @@ class StudentsView extends Component {
     // La captura integrada reemplaza los controles duplicados; conservar los
     // campos en el formulario permite guardar los PDF con el flujo existente.
     pane.querySelectorAll(':scope > .student-modal-section-title, :scope > .registration-capture-alternatives, :scope > .registration-bachiller-check, :scope > .registration-certificate-field, :scope > #registration-documents-status').forEach(element => {
+      if (this.recordEditContext && (element.matches('.registration-bachiller-check') || element.id === 'registration-documents-status')) return;
       element.style.display = 'none';
     });
     const isCurrent = () => form.isConnected && authService.can('DOCUMENT_CREATE') && form.querySelector('[name="registrationMode"]:checked')?.value === 'regular';
@@ -4243,7 +4401,7 @@ class StudentsView extends Component {
         form.elements.registrationDocumentsMobileFileUrl.value = fileUrl;
         form.elements.registrationDocumentsMobileIncludesBloodCard.value = String(includesBloodCard);
         form.elements.registrationDocumentsPdfFile.value = '';
-        document.getElementById('registration-documents-status').textContent = 'PDF preparado. Se guardará al confirmar el registro.';
+        document.getElementById('registration-documents-status').textContent = this.recordEditContext ? 'PDF preparado. Se guardará al confirmar los cambios.' : 'PDF preparado. Se guardará al confirmar el registro.';
       },
       onData: values => {
         if (!isCurrent() || !this.isScanRegistrationPilot()) return;
@@ -5098,7 +5256,9 @@ class StudentsView extends Component {
       if (!input) continue;
       const result = Validator.validate(input.value.trim(), rules);
       if (!result.isValid) {
-        input.parentElement.querySelector('.form-error').textContent = result.errors[0];
+        const errorTarget = input.closest('.form-group')?.querySelector('.form-error')
+          || input.parentElement?.querySelector('.form-error');
+        if (errorTarget) errorTarget.textContent = result.errors[0];
         firstError ||= result.errors[0];
         hasErrors = true;
       }
@@ -5771,46 +5931,43 @@ class StudentsView extends Component {
     const documentFile = formData.get('additionalPracticeDocumentsFile');
     const mobileDocumentUrl = formData.get('additionalPracticeMobileFileUrl');
     const hasMobileDocument = typeof mobileDocumentUrl === 'string' && mobileDocumentUrl.startsWith('data:application/pdf');
-    const instructorId = formData.get('additionalPracticeInstructor');
-    const startDate = formData.get('additionalPracticeStartDate');
-    const dailyTime = formData.get('additionalPracticeTime');
-    const days = Number(formData.get('additionalPracticeDays'));
-    let selectedDates = [];
-    try { selectedDates = JSON.parse(formData.get('additionalPracticeDates') || '[]'); } catch {}
+    const instructorId = this.additionalPracticeCalendarInstructor;
+    const vehicleType = form.querySelector('#additional-practice-course-preview')?.value;
+    const selections = [...(this.additionalPracticeSelections || [])].sort((a,b) => a.date.localeCompare(b.date));
+    const sessions = selections.map(item => ({date:item.date,start_time:String(item.time || '').match(/\d{1,2}:\d{2}/)?.[0] || ''}));
+    const days = sessions.length;
+    const selectedDates = sessions.map(item=>item.date);
+    const dailyTime = sessions[0]?.start_time;
+    const branchId = form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId();
     const hasDocumentFile = Boolean(documentFile && documentFile.size > 0);
     if (!hasMobileDocument && (hasDocumentFile || mobileDocumentUrl) && !this.isPdfFile(documentFile) && !this.isImageFile(documentFile)) {
-      const error = document.getElementById('additional-practice-document-error');
-      if (error) error.textContent = 'Selecciona un PDF o toma una foto del documento.';
+      this.showModalAlert('error', 'Selecciona un PDF o toma una foto del documento.');
       this.goToModalStep(3);
       return;
     }
-    if (!instructorId || !startDate || !dailyTime || !Number.isInteger(days) || days < 3 || days > 8 || selectedDates.length !== days) {
-      if (!instructorId) document.getElementById('additional-practice-instructor-error').textContent = 'Selecciona un instructor.';
-      if (!startDate) document.getElementById('additional-practice-date-error').textContent = 'Selecciona la fecha de inicio.';
-      if (!dailyTime) document.getElementById('additional-practice-time-error').textContent = 'Selecciona un horario.';
-      if (selectedDates.length !== days) document.getElementById('additional-practice-date-error').textContent = `Marca exactamente ${days} fechas en el calendario.`;
-      this.showModalAlert('error', 'Completa la programación de las prácticas.');
+    if (!instructorId || !['carro','moto'].includes(vehicleType) || days < 3 || days > 8 || sessions.some(item=>!item.start_time)) {
+      this.showModalAlert('error', 'Selecciona un instructor y entre 3 y 8 días de práctica.');
       this.goToModalStep(1);
       return;
     }
-    const availability = await StudentService.checkAdditionalPracticeAvailability({
-      instructor_id: instructorId,
-      start_date: selectedDates[0],
-      daily_start_time: dailyTime,
-      number_of_days: days,
-      schedule_dates: selectedDates.join(','),
-      branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId(),
-    });
-    if (!availability.success || !availability.data?.available) {
-      this.showModalAlert('error', availability.error || 'El instructor no está disponible. Acepta una sugerencia de instructor o cambia la fecha antes de continuar.');
+    try {
+      const availability = await ApiService.previewAdditionalPracticeSchedule({
+        branch_id:branchId,instructor_id:instructorId,vehicle_type:vehicleType,sessions,
+        student_id:this.additionalPracticeStudent?.id || null,
+      });
+      if (!availability.success || !availability.data?.available) throw new Error(
+        availability.data?.conflicts?.length ? 'El horario ya está ocupado en: '+availability.data.conflicts.join(', ') : 'No se pudo validar el horario.');
+    } catch(error) {
+      this.showModalAlert('error',error.message || 'No se pudo validar el horario.');
       this.goToModalStep(1);
-      await this.checkAdditionalPracticeAvailability();
       return;
     }
     const collectPayment = authService.can('PAYMENT_CREATE') && formData.get('collectPayment') === 'on';
     const method = collectPayment ? formData.get('paymentMethod') : 'pendiente';
     if (collectPayment && !method) {
-      document.getElementById('payment-method-error').textContent = 'Selecciona la forma de pago.';
+      const methodError = document.getElementById('payment-method-error');
+      if (methodError) methodError.textContent = 'Selecciona la forma de pago.';
+      this.showModalAlert('error', 'Selecciona la forma de pago.');
       this.goToModalStep(4);
       return;
     }
@@ -5846,6 +6003,7 @@ class StudentsView extends Component {
       const practice = await StudentService.createAdditionalPractice(student.id, {
         branch_id: form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || authService.getEffectiveBranchId(),
         instructor_id: instructorId, number_of_days: days,
+        vehicle_type: vehicleType, sessions,
         schedule_dates: selectedDates,
         start_date: selectedDates[0], daily_start_time: dailyTime, payment_method: method,
         customer_type: this.isFormerAdditionalPracticeStudent() ? 'FORMER_STUDENT' : 'EXTERNAL',

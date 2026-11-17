@@ -13,7 +13,12 @@ import ScheduleService from '../../services/ScheduleService.js';
 import NotificationService from '../../services/NotificationService.js';
 import DateHelper from '../../helpers/DateHelper.js';
 import StringHelper from '../../helpers/StringHelper.js';
+import { renderQrDataUrl } from '../../lib/qrcodeRealLocal.js';
 import { authService } from '../../core/auth/AuthService.js';
+
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+})[char]);
 
 class StudentProfileView extends Component {
   async render() {
@@ -64,6 +69,7 @@ class StudentProfileView extends Component {
     } catch (error) {
       console.warn('No se pudo cargar el horario desde la API:', error.message);
     }
+    this.studentSchedule = schedule;
     const history = await StudentService.getStudentHistory(studentId);
     const pendingBalance = Math.max(0, Number(balanceInfo?.balance || 0));
     const paidAmount = Number(balanceInfo?.paid ?? totalPaid);
@@ -236,6 +242,7 @@ class StudentProfileView extends Component {
                     <div class="info-item"><span class="info-label">Curso</span><span class="info-value">${student.course || 'Sin curso asignado'}</span></div>
                     <div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${student.instructorName || schedule?.instructor || 'Sin instructor asignado'}${isExamOnly ? ' <span class="student-exam-inline">Intensivo</span>' : ''}</span></div>
                     <div class="info-item"><span class="info-label">Inicio de clases</span><span class="info-value">${classStartDateLabel}</span></div>
+                    <div class="info-item"><span class="info-label">Horario de pr&aacute;cticas</span><span class="info-value">${escapeHtml(schedule?.type !== 'theory_only' && schedule?.time ? schedule.time : 'Sin horario asignado')}</span></div>
                   `}
                   <div class="info-item">
                     <span class="info-label">Estado</span>
@@ -419,8 +426,9 @@ class StudentProfileView extends Component {
                       </article>
                     `).join('')}
                   </div>
-                ` : schedule ? `
+                ` : schedule && schedule.type !== 'theory_only' ? `
                   <div class="schedule-info">
+                    <div class="student-profile-schedule-heading"><strong>Pr&aacute;cticas</strong></div>
                     ${isExamOnly ? '<div class="student-exam-schedule-heading"><span class="badge badge-info">Formaci&oacute;n intensiva</span><strong>Jornada intensiva programada</strong></div>' : ''}
                     <div class="info-grid">
                       <div class="info-item">
@@ -446,6 +454,7 @@ class StudentProfileView extends Component {
                   <p style="color: var(--gray-500); margin-bottom: 1rem;">No tiene horario asignado</p>
                   <button class="btn btn-primary" id="select-schedule-btn">Seleccionar Horario</button>
                 `}
+                ${!isAdditionalPracticeOnly && activeEnrollment ? this.renderTheorySchedule(schedule?.theory) : ''}
                 ${!isAdditionalPracticeOnly && !activeEnrollment ? '<div class="alert alert-warning mt-4">Este estudiante aun no tiene una matricula activa para seleccionar horario.</div>' : ''}
               </div>
             </div>
@@ -497,6 +506,32 @@ class StudentProfileView extends Component {
     return layout;
   }
 
+  renderTheorySchedule(theory) {
+    const modalityLabels = {
+      presencial_regular: 'Presencial · lunes a viernes',
+      presencial_intensivo: String(theory?.startTime || '').slice(0, 5) >= '13:00'
+        ? 'Intensivo · turno de tarde' : 'Intensivo · turno de mañana',
+      virtual: 'Teoría virtual',
+    };
+    const dateLabel = value => value ? DateHelper.format(`${String(value).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY') : '';
+    const period = theory?.startDate && theory?.endDate
+      ? `${dateLabel(theory.startDate)} al ${dateLabel(theory.endDate)}`
+      : theory?.modality === 'virtual' ? 'Sin fechas presenciales' : 'Pendiente de asignación';
+    const time = theory?.modality === 'virtual'
+      ? 'Sábado y domingo: 18:00–22:00 · Lunes a viernes: 20:00–22:00 · Examen: viernes 21:00'
+      : theory?.startTime && theory?.endTime ? `${theory.startTime}–${theory.endTime}` : 'Por confirmar';
+    return `<section class="student-profile-theory-schedule" style="margin-top:24px;">
+      <div class="student-profile-schedule-heading"><strong>Teor&iacute;a</strong></div>
+      <div class="info-grid">
+        <div class="info-item"><span class="info-label">Modalidad</span><span class="info-value">${escapeHtml(modalityLabels[theory?.modality] || 'Por confirmar')}</span></div>
+        <div class="info-item"><span class="info-label">Fechas</span><span class="info-value">${escapeHtml(period)}</span></div>
+        <div class="info-item"><span class="info-label">Hora</span><span class="info-value">${escapeHtml(time)}</span></div>
+        ${theory?.modality === 'virtual' ? '' : `<div class="info-item"><span class="info-label">Instructor</span><span class="info-value">${escapeHtml(theory?.instructor || 'Por asignar')}</span></div>`}
+      </div>
+      ${authService.can('SCHEDULE_CHANGE') ? '<button type="button" class="btn btn-secondary mt-4" id="change-theory-schedule-btn">Cambiar teor&iacute;a</button>' : ''}
+    </section>`;
+  }
+
   async mount() {
     const studentId = this.props.studentId;
 
@@ -518,15 +553,7 @@ class StudentProfileView extends Component {
 
     // Buttons
     document.getElementById('edit-student-btn')?.addEventListener('click', () => {
-      const student = this.student;
-      const practiceOnly = student?.registrationType === 'ADDITIONAL_PRACTICE'
-        || ((student?.additionalPractices || []).length > 0 && !(student?.enrollments || []).length);
-      if (authService.can('STUDENT_UPDATE') && !practiceOnly) {
-        window.history.pushState(null, null, `/students/new?edit=${encodeURIComponent(studentId)}`);
-        window.dispatchEvent(new PopStateEvent('popstate'));
-      } else {
-        this.openEditStudentModal(studentId);
-      }
+      this.openEditChoiceModal(studentId);
     });
 
     document.getElementById('reset-student-access-btn')?.addEventListener('click', () => {
@@ -671,6 +698,7 @@ class StudentProfileView extends Component {
     const openScheduleModal = () => this.openScheduleModal(studentId);
     document.getElementById('select-schedule-btn')?.addEventListener('click', openScheduleModal);
     document.getElementById('change-schedule-btn')?.addEventListener('click', openScheduleModal);
+    document.getElementById('change-theory-schedule-btn')?.addEventListener('click', () => this.openTheoryScheduleModal(studentId));
 
     this.updateNotificationBadge();
   }
@@ -828,6 +856,50 @@ class StudentProfileView extends Component {
     });
   }
 
+  openEditChoiceModal(studentId) {
+    const modal = document.getElementById('profile-action-modal');
+    if (!modal) return;
+    const student = this.student;
+    const practiceOnly = student?.registrationType === 'ADDITIONAL_PRACTICE'
+      || ((student?.additionalPractices || []).length > 0 && !(student?.enrollments || []).length);
+    const canEdit = authService.can('STUDENT_UPDATE');
+    const canChangeInstructor = canEdit && !practiceOnly
+      && (authService.can('SCHEDULE_CHANGE') || authService.can('SCHEDULE_ASSIGN'));
+    modal.innerHTML = `
+      <div class="modal profile-edit-choice-modal" role="dialog" aria-modal="true" aria-labelledby="profile-edit-choice-title">
+        <div class="modal-header"><h3 class="modal-title" id="profile-edit-choice-title">¿Qué deseas editar?</h3><button type="button" class="modal-close" data-close-modal aria-label="Cerrar">×</button></div>
+        <div class="modal-body">
+          <p class="profile-edit-choice-intro">Elige qué información deseas actualizar.</p>
+          <div class="profile-edit-choices">
+            ${canEdit ? `<button type="button" class="profile-edit-choice" data-edit-personal>
+              <span class="profile-edit-choice-icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></span>
+              <span class="profile-edit-choice-label">Editar datos <small>Actualiza la información personal del estudiante.</small></span>
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+            </button>` : ''}
+            ${canChangeInstructor ? `<button type="button" class="profile-edit-choice profile-edit-choice--schedule" data-edit-instructor>
+              <span class="profile-edit-choice-icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18M8 14h3M8 17h5"/></svg></span>
+              <span class="profile-edit-choice-label">Cambiar instructor u horario <small>Modifica la asignación de sus clases prácticas.</small></span>
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+            </button>` : ''}
+          </div>
+          ${!canEdit ? '<p>No tienes permiso para editar este estudiante.</p>' : ''}
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-close-modal>Cancelar</button></div>
+      </div>`;
+    modal.classList.add('active');
+    this.bindProfileModalClose(modal);
+    const openFullEditor = section => {
+      this.closeProfileModal(false);
+      window.history.pushState(null, null, `/students/new?edit=${encodeURIComponent(studentId)}&editSection=${section}`);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    };
+    modal.querySelector('[data-edit-personal]')?.addEventListener('click', () => {
+      if (practiceOnly) this.openEditStudentModal(studentId);
+      else openFullEditor('datos');
+    });
+    modal.querySelector('[data-edit-instructor]')?.addEventListener('click', () => openFullEditor('horario'));
+  }
+
   async openEditStudentModal(studentId) {
     const modal = document.getElementById('profile-action-modal');
     const student = this.student || await StudentService.getStudent(studentId);
@@ -860,7 +932,7 @@ class StudentProfileView extends Component {
               </div>
               <div class="form-group" style="flex:1; min-width:180px;">
                 <label class="form-label">Fecha de nacimiento</label>
-                <input type="date" class="form-input" name="birthDate" value="${student.birthDate || ''}">
+                <input type="date" class="form-input" name="birthDate" value="${student.birthDate ? String(student.birthDate).slice(0, 10) : ''}">
               </div>
             </div>
 
@@ -1030,9 +1102,15 @@ class StudentProfileView extends Component {
     }
   }
 
-  openPaymentModal({ studentId, cedula, balance }) {
+  async openPaymentModal({ studentId, cedula, balance }) {
     const modal = document.getElementById('profile-action-modal');
     if (!modal || balance <= 0) return;
+    let courseBalances;
+    try { courseBalances = (await PaymentService.getStudentBalance(studentId)).enrollments || []; }
+    catch (error) { alert(error.message || 'No se pudieron consultar los saldos por curso.'); return; }
+    const pendingCourses = courseBalances.filter(course => Number(course.balance) > 0);
+    let enrollmentId = pendingCourses[0]?.id;
+    if (pendingCourses.length) balance = Number(pendingCourses[0].balance);
     modal.innerHTML = `
       <div class="modal" style="max-width: 520px;">
         <div class="modal-header">
@@ -1042,6 +1120,7 @@ class StudentProfileView extends Component {
         <div class="modal-body">
           <p style="margin-top:0">Saldo pendiente: <strong>$${balance.toFixed(2)}</strong></p>
           <form id="profile-payment-form">
+            ${pendingCourses.length ? `<div class="form-group"><label class="form-label">Curso a cobrar</label><select class="form-input" name="enrollmentId">${pendingCourses.map(course=>`<option value="${escapeHtml(course.id)}">${escapeHtml(course.course)} — $${Number(course.balance).toFixed(2)} pendiente</option>`).join('')}</select></div>` : ''}
             <div class="form-group">
               <label class="form-label">Monto a cobrar</label>
               <input class="form-input" name="amount" type="number" min="0.01" max="${balance}" step="0.01" value="${balance.toFixed(2)}" required>
@@ -1065,6 +1144,15 @@ class StudentProfileView extends Component {
     modal.classList.add('active');
     this.bindProfileModalClose(modal);
 
+    modal.querySelector('[name="enrollmentId"]')?.addEventListener('change', event => {
+      const selected = pendingCourses.find(course => course.id === event.target.value);
+      enrollmentId = selected.id;
+      balance = Number(selected.balance);
+      const amount = modal.querySelector('[name="amount"]');
+      amount.max = String(balance); amount.value = balance.toFixed(2);
+      modal.querySelector('.modal-body > p strong').textContent = `$${balance.toFixed(2)}`;
+    });
+
     modal.querySelector('#profile-pay-submit')?.addEventListener('click', async () => {
       const form = modal.querySelector('#profile-payment-form');
       if (!form.reportValidity()) return;
@@ -1078,6 +1166,7 @@ class StudentProfileView extends Component {
       submit.textContent = 'Registrando…';
       const result = await PaymentService.registerPayment({
         studentId,
+        enrollmentId,
         cedula,
         amount,
         method: new FormData(form).get('method'),
@@ -1184,6 +1273,76 @@ class StudentProfileView extends Component {
     modal.onclick = event => {
       if (event.target === modal) this.closeProfileModal(refreshOnClose);
     };
+  }
+
+  async openTheoryScheduleModal(studentId) {
+    const modal = document.getElementById('profile-action-modal');
+    if (!modal) return;
+    modal.innerHTML = '<div class="modal"><div class="modal-body">Consultando horarios de teor&iacute;a...</div></div>';
+    modal.classList.add('active');
+    try {
+      const student = this.student || {};
+      const enrollment = (student.enrollments || []).find(item => item.status === 'activo')
+        || (student.enrollments || [])[0];
+      if (!enrollment || !student.branchId) throw new Error('El estudiante no tiene una matrícula activa.');
+      const response = await ApiService.getTheoryEnrollmentOptions({
+        branch_id: student.branchId,
+        course_id: enrollment.course_id,
+      });
+      if (!response.success) throw new Error(response.error || 'No se pudieron cargar los horarios de teoría.');
+      const options = response.data || [];
+      const current = this.studentSchedule?.theory || {};
+      const currentSelection = current.modality === 'presencial_intensivo'
+        ? (String(current.startTime || '').slice(0, 5) >= '13:00' ? 'presencial_intensivo_13' : 'presencial_intensivo_08')
+        : current.modality || 'por_confirmar';
+      const dateLabel = value => value ? DateHelper.format(`${String(value).slice(0, 10)}T12:00:00`, 'DD/MM/YYYY') : '';
+      const renderOption = option => {
+        const startDate = option.full ? option.nextAvailableStartDate : option.startDate;
+        const endDate = option.full ? option.nextAvailableEndDate : option.endDate;
+        const available = Number(option.full ? option.nextAvailable : option.available);
+        return `<label class="enrollment-modality-button ${option.unavailable ? 'theory-capacity-unavailable' : ''}">
+          <input type="radio" name="profileTheoryChange" value="${escapeHtml(option.value)}"
+            ${option.value === currentSelection ? 'checked' : ''} ${option.unavailable ? 'disabled' : ''}>
+          <strong>${escapeHtml(option.value === 'presencial_regular' ? 'Presencial · lunes a viernes' : option.startTime >= '13:00' ? 'Intensivo · turno de tarde' : 'Intensivo · turno de mañana')}</strong>
+          <span>${option.unavailable ? escapeHtml(option.message || 'No disponible') : `${dateLabel(startDate)} al ${dateLabel(endDate)} · ${option.startTime}–${option.endTime} · ${available} cupos`}</span>
+        </label>`;
+      };
+      modal.innerHTML = `
+        <div class="modal profile-schedule-modal" role="dialog" aria-modal="true">
+          <div class="modal-header"><h3 class="modal-title">Cambiar horario de teor&iacute;a</h3><button class="modal-close" data-close-modal>&times;</button></div>
+          <div class="modal-body">
+            <div class="theory-schedule-selector" id="profile-theory-change-options">
+              <label class="enrollment-modality-button"><input type="radio" name="profileTheoryChange" value="por_confirmar" ${currentSelection === 'por_confirmar' ? 'checked' : ''}><strong>Por confirmar</strong><span>La modalidad se definir&aacute; despu&eacute;s</span></label>
+              ${options.map(renderOption).join('')}
+              <label class="enrollment-modality-button"><input type="radio" name="profileTheoryChange" value="virtual" ${currentSelection === 'virtual' ? 'checked' : ''}><strong>Teor&iacute;a virtual</strong><span>Clases de lunes a domingo</span></label>
+            </div>
+            <div class="form-error" id="profile-theory-change-error"></div>
+          </div>
+          <div class="modal-footer"><button class="btn btn-secondary" data-close-modal>Cancelar</button><button class="btn btn-primary" id="confirm-profile-theory-change">Guardar teor&iacute;a</button></div>
+        </div>`;
+      this.bindProfileModalClose(modal);
+      const host = modal.querySelector('#profile-theory-change-options');
+      host.querySelectorAll('input').forEach(input => input.addEventListener('change', () => {
+        host.querySelectorAll('.enrollment-modality-button').forEach(label => label.classList.toggle('active', label.contains(input)));
+      }));
+      host.querySelector('input:checked')?.closest('.enrollment-modality-button')?.classList.add('active');
+      modal.querySelector('#confirm-profile-theory-change')?.addEventListener('click', async event => {
+        const selection = modal.querySelector('[name="profileTheoryChange"]:checked')?.value;
+        const errorHost = modal.querySelector('#profile-theory-change-error');
+        if (!selection) { errorHost.textContent = 'Selecciona un horario de teoría.'; return; }
+        try {
+          event.currentTarget.disabled = true;
+          await ApiService.changeStudentTheory(studentId, selection);
+          this.closeProfileModal(true);
+        } catch (error) {
+          event.currentTarget.disabled = false;
+          errorHost.textContent = error.message || 'No se pudo cambiar el horario de teoría.';
+        }
+      });
+    } catch (error) {
+      modal.innerHTML = `<div class="modal"><div class="modal-header"><h3 class="modal-title">Cambiar horario de teor&iacute;a</h3><button class="modal-close" data-close-modal>&times;</button></div><div class="modal-body"><div class="form-error">${escapeHtml(error.message || 'No se pudieron cargar los horarios.')}</div></div></div>`;
+      this.bindProfileModalClose(modal);
+    }
   }
 
   async openScheduleModal(studentId) {
@@ -1756,7 +1915,7 @@ class StudentProfileView extends Component {
       const uploadUrl = localOrigin && token.localUploadUrl
         ? token.localUploadUrl
         : `${window.location.origin}/mobile-upload/${token.token}`;
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(uploadUrl)}`;
+      const qrUrl = await renderQrDataUrl(uploadUrl, { width: 220, margin: 12 });
 
       modal.innerHTML = `
         <div class="modal mobile-capture-modal">
@@ -1863,7 +2022,7 @@ class StudentProfileView extends Component {
       const uploadUrl = localOrigin && token.localUploadUrl
         ? token.localUploadUrl
         : `${window.location.origin}/mobile-upload/${token.token}`;
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(uploadUrl)}`;
+      const qrUrl = await renderQrDataUrl(uploadUrl, { width: 220, margin: 12 });
 
       modal.innerHTML = `
         <div class="modal mobile-capture-modal">

@@ -7,7 +7,7 @@ const service = await readFile(new URL('../../backend/services/ScheduleService.j
 
 test('el perfil muestra practica y teoria desde el horario del estudiante', () => {
   assert.match(profile, /Pr&aacute;cticas/);
-  assert.match(profile, /renderTheorySchedule\(schedule\.theory\)/);
+  assert.match(profile, /renderTheorySchedule\(schedule\?\.theory\)/);
   assert.match(profile, /Teor&iacute;a/);
   assert.match(service, /theory_group_students/);
   assert.match(service, /theory_course_groups/);

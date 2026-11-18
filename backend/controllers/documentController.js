@@ -74,10 +74,13 @@ class DocumentController {
 
       await DocumentService.assertStudentAccess(req.params.studentId,await require('./studentController').writeScope(req));
       const document = await DocumentService.create(req.params.studentId, req.body, req.user, req.requestContext);
+      const responseDocument = req.query.compact === 'true'
+        ? require('../services/compactDocumentResponse')(document)
+        : document;
 
       return res.status(201).json({
         success: true,
-        data: document,
+        data: responseDocument,
       });
     } catch (error) {
       next(error);

@@ -161,8 +161,8 @@ class ApiService {
     return apiClient.get(`/students/${studentId}/documents`);
   }
 
-  static async createDocument(studentId, data) {
-    return apiClient.post(`/students/${studentId}/documents`, data);
+  static async createDocument(studentId, data, options = {}) {
+    return apiClient.post(`/students/${studentId}/documents${options.compact ? '?compact=true' : ''}`, data);
   }
 
   static async getStudentInstructors(branchId = null) {

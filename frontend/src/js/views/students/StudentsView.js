@@ -19,7 +19,7 @@ import DateHelper from '../../helpers/DateHelper.js';
 import { isHalloweenPromotionActive } from '../../helpers/HalloweenPromotion.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
-import ApiService from '../../core/api/apiService.js?v=practicas-guardar-20261116';
+import ApiService from '../../core/api/apiService.js?v=registro-documentos-agil-20261118';
 import { createDocumentImageSheet } from '../../services/DocumentImageSheet.js';
 import { isCedulaOcrPilotUser } from '../../services/CedulaOcrPilot.js';
 import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js';
@@ -5605,7 +5605,7 @@ class StudentsView extends Component {
         const response = await ApiService.createDocument(student.id, {
           type: 'certificado_bachiller',
           cedulaIndicatesBachiller: true,
-        });
+        }, { compact: true });
         if (!response.success) throw new Error(response.error || 'No se pudo guardar la confirmacion de bachiller.');
       } else if (formData.get('certificadoBachillerMobileFileUrl')) {
         await this.uploadModalDocumentFromDataUrl(student.id, 'certificado_bachiller', formData.get('certificadoBachillerMobileFileUrl'), 'Certificado de estudio');
@@ -6087,7 +6087,7 @@ class StudentsView extends Component {
   }
 
   async uploadModalDocumentFromDataUrl(studentId, type, fileUrl, name) {
-    const response = await ApiService.createDocument(studentId, { type, name, fileUrl });
+    const response = await ApiService.createDocument(studentId, { type, name, fileUrl }, { compact: true });
     if (!response.success) throw new Error(response.error || `No se pudo guardar ${name}`);
   }
 
@@ -6101,14 +6101,14 @@ class StudentsView extends Component {
       name: includesBloodCard ? 'Cédula y carnet de tipo sanguíneo' : 'Cédula de identidad',
       fileUrl,
       includesBloodCard,
-    });
+    }, { compact: true });
     if (!response.success) throw new Error(response.error || 'No se pudo guardar el PDF combinado');
   }
 
   async uploadModalDocument(studentId, type, file, name) {
     if (!file || !file.name) return;
     const fileUrl = await this.readFileAsDataUrl(file);
-    const response = await ApiService.createDocument(studentId, { type, name: name || file.name, fileUrl });
+    const response = await ApiService.createDocument(studentId, { type, name: name || file.name, fileUrl }, { compact: true });
     if (!response.success) throw new Error(response.error || `No se pudo guardar ${name || file.name}`);
   }
 

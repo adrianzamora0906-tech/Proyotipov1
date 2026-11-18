@@ -1853,7 +1853,7 @@ class StudentProfileView extends Component {
       try {await this.openCourseCycleScheduleModal(studentId,modal,select.value,{allowInstructorFeedback});}
       catch(error){select.disabled=false;modal.querySelector('#profile-schedule-error').textContent=error.message||'No se pudo consultar la disponibilidad. Vuelve a elegir el instructor.';modal.querySelector('#confirm-profile-schedule').disabled=true;}
     });
-    if (cycle) this.mountProfileScheduleModal(modal, studentId);
+    if (cycle) this.mountProfileScheduleModal(modal, studentId, { allowInstructorFeedback });
   }
 
   renderCurrentPracticeAssignments(cycle) {
@@ -1951,7 +1951,7 @@ class StudentProfileView extends Component {
     `;
   }
 
-  mountProfileScheduleModal(modal, studentId) {
+  mountProfileScheduleModal(modal, studentId, { allowInstructorFeedback = false } = {}) {
     modal.querySelectorAll('.schedule-option').forEach(option => {
       option.addEventListener('click', () => this.handleProfileScheduleCellClick(modal, option));
     });

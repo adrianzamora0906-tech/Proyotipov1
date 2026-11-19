@@ -1,10 +1,13 @@
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 
 export default class AtmNominaEditor {
-  constructor(host, onChange) {
+  constructor(host, onChange, lookupIdentity) {
     this.host = host;
     this.onChange = onChange;
+    this.lookupIdentity = lookupIdentity;
+    this.identityVersion = 0;
     this.rows = [];
+    this.added = new Map();
     this.manual = [];
     this.excluded = new Set();
     this.editIndex = null;
@@ -13,8 +16,8 @@ export default class AtmNominaEditor {
       <details class="atm-manual-editor"><summary>Añadir alumno manualmente</summary>
         <p>No crea estudiantes ni matrículas en el ERP. Los campos con * son obligatorios.</p>
         <div class="atm-form-grid">
-          <label>Apellidos y nombres *<input data-manual-key="student_name" maxlength="200" placeholder="Apellidos y nombres completos"></label>
           <label>Cédula o pasaporte *<input data-manual-key="identification" maxlength="20" placeholder="Identificación"></label>
+          <label>Apellidos y nombres *<input data-manual-key="student_name" maxlength="200" placeholder="Apellidos y nombres completos"></label>
           <label>Fecha de nacimiento<input type="date" data-manual-key="birth_date"></label>
           <label>Tipo de sangre<select data-manual-key="blood_type"><option value="">Sin dato</option>${['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(value=>`<option>${value}</option>`).join('')}</select></label>
           <label>Nacionalidad<input data-manual-key="nationality" maxlength="80" value="ECUATORIANO"></label>
@@ -47,16 +50,51 @@ export default class AtmNominaEditor {
         this.onChange();
       }
     });
+    host.querySelector('[data-manual-key="identification"]').addEventListener('blur',()=>this.checkIdentity());
+    host.querySelector('[data-manual-key="identification"]').addEventListener('input',()=>{this.identityVersion++;this.checkedIdentification=null;this.identityResult=null;});
     this.renderRows();
+  }
+  async checkIdentity() {
+    const field=this.host.querySelector('[data-manual-key="identification"]');
+    const identification=field.value.trim().toUpperCase();
+    if(!/^[A-Z0-9-]{5,20}$/.test(identification))return false;
+    const version=++this.identityVersion;
+    const error=this.host.querySelector('.atm-manual-error');
+    error.textContent='Verificando identificación…';
+    try {
+      if(!this.lookupIdentity)throw Error('No se pudo verificar la identificación.');
+      const response=await this.lookupIdentity(identification);
+      if(version!==this.identityVersion)return false;
+      const result=response.data||response;
+      this.identityResult=result;this.checkedIdentification=identification;
+      if(result.student)for(const key of ['student_name','birth_date','blood_type','nationality'])this.host.querySelector('[data-manual-key="'+key+'"]').value=result.student[key]||'';
+      error.textContent=result.registered?result.message:'Identificación no registrada. Puedes completar los datos para esta nómina.';
+      return true;
+    }catch(e){if(version===this.identityVersion){this.checkedIdentification=null;error.textContent=e.message==='Selecciona una sucursal antes de verificar la cédula.'?e.message:'No se pudo verificar la identificación. Intenta nuevamente antes de añadir.';}return false;}
   }
   clear() {
     this.editIndex = null;
+    this.identityVersion++;this.checkedIdentification=null;this.identityResult=null;
     for (const field of this.host.querySelectorAll('[data-manual-key]')) field.value = '';
     this.host.querySelector('[data-manual-key="nationality"]').value = 'ECUATORIANO';
     this.host.querySelector('[data-manual-save]').textContent = 'Añadir a la nómina';
     this.host.querySelector('.atm-manual-error').textContent = '';
   }
-  save() {
+  async save() {
+    const identification=this.host.querySelector('[data-manual-key="identification"]').value.trim().toUpperCase();
+    if(this.checkedIdentification!==identification && !await this.checkIdentity())return;
+    if(this.identityResult?.registered){
+      const result=this.identityResult,error=this.host.querySelector('.atm-manual-error');
+      if(result.blocked||!result.enrollment){error.textContent=result.message;return;}
+      const row=result.enrollment;
+      if(this.rows.some(other=>other.identification===row.identification&&!this.excluded.has(other.enrollment_id))||this.manual.some(other=>other.identification===row.identification)){error.textContent='Esta identificación ya está incluida en la nómina.';return;}
+      this.added.set(row.enrollment_id,row);
+      this.excluded.delete(row.enrollment_id);
+      if(!this.rows.some(other=>other.enrollment_id===row.enrollment_id))this.rows.push(row);
+      this.clear();this.renderRows();this.onChange();
+      error.textContent='Estudiante registrado añadido con su matrícula existente. Quedará excluido de futuras nóminas al confirmar la compra.';
+      return;
+    }
     const row = Object.fromEntries([...this.host.querySelectorAll('[data-manual-key]')].map(field=>[field.dataset.manualKey,field.value.trim().toUpperCase()]));
     row.nationality ||= 'ECUATORIANO';
     row.identification = row.identification.toUpperCase();
@@ -76,14 +114,16 @@ export default class AtmNominaEditor {
     this.renderRows();
     this.onChange();
   }
-  setRows(rows) { this.rows=rows; this.renderRows(); }
-  reset() {this.rows=[];this.manual=[];this.excluded.clear();this.clear();this.renderRows();}
+  setRows(rows) { this.rows=[...rows,...[...this.added.values()].filter(row=>!rows.some(other=>other.enrollment_id===row.enrollment_id))]; this.renderRows(); }
+  reset() {this.added.clear();this.rows=[];this.manual=[];this.excluded.clear();this.clear();this.renderRows();}
   get registeredCount() {return this.rows.filter(row=>!this.excluded.has(row.enrollment_id)).length;}
   get count() {return this.registeredCount+this.manual.length;}
-  payload() {return {manualStudents:this.manual,excludedEnrollmentIds:[...this.excluded]};}
+  payload() {return {manualStudents:this.manual,excludedEnrollmentIds:[...this.excluded],includedEnrollmentIds:[...this.added.keys()].filter(id=>!this.excluded.has(id))};}
   renderRows() {
-    this.host.querySelector('tbody').innerHTML = this.rows.map(row=>`<tr><td><input type="checkbox" aria-label="Incluir a ${esc(row.student_name)}" data-enrollment="${esc(row.enrollment_id)}" ${this.excluded.has(row.enrollment_id)?'':'checked'}></td><td>${esc(row.student_name)}</td><td>${esc(row.identification)}</td><td>Sistema</td><td>—</td></tr>`).join('')
-      + this.manual.map((row,index)=>`<tr class="atm-manual-row"><td>✓</td><td>${esc(row.student_name)}</td><td>${esc(row.identification)}</td><td>Manual · solo nómina</td><td><button type="button" class="btn btn-small" data-edit="${index}">Editar</button><button type="button" class="btn btn-small" data-remove="${index}">Quitar</button></td></tr>`).join('')
+    this.host.querySelector('tbody').innerHTML = this.rows.map(row=>({name:row.last_name_first||row.student_name,html:`<tr><td><input type="checkbox" aria-label="Incluir a ${esc(row.last_name_first||row.student_name)}" data-enrollment="${esc(row.enrollment_id)}" ${this.excluded.has(row.enrollment_id)?'':'checked'}></td><td>${esc(row.last_name_first||row.student_name)}</td><td>${esc(row.identification)}</td><td>Sistema</td><td>—</td></tr>`}))
+      .concat(this.manual.map((row,index)=>({name:row.student_name,html:`<tr class="atm-manual-row"><td>✓</td><td>${esc(row.last_name_first||row.student_name)}</td><td>${esc(row.identification)}</td><td>Manual · solo nómina</td><td><button type="button" class="btn btn-small" data-edit="${index}">Editar</button><button type="button" class="btn btn-small" data-remove="${index}">Quitar</button></td></tr>`})))
+      .sort((a,b)=>a.name.trim().localeCompare(b.name.trim(),'es',{sensitivity:'base'}))
+      .map(row=>row.html).join('')
       || '<tr><td colspan="5">Sin alumnos en la nómina. Selecciona un curso y sus fechas o añade una fila manual.</td></tr>';
   }
 }

@@ -4761,7 +4761,7 @@ class StudentsView extends Component {
       return;
     }
     option.classList.add('selected');
-    if (!this.hasValidConsecutiveDoubleDays(calendar)) {
+    if (!this.hasAtMostFourDoubleDays(calendar)) {
       option.classList.remove('selected');
       if (error) error.textContent = 'Puedes doblar horas en máximo cuatro días. Selecciona hasta 8 clases (2 bloques por día máximo en 4 días diferentes).';
       return;
@@ -4845,17 +4845,14 @@ class StudentsView extends Component {
     this.updateCalendarWindow(refreshed);
   }
 
-  hasValidConsecutiveDoubleDays(calendar) {
+  hasAtMostFourDoubleDays(calendar) {
     const selectionsByDate = new Map();
     calendar.querySelectorAll('.schedule-option.selected').forEach(cell => {
       const items = selectionsByDate.get(cell.dataset.date) || [];
       items.push(cell);
       selectionsByDate.set(cell.dataset.date, items);
     });
-    const doubledDays = [...selectionsByDate.values()]
-      .filter(items => items.length === 2)
-      .map(items => Number(items[0].dataset.dayIndex))
-      .sort((left, right) => left - right);
+    const doubledDays = [...selectionsByDate.values()].filter(items => items.length === 2);
     // Solo validar que no haya más de 4 días dobles. Permitir días no consecutivos.
     if (doubledDays.length > 4) return false;
     return true;

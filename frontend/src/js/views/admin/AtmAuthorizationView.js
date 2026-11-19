@@ -1055,7 +1055,7 @@ export default class AtmAuthorizationView extends Component {
           </label>
 
           <label>
-            Buscar alumnos matriculados desde
+            Buscar pagos desde
 
             <input
               type="date"
@@ -1066,7 +1066,7 @@ export default class AtmAuthorizationView extends Component {
           </label>
 
           <label>
-            Buscar alumnos matriculados hasta
+            Buscar pagos hasta
 
             <input
               type="date"
@@ -1110,9 +1110,9 @@ export default class AtmAuthorizationView extends Component {
         </div>
 
         <p id="atm-permit-official-dates" class="atm-course-status atm-course-status-compact">Selecciona un curso para consultar las fechas oficiales del Word.</p>
-        <p class="atm-permit-date-help">Puedes ampliar las fechas de búsqueda para incluir alumnos pendientes de otros períodos. Las fechas oficiales del curso en el Word se mantienen.</p>
+        <p class="atm-permit-date-help">El rango corresponde a la fecha en que el alumno alcanzó el pago requerido. Las fechas oficiales del curso en el Word se mantienen.</p>
         <div id="atm-permit-course-status" class="atm-course-status atm-course-status-compact">
-          Selecciona las fechas de matrícula.
+          Selecciona las fechas de pago.
         </div>
 
         <div class="atm-permit-summary" id="atm-permit-summary"></div>
@@ -1145,7 +1145,11 @@ export default class AtmAuthorizationView extends Component {
 
   bindPermitCourseSelection() {
     const form=document.getElementById('atm-office-form');
-    this.nominaEditor = new AtmNominaEditor(document.getElementById('atm-nomina-editor'),()=>this.updatePermitNominaCount());
+    this.nominaEditor = new AtmNominaEditor(document.getElementById('atm-nomina-editor'),()=>this.updatePermitNominaCount(), identification=>{
+      const filters=this.permitDateFilters();
+      if(!filters.branchId)throw Error('Selecciona una sucursal antes de verificar la cédula.');
+      return AdminService.lookupAtmNominaIdentity({...filters,identification});
+    });
     for(const selector of ['[name="branchId"]','#atm-permit-course-type']) {
       form?.querySelector(selector)?.addEventListener('change',()=>this.loadAuthorizedPermitCourses());
     }
@@ -1259,7 +1263,7 @@ export default class AtmAuthorizationView extends Component {
     const valid = !this.permitLoading && Boolean(this.selectedAuthorizedPermitCourse());
     this.permitEligibleCount = this.nominaEditor.count;
     document.getElementById('atm-permit-student-count').value = this.permitEligibleCount;
-    if (valid) document.getElementById('atm-permit-course-status').textContent = `${this.nominaEditor.registeredCount} alumnos elegibles del sistema + ${this.nominaEditor.manual.length} filas manuales = ${this.permitEligibleCount} alumnos en la nómina. Requisito: $165 abonados o precio promocional menor cubierto; incluye transferencias pendientes sin aprobarlas.`;
+    if (valid) document.getElementById('atm-permit-course-status').textContent = `${this.nominaEditor.registeredCount} alumnos elegibles del sistema + ${this.nominaEditor.manual.length} filas manuales = ${this.permitEligibleCount} alumnos en la nómina. Requisito: $125 en moto ($115 con promoción) y $165 en auto; incluye transferencias pendientes sin aprobarlas.`;
     for (const button of [form.querySelector('[type="submit"]'),document.getElementById('atm-download-permit-excel'),document.getElementById('atm-download-permit-identifications')]) {
       if (button) button.disabled = !valid || !this.permitEligibleCount;
     }

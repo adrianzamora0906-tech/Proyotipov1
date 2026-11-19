@@ -19,7 +19,7 @@ import DateHelper from '../../helpers/DateHelper.js';
 import { isHalloweenPromotionActive } from '../../helpers/HalloweenPromotion.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
-import ApiService from '../../core/api/apiService.js?v=practicas-guardar-20261116';
+import ApiService from '../../core/api/apiService.js?v=registro-documentos-agil-20261118';
 import { createDocumentImageSheet } from '../../services/DocumentImageSheet.js';
 import { isCedulaOcrPilotUser } from '../../services/CedulaOcrPilot.js';
 import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js?v=escaner-edicion-20261113';
@@ -37,6 +37,9 @@ class StudentsView extends Component {
     const currentPage = Math.max(Number(queryParams.get('page')) || 1, 1);
     const searchQuery = queryParams.get('search') || queryParams.get('q') || '';
     const identificationSearch = /^\d{10}$/.test(searchQuery.trim());
+    const identityResult=identificationSearch?await ApiService.globalStudentIdentification(searchQuery.trim()):null;
+    const matchedIdentity=identityResult?.data?.find(row=>row.kind==='reservation'&&row.status==='reservado')||identityResult?.data?.find(row=>row.kind==='student');
+    const identityStatus=this.identityCardStatus(matchedIdentity);
     const selectedRegistrationType = queryParams.get('registration_type') || 'REGULAR';
     this.registrationType = selectedRegistrationType;
     const listParams = {};
@@ -46,7 +49,7 @@ class StudentsView extends Component {
     else if (!queryParams.get('branch_id')) listParams.scope = 'all';
     if (queryParams.get('branch_id')) listParams.branch_id = queryParams.get('branch_id');
     if (searchQuery) listParams.search = searchQuery;
-    const selectedStatus = identificationSearch ? '' : queryParams.has('status') ? queryParams.get('status') : (isBranchAdmin ? 'active' : '');
+    const selectedStatus = identificationSearch ? identityStatus : queryParams.has('status') ? queryParams.get('status') : (isBranchAdmin ? 'active' : '');
     const statusFilterOptions = [
       ['', 'Todos los estados'],
       ['active', 'Matriculados o en curso'],
@@ -310,6 +313,15 @@ class StudentsView extends Component {
     this.startAutomaticRefresh();
   }
 
+  identityCardStatus(row) {
+    if(row?.status==='reservado')return 'reservado';
+    if(row?.status==='inhabilitado')return 'inhabilitado';
+    if(['pendiente_pago','pago_parcial'].includes(row?.status))return 'payment_pending';
+    if(['pendiente_documentacion','pendiente_documentos','pendiente_doc','pending_documents'].includes(row?.status))return 'documents_pending';
+    if(['activo','matriculado','en_curso'].includes(row?.status))return 'active';
+    return '';
+  }
+
   goToRegistrationPage() {
     this.openStudentModal();
   }
@@ -346,6 +358,18 @@ class StudentsView extends Component {
     container.style.opacity = '0.55';
 
     try {
+      const exactIdentification=String(params.search||'').trim();
+      if(/^\d{10}$/.test(exactIdentification)){
+        const result=await ApiService.globalStudentIdentification(exactIdentification);
+        if(requestId!==this.studentListRequestId)return;
+        if(!result.success)throw Error('No se pudo consultar la cédula.');
+        const rows=result.data||[];
+        const match=rows.find(row=>row.kind==='reservation'&&row.status==='reservado')||rows.find(row=>row.kind==='student');
+        params={...params,status:this.identityCardStatus(match)};
+        const status=document.querySelector('#student-filter-form [name="status"]');
+        if(status)status.value=params.status;
+      }
+      document.getElementById('student-registration-tabs').hidden=false;
       const paginatedParams = { ...params, paginated: true, page: requestedPage, group: this.groupBy };
       const showingReservations = params.status === 'reservado';
       const studentsPromise = showingReservations ? Promise.resolve({ students: [], total: 0, page: requestedPage })
@@ -952,6 +976,12 @@ class StudentsView extends Component {
                 </div>
 
                 <div class="regular-enrollment-only schedule-workflow">
+                <div class="form-group">
+                  <label class="form-label" for="registration-instructor-search">Buscar instructor</label>
+                  <input type="search" class="form-input" id="registration-instructor-search" placeholder="Escribe el nombre del instructor" autocomplete="off">
+                  <small id="registration-instructor-search-status" role="status" aria-live="polite"></small>
+                  <div id="registration-instructor-search-results" hidden></div>
+                </div>
                 <input type="hidden" name="practicalMode" id="selected-practical-mode" value="classes">
                 <div class="external-instructor-selector" id="external-instructor-selector" hidden></div>
                 <div class="schedule-setup-grid">
@@ -1275,6 +1305,7 @@ class StudentsView extends Component {
       if (event.target.closest('[data-clear-referrer]')) this.clearReferralStaff();
     });
     form?.querySelector('[name="cedula"]')?.addEventListener('input', event => {
+      this.setReservationIdentityLock(false);
       if (!this.validateCedulaLive(event.target)) return;
       if (form.querySelector('[name="additionalPractice"]')?.checked) this.scheduleAdditionalPracticeResolution(event.target.value);
       else this.scheduleRegistrationIdentityLookup(event.target.value);
@@ -1478,12 +1509,62 @@ class StudentsView extends Component {
       const date = document.getElementById('practical-start-date');
       if (toggle) toggle.checked = false;
       if (date) date.value = '';
-      if (branchId) await this.reloadModalSchedules(branchId, event.target.value || null, null);
+      if (branchId) await this.reloadModalSchedules(branchId, event.target.value || null, null, {forceAllSchedulesRefresh:true});
     });
     document.getElementById('toggle-canton-instructors')?.addEventListener('click', () => {
       this.showCantonReferralInstructors = !this.showCantonReferralInstructors;
       this.renderModalReferredInstructorOptions();
     });
+    this.registrationInstructorSearchObserver?.disconnect();
+    const instructorSearch=document.getElementById('registration-instructor-search');
+    const filterInstructors=()=>{
+      const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es').trim();
+      const terms=normalize(instructorSearch?.value).split(/\s+/).filter(Boolean);
+      const buttons=[...document.querySelectorAll('#student-schedule-calendar [data-course-instructor-id],#external-instructor-selector [data-external-instructor-id]')];
+      for(const button of buttons){
+        const match=terms.every(term=>normalize(button.textContent).includes(term));
+        button.hidden=!match;button.style.display=match?'':'none';
+      }
+      const courseId=document.getElementById('modal-course-select')?.value;
+      const matches=(this.modalBranchInstructors||[]).filter(instructor=>(instructor.courses||[]).some(course=>String(course.id)===String(courseId))&&terms.every(term=>normalize(instructor.name).includes(term)));
+      const results=document.getElementById('registration-instructor-search-results');
+      if(results){
+        results.hidden=!terms.length||Boolean(this.instructorSuggestionsDismissed);
+        results.innerHTML=terms.length?matches.map(instructor=>'<button type="button" class="btn btn-light" style="display:block;width:100%;text-align:left;margin-top:6px" data-instructor-search-id="'+escapeHtml(instructor.id)+'">'+escapeHtml(instructor.name)+' · '+escapeHtml((instructor.home_branch||'').trim())+'</button>').join(''):'';
+      }
+      const status=document.getElementById('registration-instructor-search-status');
+      if(status)status.textContent=terms.length?(matches.length?'':'No hay instructores que coincidan para este curso.') : '';
+    };
+    instructorSearch?.addEventListener('input',()=>{this.instructorSuggestionsDismissed=false;filterInstructors();});
+    instructorSearch?.addEventListener('focus',()=>{this.instructorSuggestionsDismissed=false;filterInstructors();});
+    instructorSearch?.addEventListener('keydown',event=>{
+      if(event.key==='Escape'){const results=document.getElementById('registration-instructor-search-results');if(results)results.hidden=true;}
+    });
+    instructorSearch?.closest('.form-group')?.addEventListener('focusout',event=>{
+      if(!event.currentTarget.contains(event.relatedTarget)){
+        const results=document.getElementById('registration-instructor-search-results');if(results)results.hidden=true;
+      }
+    });
+    document.getElementById('registration-instructor-search-results')?.addEventListener('click',event=>{
+      const button=event.target.closest('[data-instructor-search-id]');
+      if(!button)return;
+      const instructor=(this.modalBranchInstructors||[]).find(item=>item.id===button.dataset.instructorSearchId);
+      const select=document.getElementById('preferred-instructor-select');
+      if(!instructor||!select)return;
+      if(![...select.options].some(option=>option.value===instructor.id))select.add(new Option(instructor.name,instructor.id));
+      this.instructorSuggestionsDismissed=true;
+      select.value=instructor.id;
+      select.dispatchEvent(new Event('change',{bubbles:true}));
+      const results=document.getElementById('registration-instructor-search-results');
+      if(results)results.hidden=true;
+      if(instructorSearch)instructorSearch.value=instructor.name;
+    });
+    this.registrationInstructorSearchObserver=new MutationObserver(filterInstructors);
+    for(const id of ['student-schedule-calendar','external-instructor-selector']){
+      const host=document.getElementById(id);
+      if(host)this.registrationInstructorSearchObserver.observe(host,{childList:true,subtree:true});
+    }
+    filterInstructors();
     document.getElementById('external-instructor-selector')?.addEventListener('click', event => {
       const button = event.target.closest('[data-external-instructor-id]');
       if (!button) return;
@@ -1544,6 +1625,8 @@ class StudentsView extends Component {
       courseRow.id = 'schedule-course-row';
       courseRow.className = 'form-row regular-enrollment-only renewal-hidden';
       courseRow.appendChild(courseGroup);
+      const instructorSearchGroup=document.getElementById('registration-instructor-search')?.closest('.form-group');
+      if(instructorSearchGroup)courseRow.appendChild(instructorSearchGroup);
       scheduleStep.insertBefore(courseRow, scheduleWorkflow);
     }
   }
@@ -1693,6 +1776,16 @@ class StudentsView extends Component {
     return valid;
   }
 
+  setReservationIdentityLock(locked) {
+    const form=document.getElementById('student-modal-form');
+    if(!form)return;
+    for(const field of form.querySelectorAll('input,select,textarea,button')) {
+      if(field.name==='cedula'||['student-modal-close','student-modal-cancel'].includes(field.id))continue;
+      if(locked&&!field.disabled){field.dataset.reservationIdentityLocked='true';field.disabled=true;}
+      else if(!locked&&field.dataset.reservationIdentityLocked){field.disabled=false;delete field.dataset.reservationIdentityLocked;}
+    }
+  }
+
   scheduleRegistrationIdentityLookup(value) {
     if (this.recordEditContext || this.activatingReservation) return;
     clearTimeout(this.registrationIdentityTimer);
@@ -1723,6 +1816,15 @@ class StudentsView extends Component {
     const names=['firstName','lastName','birthDate','email','phone','address','bloodType','nationality'];
     const before=Object.fromEntries(names.map(name=>[name,form?.elements[name]?.value]));
     try {
+      const identityResponse=await ApiService.studentIdentityStatus(identification);
+      if(request!==this.registrationIdentityRequest||!form?.isConnected||form.elements.cedula.value.trim()!==identification)return;
+      if(!identityResponse.success)throw Error('No se pudo verificar la cédula.');
+      const identity=identityResponse.data;
+      if(identity.reserved){
+        this.setReservationIdentityLock(true);
+        if(status)status.textContent='Esta cédula ya tiene una reserva activa. Continúa desde esa reserva; no crees otro registro.';
+        return;
+      }
       const result=await ApiService.searchStudents(identification);
       if (request!==this.registrationIdentityRequest || !form?.isConnected
         || form.elements.cedula.value.trim()!==identification || this.recordEditContext || this.activatingReservation
@@ -1730,7 +1832,7 @@ class StudentsView extends Component {
       if (!result.success) throw new Error('No se pudo consultar el estudiante.');
       const found=(result.data || []).find(student=>String(student.identification || student.cedula)===identification);
       if (!found) {
-        if (status) status.textContent='No se encontro un estudiante en tu alcance. Completa sus datos.';
+        if (status) status.textContent=identity.registered?'Esta cédula ya está registrada en el sistema. El expediente está fuera de tu alcance; solicita revisión antes de continuar.':'Esta cédula no tiene estudiante ni reserva activa en el sistema. Completa sus datos.';
         return;
       }
       const student=StudentService.normalizeStudent(found);
@@ -1746,7 +1848,7 @@ class StudentsView extends Component {
         }
       }
       this.registrationIdentityFound=identification;
-      if (status) status.textContent='Estudiante encontrado. Datos personales precargados.';
+      if (status) status.textContent='Este estudiante ya está registrado en el sistema. Se usará su expediente existente; datos personales precargados.';
     } catch(error) {
       if (request===this.registrationIdentityRequest && status?.isConnected) status.textContent='No se pudo consultar la cedula. Vuelve a ingresarla para reintentar.';
     }
@@ -2441,9 +2543,9 @@ class StudentsView extends Component {
         </div>
         ${cycle.instructors.length && !selectedExternalInstructor ? `
           <div class="enrollment-cycle-instructors">
-            <strong>Disponibilidad por instructor (${cycle.instructors.length})</strong>
+            <strong>${this.scheduleInstructorExplicit ? 'Horario de '+escapeHtml((this.modalBranchInstructors||[]).find(item=>String(item.id)===String(this.scheduleInstructorFilterId))?.name||'instructor seleccionado') : 'Disponibilidad por instructor ('+cycle.instructors.length+')'}</strong>
             <div class="course-instructor-filters" role="group" aria-label="Filtrar disponibilidad por instructor">
-              ${cycle.instructors.map((instructor, index) => `<button type="button" class="course-instructor-chip ${(String(this.scheduleInstructorFilterId || '') === String(instructor.id) || (!cycle.instructors.some(item => String(item.id) === String(this.scheduleInstructorFilterId || '')) && index === 0)) ? 'active' : ''}" data-course-instructor-id="${escapeHtml(instructor.id)}"${instructor.home_branch ? ` title="${escapeHtml(instructor.home_branch.trim())}"` : ''}>${escapeHtml(instructor.name)}</button>`).join('')}
+              ${cycle.instructors.map((instructor, index) => `<button type="button" class="course-instructor-chip ${(String(this.scheduleInstructorFilterId || '') === String(instructor.id) || (!cycle.instructors.some(item => String(item.id) === String(this.scheduleInstructorFilterId || '')) && index === 0)) ? 'active' : ''}" data-course-instructor-id="${escapeHtml(instructor.id)}"${instructor.home_branch ? ` title="${escapeHtml(instructor.home_branch.trim())}"` : ''}>${escapeHtml(instructor.name)}${instructor.home_branch?` · ${escapeHtml(instructor.home_branch.trim())}`:''}</button>`).join('')}
               <button type="button" class="instructor-availability-start-toggle ${this.useInstructorFirstAvailability ? 'active' : ''}" data-instructor-availability-toggle aria-pressed="${Boolean(this.useInstructorFirstAvailability)}">
                 <span class="instructor-availability-dot"></span>
                 ${this.useInstructorFirstAvailability ? 'Ocultar horario completo' : 'Ver horario completo'}
@@ -2934,7 +3036,7 @@ class StudentsView extends Component {
     const nextUsesAdvancedStart = Boolean(nextCalendar.querySelector('.advanced-practical-start-official'));
     const currentUsesInstructorBase = Boolean(host.querySelector('.instructor-base-start-official'));
     const nextUsesInstructorBase = Boolean(nextCalendar.querySelector('.instructor-base-start-official'));
-    const canUpdateOnlyGrids = currentGrids.length > 0
+    const canUpdateOnlyGrids = !forceAllSchedulesRefresh && currentGrids.length > 0
       && currentGrids.length === nextGrids.length
       // Al cambiar entre el inicio oficial y la primera disponibilidad debe
       // reconstruirse también el encabezado (fecha inicial y curso oficial),
@@ -3406,17 +3508,9 @@ class StudentsView extends Component {
       : [];
     const externalSelector = document.getElementById('external-instructor-selector');
     const branchName = document.getElementById('modal-branch-select')?.selectedOptions?.[0]?.textContent?.trim() || '';
-    const mantaPriority = /manta\s*2000/i.test(branchName)
-      ? compatible.filter(instructor => instructor.priority_branch
-          && /^(benito alonzo|carlos velez)$/i.test(String(instructor.name || '').trim()))
-      : [];
     if (externalSelector) {
-      externalSelector.hidden = !selectedCourseId || mantaPriority.length === 0;
-      externalSelector.innerHTML = mantaPriority.length ? `
-        <strong>Instructor de Manta 2000</strong>
-        <div class="course-instructor-filters" role="group" aria-label="Escoger instructor de Manta 2000">
-          ${mantaPriority.map(instructor => `<button type="button" class="course-instructor-chip" data-external-instructor-id="${escapeHtml(instructor.id)}">${escapeHtml(instructor.name)}</button>`).join('')}
-        </div>` : '';
+      externalSelector.hidden = true;
+      externalSelector.innerHTML = '';
     }
     const priority = compatible.filter(instructor => instructor.priority_branch);
     const cantonSupport = compatible.filter(instructor => !instructor.priority_branch);
@@ -4500,9 +4594,7 @@ class StudentsView extends Component {
     const nextCalendar = calendars[nextIndex];
     if (!nextCalendar) return;
     const nextCycleId = nextCalendar?.dataset.cycleId;
-    const nextInstructorId = nextCalendar
-      ?.querySelector('.course-instructor-chip.active, .course-instructor-chip')
-      ?.dataset.courseInstructorId || null;
+    const nextInstructorId = this.scheduleInstructorExplicit ? this.scheduleInstructorFilterId : nextCalendar?.querySelector('.course-instructor-chip.active, .course-instructor-chip')?.dataset.courseInstructorId || null;
     if (nextInstructorId && String(nextInstructorId) !== String(this.scheduleInstructorFilterId || '')) {
       this.scheduleInstructorExplicit = false;
       const form = document.getElementById('student-modal-form');
@@ -4782,7 +4874,7 @@ class StudentsView extends Component {
       return;
     }
     option.classList.add('selected');
-    if (!this.hasValidConsecutiveDoubleDays(calendar)) {
+    if (!this.hasAtMostFourDoubleDays(calendar)) {
       option.classList.remove('selected');
       if (error) error.textContent = 'Puedes doblar horas en máximo cuatro días. Selecciona hasta 8 clases (2 bloques por día máximo en 4 días diferentes).';
       return;
@@ -4866,17 +4958,14 @@ class StudentsView extends Component {
     this.updateCalendarWindow(refreshed);
   }
 
-  hasValidConsecutiveDoubleDays(calendar) {
+  hasAtMostFourDoubleDays(calendar) {
     const selectionsByDate = new Map();
     calendar.querySelectorAll('.schedule-option.selected').forEach(cell => {
       const items = selectionsByDate.get(cell.dataset.date) || [];
       items.push(cell);
       selectionsByDate.set(cell.dataset.date, items);
     });
-    const doubledDays = [...selectionsByDate.values()]
-      .filter(items => items.length === 2)
-      .map(items => Number(items[0].dataset.dayIndex))
-      .sort((left, right) => left - right);
+    const doubledDays = [...selectionsByDate.values()].filter(items => items.length === 2);
     // Solo validar que no haya más de 4 días dobles. Permitir días no consecutivos.
     if (doubledDays.length > 4) return false;
     return true;
@@ -5017,6 +5106,16 @@ class StudentsView extends Component {
   getCalendarInstructorButton(calendar) {
     if (!calendar) return null;
     const buttons = [...calendar.querySelectorAll('[data-course-instructor-id]')];
+    if(this.scheduleInstructorExplicit&&this.scheduleInstructorFilterId){
+      const id=String(this.scheduleInstructorFilterId);
+      const matching=buttons.find(button=>String(button.dataset.courseInstructorId)===id);
+      if(matching)return matching;
+      const instructor=(this.modalBranchInstructors||[]).find(item=>String(item.id)===id);
+      const selected=document.createElement('button');
+      selected.dataset.courseInstructorId=id;
+      selected.textContent=instructor?.name||document.getElementById('preferred-instructor-select')?.selectedOptions?.[0]?.textContent||'';
+      return selected;
+    }
     const active = buttons.find(button => button.classList.contains('active'));
     if (active) return active;
     if (calendar.dataset.modality !== 'intensivo') return null;
@@ -5075,6 +5174,7 @@ class StudentsView extends Component {
         reservationId: this.activatingReservation?.id || null,
       });
       if (preview.dataset.requestId !== requestId) return;
+      if(this.scheduleInstructorExplicit&&(!response.data?.instructorId||String(response.data.instructorId)!==String(preferredInstructorId)))throw Error('El instructor seleccionado no está disponible para toda esta selección. Elige otro horario.');
       const instructorName = response.data?.instructorName || preferredName;
       const instructorId = response.data?.instructorId || preferredInstructorId || '';
       if (instructorId) {
@@ -5626,7 +5726,7 @@ class StudentsView extends Component {
         const response = await ApiService.createDocument(student.id, {
           type: 'certificado_bachiller',
           cedulaIndicatesBachiller: true,
-        });
+        }, { compact: true });
         if (!response.success) throw new Error(response.error || 'No se pudo guardar la confirmacion de bachiller.');
       } else if (formData.get('certificadoBachillerMobileFileUrl')) {
         await this.uploadModalDocumentFromDataUrl(student.id, 'certificado_bachiller', formData.get('certificadoBachillerMobileFileUrl'), 'Certificado de estudio');
@@ -5780,6 +5880,7 @@ class StudentsView extends Component {
         }
         payload.academic = { courseId: newCourse, theorySelection: theory,
           schedulePlan: { ...plan, preferredInstructorId: newInstructor,
+            practicalStartDate: plan.selections[0]?.practicalStartDate || plan.practicalStartDate || null,
             practicalMode: formData.get('practicalMode') || plan.practicalMode || 'classes' } };
       }
       if (context.canFinance && context.payment && form.elements.discountAmount) {
@@ -6108,7 +6209,7 @@ class StudentsView extends Component {
   }
 
   async uploadModalDocumentFromDataUrl(studentId, type, fileUrl, name) {
-    const response = await ApiService.createDocument(studentId, { type, name, fileUrl });
+    const response = await ApiService.createDocument(studentId, { type, name, fileUrl }, { compact: true });
     if (!response.success) throw new Error(response.error || `No se pudo guardar ${name}`);
   }
 
@@ -6122,14 +6223,14 @@ class StudentsView extends Component {
       name: includesBloodCard ? 'Cédula y carnet de tipo sanguíneo' : 'Cédula de identidad',
       fileUrl,
       includesBloodCard,
-    });
+    }, { compact: true });
     if (!response.success) throw new Error(response.error || 'No se pudo guardar el PDF combinado');
   }
 
   async uploadModalDocument(studentId, type, file, name) {
     if (!file || !file.name) return;
     const fileUrl = await this.readFileAsDataUrl(file);
-    const response = await ApiService.createDocument(studentId, { type, name: name || file.name, fileUrl });
+    const response = await ApiService.createDocument(studentId, { type, name: name || file.name, fileUrl }, { compact: true });
     if (!response.success) throw new Error(response.error || `No se pudo guardar ${name || file.name}`);
   }
 

@@ -77,6 +77,12 @@ class ApiService {
     return apiClient.post(`/students/${id}/enable`, {});
   }
 
+  static async globalStudentIdentification(identification) {return apiClient.get('/students/global-identification?'+new URLSearchParams({identification}));}
+
+  static async studentIdentityStatus(identification) {
+    return apiClient.get('/students/identity-status?'+new URLSearchParams({identification}));
+  }
+
   static async searchStudents(query, params = {}) {
     const qs = new URLSearchParams({ query, ...params }).toString();
     return apiClient.get(`/students/search?${qs}`);
@@ -157,8 +163,8 @@ class ApiService {
     return apiClient.get(`/students/${studentId}/documents`);
   }
 
-  static async createDocument(studentId, data) {
-    return apiClient.post(`/students/${studentId}/documents`, data);
+  static async createDocument(studentId, data, options = {}) {
+    return apiClient.post(`/students/${studentId}/documents${options.compact ? '?compact=true' : ''}`, data);
   }
 
   static async getStudentInstructors(branchId = null) {

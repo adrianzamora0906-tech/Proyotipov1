@@ -2586,3 +2586,14 @@
   background: #fee2e2;
   color: #b91c1c;
 }
+
+/* Curso y busqueda de instructor comparten la fila de horarios. */
+#schedule-course-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+#schedule-course-row > .form-group { min-width: 0; width: 100%; }
+@media (max-width: 640px) { #schedule-course-row { grid-template-columns: minmax(0, 1fr); } }
+
+/* Sugerencias del buscador sobre el calendario, sin desplazarlo. */
+#schedule-course-row > .form-group:has(#registration-instructor-search) { position: relative; z-index: 30; }
+#registration-instructor-search-results:not([hidden]) { position: absolute; top: 100%; left: 0; right: 0; z-index: 100; max-height: 280px; overflow-y: auto; background: #fff; border: 1px solid #dce0ea; border-radius: 0 0 12px 12px; box-shadow: 0 10px 24px rgba(20,30,55,.16); padding: 6px; }
+#registration-instructor-search-results > button { margin: 0 !important; border: 0; border-radius: 7px; padding: 10px 12px; white-space: normal; }
+#registration-instructor-search-results > button:hover, #registration-instructor-search-results > button:focus-visible { background: #efedff; color: #4938dd; }

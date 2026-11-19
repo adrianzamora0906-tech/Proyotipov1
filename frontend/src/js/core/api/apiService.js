@@ -81,6 +81,12 @@ class ApiService {
     return apiClient.post(`/students/${id}/enable`, {});
   }
 
+  static async globalStudentIdentification(identification) {return apiClient.get('/students/global-identification?'+new URLSearchParams({identification}));}
+
+  static async studentIdentityStatus(identification) {
+    return apiClient.get('/students/identity-status?'+new URLSearchParams({identification}));
+  }
+
   static async searchStudents(query, params = {}) {
     const qs = new URLSearchParams({ query, ...params }).toString();
     return apiClient.get(`/students/search?${qs}`);

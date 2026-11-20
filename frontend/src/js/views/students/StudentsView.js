@@ -21,6 +21,7 @@ import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
 import ApiService from '../../core/api/apiService.js?v=registro-documentos-agil-20261118';
 import { createDocumentImageSheet } from '../../services/DocumentImageSheet.js';
+import { saveRegistrationDocuments } from '../../services/RegistrationDocuments.js';
 import { isCedulaOcrPilotUser } from '../../services/CedulaOcrPilot.js';
 import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js';
 
@@ -5689,32 +5690,33 @@ class StudentsView extends Component {
 
     try {
       if (submitBtn) submitBtn.textContent = 'Guardando documentos...';
-      if (registrationDocumentsUrl || hasRegistrationPdf) {
-        await this.uploadRegistrationDocumentPackage(
-          student.id,
-          registrationDocumentsUrl || registrationDocumentsPdf,
-          registrationDocumentsUrl
-            ? formData.get('registrationDocumentsMobileIncludesBloodCard') === 'true'
-            : true
-        );
-      } else {
-        await this.saveTwoSideDocument(student.id, 'cedula', cedulaDoc, `cedula-${student.id}.pdf`, 'Cédula de Identidad');
-        await this.saveTwoSideDocument(student.id, 'carnet_tipo_sangre', bloodTypeCardDoc, `carnet-tipo-sangre-${student.id}.pdf`, 'Carnet de Tipo de Sangre');
-      }
-      if (formData.get('cedulaIndicatesBachiller')) {
-        const response = await ApiService.createDocument(student.id, {
-          type: 'certificado_bachiller',
-          cedulaIndicatesBachiller: true,
-        }, { compact: true });
-        if (!response.success) throw new Error(response.error || 'No se pudo guardar la confirmacion de bachiller.');
-      } else if (formData.get('certificadoBachillerMobileFileUrl')) {
-        await this.uploadModalDocumentFromDataUrl(student.id, 'certificado_bachiller', formData.get('certificadoBachillerMobileFileUrl'), 'Certificado de estudio');
-      } else {
-        await this.uploadModalDocument(student.id, 'certificado_bachiller', formData.get('certificadoBachillerFile'), 'Certificado de estudio');
-      }
-      if (selectedCatalogType === 'tipo-f') {
-        await this.uploadModalDocument(student.id, 'certificado_discapacidad', disabilityCertificate, 'Certificado de discapacidad');
-      }
+      await saveRegistrationDocuments({
+        saveIdentity: async () => {
+          if (registrationDocumentsUrl || hasRegistrationPdf) {
+            await this.uploadRegistrationDocumentPackage(student.id, registrationDocumentsUrl || registrationDocumentsPdf,
+              registrationDocumentsUrl ? formData.get('registrationDocumentsMobileIncludesBloodCard') === 'true' : true);
+          } else {
+            await this.saveTwoSideDocument(student.id, 'cedula', cedulaDoc, `cedula-${student.id}.pdf`, 'Cédula de Identidad');
+            await this.saveTwoSideDocument(student.id, 'carnet_tipo_sangre', bloodTypeCardDoc, `carnet-tipo-sangre-${student.id}.pdf`, 'Carnet de Tipo de Sangre');
+          }
+        },
+        certificateNeedsIdentity: Boolean(formData.get('cedulaIndicatesBachiller')),
+        saveCertificate: async () => {
+          if (formData.get('cedulaIndicatesBachiller')) {
+            const response = await ApiService.createDocument(student.id, {
+              type: 'certificado_bachiller', cedulaIndicatesBachiller: true,
+            }, { compact: true });
+            if (!response.success) throw new Error(response.error || 'No se pudo guardar la confirmacion de bachiller.');
+          } else if (formData.get('certificadoBachillerMobileFileUrl')) {
+            await this.uploadModalDocumentFromDataUrl(student.id, 'certificado_bachiller', formData.get('certificadoBachillerMobileFileUrl'), 'Certificado de estudio');
+          } else {
+            await this.uploadModalDocument(student.id, 'certificado_bachiller', formData.get('certificadoBachillerFile'), 'Certificado de estudio');
+          }
+        },
+        saveDisability: selectedCatalogType === 'tipo-f'
+          ? () => this.uploadModalDocument(student.id, 'certificado_discapacidad', disabilityCertificate, 'Certificado de discapacidad')
+          : null,
+      });
       registrationStage = 'instructor';
       if (submitBtn) submitBtn.textContent = 'Reservando horario...';
       const scheduleReservation = student.scheduleReserved ? {instructor:student.assignedInstructor}

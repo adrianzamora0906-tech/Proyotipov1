@@ -437,6 +437,7 @@ export default class AtmAuthorizationView extends Component {
                   <td class="atm-actions-cell">
 
                     <div class="atm-file-actions">
+                    ${item.purchase_status==='DRAFT'?`<button type="button" class="btn btn-small atm-edit-nomina" data-id="${esc(item.id)}">Editar nómina</button>`:''}
                     ${item.purchase_status==='DRAFT'?`<button type="button" class="btn btn-small atm-confirm-purchase" data-id="${esc(item.id)}" data-count="${Number(item.purchase_count||0)}">Confirmar compra</button>`:''}
                     ${item.purchase_status==='CONFIRMED'?`<button type="button" class="btn btn-small atm-cancel-purchase" data-id="${esc(item.id)}">Anular compra</button>`:''}
 
@@ -496,6 +497,7 @@ export default class AtmAuthorizationView extends Component {
       </div>
     `;
 
+    host.querySelectorAll('.atm-edit-nomina').forEach(button=>button.addEventListener('click',()=>this.openEditPermitNomina(button.dataset.id)));
     host.querySelectorAll('.atm-response-upload').forEach(button => {
       button.addEventListener('click', () => this.openResponseUpload(button.dataset.id));
     });
@@ -590,6 +592,26 @@ export default class AtmAuthorizationView extends Component {
         <thead><tr><th scope="col">Cursos enviados en este oficio</th><th scope="col">Cursos leídos de la respuesta ANT</th><th scope="col">Resultado</th></tr></thead>
         <tbody>${rows.map(row => `<tr><td>${cell(row.sent, row, 'sent')}</td><td>${cell(row.received, row, 'received')}</td><td class="atm-compare-result"><strong class="atm-compare-badge ${row.status === 'match' ? 'is-match' : row.status === 'pending' ? '' : 'is-different'}">${labels[row.status]}</strong>${row.differences.length ? `<p>${row.status === 'different' ? 'Revisar: ' : ''}${esc(row.differences.join(', '))}</p>` : ''}</td></tr>`).join('')}</tbody>
       </table></div><p class="atm-comparison-help">Verde: coincide. Rojo: diferencia o curso sin correspondencia. Se ignoran espacios, guiones y guiones bajos del código. Esta comparación no modifica los cursos del sistema.</p>`;
+  }
+
+  async openEditPermitNomina(id) {
+    try {
+      const result=await AdminService.editPermitNominaContext(id);
+      if(!result.success)throw Error(result.error||'No se pudo abrir la nómina.');
+      const context=result.data,course=context.course;
+      const host=document.getElementById('atm-modal');
+      host.innerHTML=`<div class="branch-modal-backdrop"><section class="atm-modal atm-office-form-modal" style="display:block;max-height:90vh;overflow:auto"><header class="atm-modal-header"><h2>Editar nómina</h2><p>${esc(context.office)} · ${esc(course.courseCode)}</p><button type="button" data-close-edit>Cerrar</button></header><div class="atm-modal-body" style="padding:1.4rem"><div id="atm-saved-nomina-editor"></div><p data-edit-count></p><p data-edit-error role="alert"></p></div><footer class="atm-modal-footer"><button type="button" class="btn btn-secondary" data-close-edit>Cancelar</button><button type="button" class="btn btn-primary" data-save-edit>Guardar y descargar Word</button></footer></section></div>`;
+      const count=()=>{host.querySelector('[data-edit-count]').textContent=editor.count+' alumnos en la nómina.';};
+      const editor=new AtmNominaEditor(host.querySelector('#atm-saved-nomina-editor'),count,identification=>AdminService.lookupAtmNominaIdentity({branchId:context.branchId,courseType:course.courseType,identification}));
+      editor.manual=(course.manualStudents||[]).map(row=>({...row}));
+      editor.setRows(context.rows);count();
+      host.querySelectorAll('[data-close-edit]').forEach(button=>button.onclick=()=>this.closeModal());
+      host.querySelector('[data-save-edit]').onclick=async event=>{
+        const button=event.currentTarget;button.disabled=true;
+        try {download(await AdminService.savePermitNomina(id,{revision:context.revision,nomina:editor.payload()}));this.closeModal();await this.loadDocuments();}
+        catch(error){host.querySelector('[data-edit-error]').textContent=error.message||'No se pudo guardar la nómina.';button.disabled=false;}
+      };
+    }catch(error){window.alert(error.message||'No se pudo abrir la nómina.');}
   }
 
   openResponseUpload(id) {
@@ -1110,7 +1132,6 @@ export default class AtmAuthorizationView extends Component {
         </div>
 
         <p id="atm-permit-official-dates" class="atm-course-status atm-course-status-compact">Selecciona un curso para consultar las fechas oficiales del Word.</p>
-        <p class="atm-permit-date-help">El rango corresponde a la fecha en que el alumno alcanzó el pago requerido. Las fechas oficiales del curso en el Word se mantienen.</p>
         <div id="atm-permit-course-status" class="atm-course-status atm-course-status-compact">
           Selecciona las fechas de pago.
         </div>
@@ -1162,7 +1183,7 @@ export default class AtmAuthorizationView extends Component {
       form.elements.courseStart.value = selected?.registrationStart || '';
       form.elements.courseEnd.value = selected?.registrationEnd || '';
       document.getElementById('atm-permit-official-dates').textContent = selected
-        ? `Fechas oficiales del Word · ${selected.courseCode}: inicia ${date(selected.courseStart)} y termina ${date(selected.courseEnd)}.`
+        ? `Curso ${selected.courseCode}: ${date(selected.courseStart)} al ${date(selected.courseEnd)}.`
         : 'Selecciona un curso para consultar las fechas oficiales del Word.';
       this.loadPermitCourses();
     });
@@ -1263,7 +1284,7 @@ export default class AtmAuthorizationView extends Component {
     const valid = !this.permitLoading && Boolean(this.selectedAuthorizedPermitCourse());
     this.permitEligibleCount = this.nominaEditor.count;
     document.getElementById('atm-permit-student-count').value = this.permitEligibleCount;
-    if (valid) document.getElementById('atm-permit-course-status').textContent = `${this.nominaEditor.registeredCount} alumnos elegibles del sistema + ${this.nominaEditor.manual.length} filas manuales = ${this.permitEligibleCount} alumnos en la nómina. Requisito: $125 en moto ($115 con promoción) y $165 en auto; incluye transferencias pendientes sin aprobarlas.`;
+    if (valid) document.getElementById('atm-permit-course-status').textContent = `${this.permitEligibleCount} alumnos en la nómina (${this.nominaEditor.registeredCount} del sistema y ${this.nominaEditor.manual.length} manuales).`;
     for (const button of [form.querySelector('[type="submit"]'),document.getElementById('atm-download-permit-excel'),document.getElementById('atm-download-permit-identifications')]) {
       if (button) button.disabled = !valid || !this.permitEligibleCount;
     }

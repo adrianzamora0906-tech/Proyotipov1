@@ -246,8 +246,8 @@ class ApiService {
     return apiClient.get('/payments/history');
   }
 
-  static async getCashWorkspace() {
-    return apiClient.get('/payments/cash-workspace');
+  static async getCashWorkspace(search = '') {
+    return apiClient.get('/payments/cash-workspace?search=' + encodeURIComponent(search));
   }
 
   static async createTransferVerification(data) {

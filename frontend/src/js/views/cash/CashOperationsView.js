@@ -295,6 +295,20 @@ class CashOperationsView extends Component {
     for (const [id, key] of [['transfer-search', 'search'], ['transfer-from', 'from'], ['transfer-to', 'to']]) {
       document.getElementById(id).addEventListener(key === 'search' ? 'input' : 'change', (event) => {
         this.transferFilters[key] = event.target.value;
+        if (key === 'search') {
+          clearTimeout(this.transferSearchTimer);
+          const sequence = this.transferSearchSequence = (this.transferSearchSequence || 0) + 1;
+          this.transferSearchTimer = setTimeout(async () => {
+            try {
+              const response = await ApiService.getCashWorkspace(this.transferFilters.search);
+              if (sequence !== this.transferSearchSequence || !document.getElementById('transfer-list')) return;
+              this.data.transfers = response.data?.transfers || [];
+              this.updateTransferList();
+            } catch (error) {
+              if (sequence === this.transferSearchSequence) this.updateTransferList(error.message || 'No se pudo buscar las transferencias.');
+            }
+          }, 300);
+        }
         this.updateTransferList();
       });
     }

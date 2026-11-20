@@ -15,7 +15,7 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=manos-restauradas-20261014";
 import DashboardView from "./views/dashboard/DashboardView.js?v=actualizacion-parcial-20261014";
-import StudentsView from "./views/students/StudentsView.js?v=registro-instructor-20261119";
+import StudentsView from "./views/students/StudentsView.js?v=registro-documentos-paralelo-20261120";
 import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=corregir-cambio-horario-20261118";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=estudiantes-orden-hora-20261015";
@@ -46,7 +46,7 @@ import AdminSecurityView from "./views/admin/AdminSecurityView.js?v=tipo-instruc
 import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js?v=actualizacion-parcial-20261014";
 import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=suspender-instructor-20261116";
 import ManagerReportsView from "./views/manager/ManagerReportsView.js?v=periodo-compacto-20261023";
-import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=nomina-horarios-20261119";
+import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=registro-nomina-20261120";
 import AdminSettingsView from "./views/admin/AdminSettingsView.js?v=feriados-periodos-20261026";
 import AdminReferralCampaignView from "./views/admin/AdminReferralCampaignView.js";
 import ManagerWorkspaceView from "./views/manager/ManagerWorkspaceView.js";

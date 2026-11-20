@@ -11,10 +11,9 @@ export default class AtmNominaEditor {
     this.manual = [];
     this.excluded = new Set();
     this.editIndex = null;
-    host.innerHTML = `<div class="atm-section-heading"><div><h3>Nómina de alumnos</h3><p>Revisa los alumnos del sistema y añade filas manuales solo para esta nómina.</p></div></div>
+    host.innerHTML = `<div class="atm-section-heading"><div><h3>Nómina de alumnos</h3></div></div>
       <div class="atm-nomina-scroll"><table class="atm-nomina-table"><thead><tr><th>Incluir</th><th>Apellidos y nombres</th><th>Identificación</th><th>Origen</th><th>Acciones</th></tr></thead><tbody></tbody></table></div>
       <details class="atm-manual-editor"><summary>Añadir alumno manualmente</summary>
-        <p>No crea estudiantes ni matrículas en el ERP. Los campos con * son obligatorios.</p>
         <div class="atm-form-grid">
           <label>Cédula o pasaporte *<input data-manual-key="identification" maxlength="20" placeholder="Identificación"></label>
           <label>Apellidos y nombres *<input data-manual-key="student_name" maxlength="200" placeholder="Apellidos y nombres completos"></label>

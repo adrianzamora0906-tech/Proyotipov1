@@ -57,6 +57,8 @@ export default class AdminService {
     return apiClient.delete(`/admin/atm-authorizations/${id}`);
   }
   static lookupAtmNominaIdentity(params) {return apiClient.get(`/admin/atm-authorizations/nomina-identity${query(params)}`);}
+  static editPermitNominaContext(id){return apiClient.get(`/admin/atm-authorizations/${encodeURIComponent(id)}/nomina`);}
+  static savePermitNomina(id,data){return apiClient.download(`/admin/atm-authorizations/${encodeURIComponent(id)}/nomina`,data);}
   static confirmPermitPurchase(id) {return apiClient.post(`/admin/atm-authorizations/${encodeURIComponent(id)}/purchase/confirm`,{});}
   static cancelPermitPurchase(id,reason) {return apiClient.post(`/admin/atm-authorizations/${encodeURIComponent(id)}/purchase/cancel`,{reason});}
   static courseReports(params = {}) {

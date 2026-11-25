@@ -919,6 +919,11 @@
 
 .staff-referral-option:hover,
 .staff-referral-option:focus-visible { background: var(--primary-50); outline: none; }
+.staff-referral-option:disabled {
+  background: var(--gray-50);
+  color: var(--gray-500);
+  cursor: not-allowed;
+}
 .staff-referral-option span,
 .staff-referral-selected span { color: var(--gray-500); font-size: .82rem; }
 .staff-referral-empty { padding: .75rem; color: var(--gray-500); }

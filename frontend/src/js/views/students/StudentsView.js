@@ -4128,7 +4128,7 @@ class StudentsView extends Component {
             { id: 'benefit:BLACK_FRIDAY', name: 'Promo Black Friday', role_name: '27 y 28 de noviembre de 2026', branch_name: 'Moto $100 · Carro $156', discount_benefit: 'BLACK_FRIDAY' },
             { id: 'benefit:HALLOWEEN', name: 'Promo Halloween', role_name: '28 al 31 de octubre de 2026', branch_name: 'Moto $114.99 · Carro $164.99', discount_benefit: 'HALLOWEEN' },
             { id: 'benefit:COMBO', name: 'Combo (2 o más personas)', role_name: 'Inscripción conjunta', branch_name: 'Moto $115 · Carro $180', discount_benefit: 'COMBO' },
-          ].filter(item => (item.discount_benefit !== 'BLACK_FRIDAY' || isBlackFridayPromotionActive()) && (item.discount_benefit !== 'HALLOWEEN' || isHalloweenPromotionActive()) && (item.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(normalizedQuery)
+          ].filter(item => (item.discount_benefit !== 'HALLOWEEN' || isHalloweenPromotionActive()) && (item.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(normalizedQuery)
             || (item.discount_benefit === 'UNIVERSITY_STUDENT' && 'universidad'.includes(normalizedQuery))))
         : [];
       this.referralStaffResults = [...benefitReferrals, ...staff];
@@ -4142,9 +4142,10 @@ class StudentsView extends Component {
     results.hidden = false;
     results.innerHTML = staff.length
       ? staff.map(person => `
-        <button type="button" class="staff-referral-option" data-referrer-id="${escapeHtml(person.id)}">
+        <button type="button" class="staff-referral-option" data-referrer-id="${escapeHtml(person.id)}" ${person.discount_benefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive() ? 'disabled title="Disponible solo el 27 y 28 de noviembre de 2026"' : ''}>
           <strong>${escapeHtml(person.name)}</strong>
           <span>${escapeHtml(person.role_name || 'Personal')} · ${escapeHtml(person.branch_name || '')}</span>
+          ${person.discount_benefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive() ? '<span>Disponible solo el 27 y 28 de noviembre.</span>' : ''}
         </button>`).join('')
       : '<div class="staff-referral-empty">No se encontró personal con ese nombre.</div>';
   }
@@ -4152,6 +4153,10 @@ class StudentsView extends Component {
   selectReferralStaff(userId) {
     const person = (this.referralStaffResults || []).find(item => String(item.id) === String(userId));
     if (!person) return;
+    if (person.discount_benefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive()) {
+      this.renderReferralStaffResults(this.referralStaffResults);
+      return;
+    }
     const idInput = document.getElementById('student-referrer-id');
     const search = document.getElementById('student-referrer-search');
     const results = document.getElementById('student-referrer-results');

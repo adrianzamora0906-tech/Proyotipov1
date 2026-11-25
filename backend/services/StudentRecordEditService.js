@@ -211,7 +211,7 @@ class StudentRecordEditService {
       if (key==='city_id' && !value && snapshot.student.city_id) throw createError(422,'El canton es obligatorio');
       if (key==='birthDate' && value && (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || iso(value)!==value)) throw createError(422,'Fecha de nacimiento invalida');
       if (key==='email' && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) throw createError(422,'Correo invalido');
-      if (key==='discountBenefit' && value && !['UNIVERSITY_STUDENT','POLICE','COMBO','HALLOWEEN'].includes(value)) throw createError(422,'Convenio no valido');
+      if (key==='discountBenefit' && value && !['BLACK_FRIDAY','UNIVERSITY_STUDENT','POLICE','COMBO','HALLOWEEN'].includes(value)) throw createError(422,'Convenio no valido');
       if (key==='discountBenefit') require('./validateComboSize')(value,payload.personal.comboSize ?? snapshot.student.combo_size);
       if (key==='comboSize' && value!==null) value=require('./validateComboSize')('COMBO',value);
       if (key==='disabilityPercentage' && value!==null) {
@@ -241,7 +241,7 @@ class StudentRecordEditService {
           const labels=(await client.query("SELECT id,TRIM(CONCAT(first_name,' ',last_name)) name FROM users WHERE id=ANY($1::uuid[])",[[before,value].filter(Boolean)])).rows;
           oldLabel=labels.find(b=>b.id===before)?.name || before;newLabel=labels.find(b=>b.id===value)?.name || value;
         } else if (key==='discountBenefit') {
-          const labels={UNIVERSITY_STUDENT:'Estudiante universitario',POLICE:'Policia',HALLOWEEN:'Promo Halloween',COMBO:`Combo (${payload.personal.comboSize} personas declaradas)`};
+          const labels={BLACK_FRIDAY:'Black Friday',UNIVERSITY_STUDENT:'Estudiante universitario',POLICE:'Policia',HALLOWEEN:'Promo Halloween',COMBO:`Combo (${payload.personal.comboSize} personas declaradas)`};
           oldLabel=labels[before] || null;newLabel=labels[value] || null;
         }
         changes.push({field:label,before:oldLabel,after:newLabel});
@@ -347,10 +347,13 @@ class StudentRecordEditService {
       const price=Number(course?.price);
       const benefit=benefitChanged ? personal.discount_benefit : snapshot.student.discount_benefit;
       // Las tarifas ya otorgadas se conservan; aplicar la promo a otro curso exige vigencia.
-      if(courseChanged || benefit!==snapshot.student.discount_benefit)require('./validateHalloweenPromotion')(benefit);
+      if(courseChanged || benefit!==snapshot.student.discount_benefit) {
+        require('./validateHalloweenPromotion')(benefit);
+        require('./BlackFridayPromotion').validate(benefit);
+      }
       const kind=/clase\s*a|moto/i.test(course.name) ? 'moto' : /clase\s*b|auto/i.test(course.name) && !/tipo\s*f/i.test(course.name) ? 'carro' : null;
       if (benefit && !kind) throw createError(422,'El convenio solo aplica a Moto y Carro');
-      const prices={UNIVERSITY_STUDENT:{moto:117,carro:180},POLICE:{moto:110,carro:170},COMBO:{moto:115,carro:180},HALLOWEEN:{moto:114.99,carro:164.99}};
+      const prices={BLACK_FRIDAY:require('./BlackFridayPromotion').prices,UNIVERSITY_STUDENT:{moto:117,carro:180},POLICE:{moto:110,carro:170},COMBO:{moto:115,carro:180},HALLOWEEN:{moto:114.99,carro:164.99}};
       finalAmount=benefit ? prices[benefit][kind] : finance?.finalAmount!==undefined ? Number(finance.finalAmount) : price;
       const paid=Number(payment.final_amount)-Number(payment.balance);
       if (!Number.isFinite(finalAmount) || Math.abs(finalAmount*100-Math.round(finalAmount*100))>0.000001 || finalAmount<paid || finalAmount<0 || finalAmount>price) throw createError(422,'El importe debe tener hasta dos decimales y estar entre lo ya pagado y el precio del curso');

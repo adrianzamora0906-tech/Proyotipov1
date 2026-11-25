@@ -772,8 +772,10 @@ class StudentService {
 
     const discountBenefit = String(data.discountBenefit || '').trim() || null;
     require('./validateHalloweenPromotion')(discountBenefit);
+    require('./BlackFridayPromotion').validate(discountBenefit);
     const comboSize=require('./validateComboSize')(discountBenefit,data.comboSize);
     const benefitFinalPrices = {
+      BLACK_FRIDAY: require('./BlackFridayPromotion').prices,
       UNIVERSITY_STUDENT: { moto: 117, carro: 180 },
       HALLOWEEN: { moto: 114.99, carro: 164.99 },
       POLICE: { moto: 110, carro: 170 },
@@ -914,7 +916,7 @@ class StudentService {
         await db.query('INSERT INTO history (student_id, action) VALUES ($1, $2)', [
           student.id,
           discountBenefit
-            ? `Convenio ${discountBenefit === 'HALLOWEEN' ? 'Promo Halloween' : discountBenefit === 'COMBO' ? `Combo (${comboSize} personas declaradas)` : discountBenefit === 'POLICE' ? 'Policía' : 'Estudiante universitario'} aplicado: precio final $${benefitFinalAmount.toFixed(2)}`
+            ? `Convenio ${discountBenefit === 'BLACK_FRIDAY' ? 'Black Friday' : discountBenefit === 'HALLOWEEN' ? 'Promo Halloween' : discountBenefit === 'COMBO' ? `Combo (${comboSize} personas declaradas)` : discountBenefit === 'POLICE' ? 'Policía' : 'Estudiante universitario'} aplicado: precio final $${benefitFinalAmount.toFixed(2)}`
             : `Descuento de $${discount.toFixed(2)} aplicado al registrar la matrícula`,
         ]);
       }
@@ -929,6 +931,7 @@ class StudentService {
       });
     }
 
+    if (discountBenefit === 'BLACK_FRIDAY') await AuditService.log({userId,branchId,action:'STUDENT_BLACK_FRIDAY_REGISTERED',module:'ESTUDIANTES',entityType:'ENROLLMENT',entityId:createdEnrollmentId,newValues:{studentId:student.id,courseId,discountBenefit,finalAmount:benefitFinalAmount,discount},requestContext});
     const access = await StudentAccountService.createForStudent(student.id);
     return { ...student, enrollment_id: createdEnrollmentId, access };
   }

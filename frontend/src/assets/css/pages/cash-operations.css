@@ -49,6 +49,8 @@
 .transfer-review-details div { min-width: 0; }
 .transfer-review-details dt { color: #667085; font-size: 12px; margin-bottom: 5px; }
 .transfer-review-details dd { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.transfer-review-details #transfer-confirmed-bank { width: auto; max-width: 100%; min-height: 0; padding: 0 22px 0 0; border: 0; border-radius: 0; background-color: transparent; box-shadow: none; font: inherit; color: inherit; cursor: pointer; }
+.transfer-review-details #transfer-confirmed-bank:focus-visible { outline: 2px solid #5143e5; outline-offset: 3px; }
 .transfer-review-note { display: grid; gap: 6px; font-size: 13px; margin-top: 16px; }
 .transfer-review-note textarea { min-height: 72px; resize: vertical; }
 .cash-ops button:focus-visible, .cash-ops input:focus-visible, .cash-ops select:focus-visible { outline: 2px solid #5146e5; outline-offset: 3px; }

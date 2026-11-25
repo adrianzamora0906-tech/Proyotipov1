@@ -12,6 +12,7 @@ class CashSalesReportService {
  }
  static promotion(row){
   // La promocion declarada no depende del monto del abono ni de su redondeo.
+  if(row.discount_benefit==='BLACK_FRIDAY')return 'Black Friday';
   if(row.discount_benefit==='HALLOWEEN')return 'Promo Halloween';
   if(row.amount===null)return 'Sin cuenta de pago';
   if(Number(row.discount||0)<=0)return 'Sin promocion';

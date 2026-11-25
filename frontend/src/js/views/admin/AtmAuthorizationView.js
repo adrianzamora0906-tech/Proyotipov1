@@ -1132,7 +1132,6 @@ export default class AtmAuthorizationView extends Component {
         </div>
 
         <p id="atm-permit-official-dates" class="atm-course-status atm-course-status-compact">Selecciona un curso para consultar las fechas oficiales del Word.</p>
-        <p class="atm-permit-date-help">El rango corresponde a la fecha en que el alumno alcanzó el pago requerido. Las fechas oficiales del curso en el Word se mantienen.</p>
         <div id="atm-permit-course-status" class="atm-course-status atm-course-status-compact">
           Selecciona las fechas de pago.
         </div>
@@ -1184,7 +1183,7 @@ export default class AtmAuthorizationView extends Component {
       form.elements.courseStart.value = selected?.registrationStart || '';
       form.elements.courseEnd.value = selected?.registrationEnd || '';
       document.getElementById('atm-permit-official-dates').textContent = selected
-        ? `Fechas oficiales del Word · ${selected.courseCode}: inicia ${date(selected.courseStart)} y termina ${date(selected.courseEnd)}.`
+        ? `Curso ${selected.courseCode}: ${date(selected.courseStart)} al ${date(selected.courseEnd)}.`
         : 'Selecciona un curso para consultar las fechas oficiales del Word.';
       this.loadPermitCourses();
     });
@@ -1285,7 +1284,7 @@ export default class AtmAuthorizationView extends Component {
     const valid = !this.permitLoading && Boolean(this.selectedAuthorizedPermitCourse());
     this.permitEligibleCount = this.nominaEditor.count;
     document.getElementById('atm-permit-student-count').value = this.permitEligibleCount;
-    if (valid) document.getElementById('atm-permit-course-status').textContent = `${this.nominaEditor.registeredCount} alumnos elegibles del sistema + ${this.nominaEditor.manual.length} filas manuales = ${this.permitEligibleCount} alumnos en la nómina. Requisito: $125 en moto o su precio final si es menor, y $165 en auto; incluye transferencias pendientes sin aprobarlas.`;
+    if (valid) document.getElementById('atm-permit-course-status').textContent = `${this.permitEligibleCount} alumnos en la nómina (${this.nominaEditor.registeredCount} del sistema y ${this.nominaEditor.manual.length} manuales).`;
     for (const button of [form.querySelector('[type="submit"]'),document.getElementById('atm-download-permit-excel'),document.getElementById('atm-download-permit-identifications')]) {
       if (button) button.disabled = !valid || !this.permitEligibleCount;
     }

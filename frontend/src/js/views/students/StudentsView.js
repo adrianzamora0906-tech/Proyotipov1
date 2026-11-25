@@ -16,6 +16,7 @@ import DocumentService from '../../services/DocumentService.js';
 import NotificationService from '../../services/NotificationService.js';
 import Validator from '../../helpers/Validator.js';
 import DateHelper from '../../helpers/DateHelper.js';
+import { BLACK_FRIDAY_PRICES, isBlackFridayPromotionActive } from '../../helpers/BlackFridayPromotion.js';
 import { isHalloweenPromotionActive } from '../../helpers/HalloweenPromotion.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
@@ -23,7 +24,7 @@ import ApiService from '../../core/api/apiService.js?v=registro-documentos-agil-
 import { createDocumentImageSheet } from '../../services/DocumentImageSheet.js';
 import { saveRegistrationDocuments } from '../../services/RegistrationDocuments.js';
 import { isCedulaOcrPilotUser } from '../../services/CedulaOcrPilot.js';
-import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js?v=escaner-edicion-20261113';
+import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js';
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -1399,7 +1400,6 @@ class StudentsView extends Component {
         return;
       }
       const instructorId = instructorButton.dataset.courseInstructorId || null;
-      this.scheduleInstructorExplicit = false;
       document.querySelectorAll('#student-schedule-calendar [data-course-instructor-id]').forEach(button => {
         const selected = String(button.dataset.courseInstructorId || '') === String(instructorId || '');
         button.classList.toggle('active', selected);
@@ -1478,7 +1478,6 @@ class StudentsView extends Component {
       this.useInstructorFirstAvailability = false;
       this.instructorFirstAvailabilityDate = null;
       this.scheduleInstructorFilterId = null;
-      this.scheduleInstructorExplicit = false;
       const preferredInstructor = document.getElementById('preferred-instructor-select');
       if (preferredInstructor) preferredInstructor.value = '';
       const branchId = branchSelect?.selectedOptions?.[0]?.dataset?.branchId;
@@ -1502,7 +1501,6 @@ class StudentsView extends Component {
     form?.querySelector('[name="discountAmount"]')?.addEventListener('input', () => this.updateRegistrationPaymentSummary());
     form?.querySelector('[name="preferredInstructorId"]')?.addEventListener('change', async event => {
       this.scheduleInstructorFilterId = event.target.value || null;
-      this.scheduleInstructorExplicit = Boolean(event.target.value);
       const branchId = branchSelect?.selectedOptions?.[0]?.dataset?.branchId;
       this.useInstructorFirstAvailability = false;
       this.instructorFirstAvailabilityDate = null;
@@ -1952,6 +1950,7 @@ class StudentsView extends Component {
     const isCarCourse = catalogType === 'carro';
     const benefit = form?.querySelector('[name="discountBenefit"]')?.value || '';
     const benefitPrices = {
+      BLACK_FRIDAY: BLACK_FRIDAY_PRICES,
       UNIVERSITY_STUDENT: { moto: 117, carro: 180 },
       HALLOWEEN: { moto: 114.99, carro: 164.99 },
       POLICE: { moto: 110, carro: 170 },
@@ -1984,7 +1983,7 @@ class StudentsView extends Component {
       summary.textContent = 'Este convenio solo aplica a los cursos de Moto y Carro.';
       return;
     }
-    const benefitLabel = benefit === 'COMBO' ? 'Combo' : benefit === 'POLICE' ? 'Policía' : 'Estudiante universitario';
+    const benefitLabel = benefit === 'BLACK_FRIDAY' ? 'Black Friday' : benefit === 'HALLOWEEN' ? 'Promo Halloween' : benefit === 'COMBO' ? 'Combo' : benefit === 'POLICE' ? 'Policía' : 'Estudiante universitario';
     summary.innerHTML = `Valor del curso: <strong>$${price.toFixed(2)}</strong> · Descuento: <strong>$${Math.min(discount, maximumDiscount).toFixed(2)}</strong> · Total final: <strong>$${Math.max(price - discount, minimumFinalAmount).toFixed(2)}</strong>${hasApplicableBenefit ? ` · Convenio: <strong>${benefitLabel}</strong>` : (isCarCourse ? ' · Mínimo permitido: <strong>$175.00</strong>' : '')}`;
   }
 
@@ -2296,18 +2295,6 @@ class StudentsView extends Component {
     `;
   }
 
-  isReservedSchedule(schedule, matchDate = true) {
-    const reservation = this.activatingReservation;
-    if (!reservation || String(schedule.cycleId) !== String(reservation.cycle_id)) return false;
-    const normalizeTime = value => (String(value || '').match(/\d{1,2}:\d{2}(?::\d{2})?/g) || [])
-      .map(time => time.split(':').slice(0, 2).map(part => part.padStart(2, '0')).join(':')).join('-');
-    const selections = reservation.draft_data?.schedulePlan?.selections || [];
-    if (selections.length) return selections.some(item => (!matchDate || String(item.date).slice(0, 10) === String(schedule.date).slice(0, 10))
-      && normalizeTime(item.time) === normalizeTime(schedule.time));
-    const time = normalizeTime(`${reservation.start_time || reservation.reserved_start_time || ''} - ${reservation.end_time || reservation.reserved_end_time || ''}`);
-    return Boolean(time) && time === normalizeTime(schedule.time);
-  }
-
   renderScheduleOption(schedule) {
     if (!schedule) {
       return '<div class="enrollment-calendar-empty-cell"></div>';
@@ -2341,7 +2328,7 @@ class StudentsView extends Component {
       instructorBaseStart: schedule.instructorBaseStart,
     }).replace(/"/g, '&quot;');
     const showOccupied = Boolean(this.useInstructorFirstAvailability)
-      || Boolean(this.recordEditContext && schedule.fullNormalSchedule) || this.isReservedSchedule(schedule);
+      || Boolean(this.recordEditContext && schedule.fullNormalSchedule);
     if (disabled && !showOccupied) {
       return `<div class="enrollment-calendar-empty-cell" data-day-index="${schedule.dayIndex ?? ''}" aria-label="Horario no disponible"></div>`;
     }
@@ -2461,7 +2448,6 @@ class StudentsView extends Component {
           durationBusinessDays: schedule.durationBusinessDays,
           calendarDates: schedule.calendarDates,
           instructors: schedule.instructors || [],
-          scheduledInstructors: schedule.scheduledInstructors || [],
         });
         cycles.push(cycleMap.get(cycleKey));
       }
@@ -2505,8 +2491,7 @@ class StudentsView extends Component {
         String(schedule.branch || '').trim().toLowerCase() === 'manta 2000')))));
     const times = [...new Set(cycleSchedules.map(schedule => schedule.time))]
       .filter(time => showCompleteHours || cycleSchedules.filter(schedule => schedule.time === time)
-        .some(schedule => this.isReservedSchedule(schedule, false)
-          || Object.values(schedule.availabilityByDate || {}).some(availability => Number(availability?.available || 0) > 0)))
+        .some(schedule => Object.values(schedule.availabilityByDate || {}).some(availability => Number(availability?.available || 0) > 0)))
       .sort((first, second) => first.localeCompare(second));
     const displayStartDate = String(cycle.officialStartDate || cycle.startDate) < String(cycle.startDate)
       ? cycle.officialStartDate : cycle.startDate;
@@ -2582,7 +2567,7 @@ class StudentsView extends Component {
               const rowSchedule = cycleSchedules.find(item => item.time === time);
               const normalRowUnavailable = !rowSchedule || Number(rowSchedule.available) <= 0;
               return `
-              <div class="enrollment-calendar-row ${normalRowUnavailable && !showCompleteHours && !this.isReservedSchedule(rowSchedule || {}, false) ? 'normal-row-unavailable' : ''}">
+              <div class="enrollment-calendar-row ${normalRowUnavailable && !showCompleteHours ? 'normal-row-unavailable' : ''}">
               <div class="enrollment-calendar-time">${time}</div>
               ${days.map((day, dayIndex) => {
                 const schedule = rowSchedule;
@@ -3002,8 +2987,21 @@ class StudentsView extends Component {
       allSchedules ||= await this.getSchedulesForModal(branchId, null, selectedPracticalStart || null, selectedPracticalCycleId);
       this.modalAllSchedules = allSchedules;
       this.modalAllSchedulesKey = allSchedulesKey;
-      schedules = this.mergeEnrollmentSchedules(allSchedules, schedules, selectedInstructorId,
-        Boolean(this.scheduleInstructorExplicit || this.recordEditContext || this.activatingReservation));
+      const selectedSchedules = schedules;
+      const selectedBySlot = new Map(selectedSchedules.map(schedule => [
+        `${schedule.cycleId || schedule.day}|${schedule.time}`,
+        schedule,
+      ]));
+      const baseScheduleKeys = new Set(allSchedules.map(schedule =>
+        `${schedule.cycleId || schedule.day}|${schedule.time}`));
+      schedules = [...allSchedules.map(schedule => {
+        const selected = selectedBySlot.get(`${schedule.cycleId || schedule.day}|${schedule.time}`);
+        if (selected) return { ...schedule, ...selected, instructors: schedule.instructors || selected.instructors || [] };
+        // El instructor seleccionado pertenece solo a su curso. Los demás
+        // ciclos deben conservarse para que Próximo respete G1, G2, G3, etc.
+        return schedule;
+      }), ...selectedSchedules.filter(schedule =>
+        !baseScheduleKeys.has(`${schedule.cycleId || schedule.day}|${schedule.time}`))];
     }
     // Si el modal se cerró o se hizo otra selección mientras esperaba la API,
     // esta respuesta ya no puede modificar el calendario actual.
@@ -3210,7 +3208,6 @@ class StudentsView extends Component {
         availabilityByDate: slot.occupancyByDate || {},
         calendarDates: Array.isArray(slot.dates) ? slot.dates : Array.isArray(cycle.dates) ? cycle.dates : Object.keys(slot.occupancyByDate || {}).sort(),
         instructors: cycle.instructors || [],
-        scheduledInstructors: cycle.scheduledInstructors || [],
       };
     }));
   }
@@ -3789,10 +3786,7 @@ class StudentsView extends Component {
       }
       if (!context.canFinance && form.elements.discountAmount) form.elements.discountAmount.disabled = true;
       if (!context.canSchedule && form.elements.course_id) form.elements.course_id.disabled = true;
-      const editSection = new URLSearchParams(window.location.search).get('editSection');
-      if (editSection === 'datos') this.goToModalStep(2);
-      else if (editSection === 'horario') this.goToModalStep(1);
-      if (editSection !== 'horario') form.querySelector('[name="firstName"]')?.focus();
+      form.querySelector('[name="firstName"]')?.focus();
     } catch (error) {
       this.preparingRecordEdit = false;
       if (!document.getElementById('student-modal-overlay')?.classList.contains('active')) this.openStudentModal();
@@ -3914,10 +3908,7 @@ class StudentsView extends Component {
     const modality = reservation.modality || reservedPlan.selections?.[0]?.modality || (weekend ? 'intensivo' : 'normal');
     const modalityInput = document.getElementById('selected-enrollment-modality');
     if (modalityInput) modalityInput.value = modality;
-    if (instructor && reservation.instructor_id) {
-      if (![...instructor.options].some(item => item.value === reservation.instructor_id)) {
-        instructor.add(new Option(reservation.instructor_name || 'Instructor de la reserva', reservation.instructor_id));
-      }
+    if (instructor && [...instructor.options].some(item => item.value === reservation.instructor_id)) {
       instructor.value = reservation.instructor_id;
       this.scheduleInstructorFilterId = reservation.instructor_id;
       await this.reloadModalSchedules(reservation.branch_id, reservation.instructor_id, null, {
@@ -3977,10 +3968,6 @@ class StudentsView extends Component {
       cell.classList.add('selected', 'reservation-activation-slot');
       cell.setAttribute('aria-disabled', 'false');
       cell.setAttribute('aria-hidden', 'false');
-      const status = cell.querySelector?.('.schedule-option-status');
-      if (status) status.textContent = 'Seleccionado';
-      const capacity = cell.querySelector?.('.schedule-option-capacity');
-      if (capacity) capacity.textContent = 'Horario reservado';
     });
     calendar.dataset.rotationEnabled = String(Boolean(reservation.draft_data?.schedulePlan?.rotation));
     calendar.querySelectorAll('.schedule-rotation-toggle').forEach(toggle => {
@@ -4043,7 +4030,6 @@ class StudentsView extends Component {
     if (form?.elements.scheduleId) form.elements.scheduleId.value = '';
     if (form?.elements.schedulePlan) form.elements.schedulePlan.value = '';
     this.scheduleInstructorFilterId = null;
-    this.scheduleInstructorExplicit = false;
     this.useInstructorFirstAvailability = false;
     this.instructorFirstAvailabilityDate = null;
     this.showCantonReferralInstructors = false;
@@ -4139,9 +4125,10 @@ class StudentsView extends Component {
         ? [
             { id: 'benefit:POLICE', name: 'Policía', role_name: 'Precio especial', branch_name: 'Moto $110 · Carro $170', discount_benefit: 'POLICE' },
             { id: 'benefit:UNIVERSITY_STUDENT', name: 'Estudiante universitario', role_name: 'Precio especial', branch_name: 'Moto $117 · Carro $180', discount_benefit: 'UNIVERSITY_STUDENT' },
+            { id: 'benefit:BLACK_FRIDAY', name: 'Promo Black Friday', role_name: '27 y 28 de noviembre de 2026', branch_name: 'Moto $100 · Carro $156', discount_benefit: 'BLACK_FRIDAY' },
             { id: 'benefit:HALLOWEEN', name: 'Promo Halloween', role_name: '28 al 31 de octubre de 2026', branch_name: 'Moto $114.99 · Carro $164.99', discount_benefit: 'HALLOWEEN' },
             { id: 'benefit:COMBO', name: 'Combo (2 o más personas)', role_name: 'Inscripción conjunta', branch_name: 'Moto $115 · Carro $180', discount_benefit: 'COMBO' },
-          ].filter(item => (item.discount_benefit !== 'HALLOWEEN' || isHalloweenPromotionActive()) && (item.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(normalizedQuery)
+          ].filter(item => (item.discount_benefit !== 'BLACK_FRIDAY' || isBlackFridayPromotionActive()) && (item.discount_benefit !== 'HALLOWEEN' || isHalloweenPromotionActive()) && (item.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(normalizedQuery)
             || (item.discount_benefit === 'UNIVERSITY_STUDENT' && 'universidad'.includes(normalizedQuery))))
         : [];
       this.referralStaffResults = [...benefitReferrals, ...staff];
@@ -4584,7 +4571,7 @@ class StudentsView extends Component {
     this.changingEnrollmentCycle = true;
     try {
     const calendars = [...cycleSet.querySelectorAll(':scope > .enrollment-calendar')];
-    const currentIndex = Number(cycleSet.dataset.activeCycleIndex ?? currentCalendar.dataset.cycleIndex ?? 0);
+    const currentIndex = Number(currentCalendar.dataset.cycleIndex || 0);
     const nextIndex = Math.max(0, Math.min(calendars.length - 1, currentIndex + direction));
     if (nextIndex === currentIndex && direction > 0 && button.dataset.loadNext === 'true') {
       await this.loadNextEnrollmentCycle(button, currentIndex);
@@ -4593,11 +4580,9 @@ class StudentsView extends Component {
     if (nextIndex === currentIndex) return;
     calendars.forEach(calendar => this.resetCalendarSelection(calendar));
     const nextCalendar = calendars[nextIndex];
-    if (!nextCalendar) return;
     const nextCycleId = nextCalendar?.dataset.cycleId;
     const nextInstructorId = this.scheduleInstructorExplicit ? this.scheduleInstructorFilterId : nextCalendar?.querySelector('.course-instructor-chip.active, .course-instructor-chip')?.dataset.courseInstructorId || null;
     if (nextInstructorId && String(nextInstructorId) !== String(this.scheduleInstructorFilterId || '')) {
-      this.scheduleInstructorExplicit = false;
       const form = document.getElementById('student-modal-form');
       const branchId = form?.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId;
       const preferredSelect = document.getElementById('preferred-instructor-select');
@@ -4613,9 +4598,6 @@ class StudentsView extends Component {
       }
     } else {
       cycleSet.dataset.activeCycleIndex = String(nextIndex);
-      calendars.forEach(calendar => {
-        calendar.style.display = calendar === nextCalendar ? 'block' : 'none';
-      });
     }
     const form = document.getElementById('student-modal-form');
     if (form?.elements.scheduleId) form.elements.scheduleId.value = '';
@@ -5586,6 +5568,11 @@ class StudentsView extends Component {
     const shouldCollectPayment = authService.can('PAYMENT_CREATE') && formData.get('collectPayment') === 'on';
     const discountAmount = Number(formData.get('discountAmount') || 0);
     const discountBenefit = String(formData.get('discountBenefit') || '');
+    if (discountBenefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive()) {
+      this.showModalAlert('error', 'Black Friday solo está vigente el 27 y 28 de noviembre de 2026.');
+      this.goToModalStep(1);
+      return;
+    }
     const selectedCourseOption = form.querySelector('[name="course_id"]')?.selectedOptions?.[0];
     const selectedCoursePrice = Number(selectedCourseOption?.dataset?.price || 0);
     const benefitCatalogType = selectedCourseOption?.dataset?.catalogType || selectedCourseOption?.dataset?.courseType;
@@ -6332,7 +6319,7 @@ class StudentsView extends Component {
     const instructorSummary = student.assignedInstructor?.name
       ? `<div class="student-registration-success__notice"><strong>Instructor asignado</strong><small>${escapeHtml(student.assignedInstructor.name)}</small></div>`
       : '';
-    layer.innerHTML = `<section class="branch-modal student-registration-success" role="dialog" aria-modal="true" aria-labelledby="student-access-title"><button type="button" class="student-registration-success__close" id="close-student-access" aria-label="Cerrar modal">×</button><div class="student-registration-success__icon">✓</div><div class="student-registration-success__title"><span>Registro completado</span><h2 id="student-access-title">Estudiante y acceso creados</h2><p>El estudiante, su horario, instructor y cuenta fueron registrados correctamente.</p></div>${instructorSummary}<div class="student-registration-success__notice"><strong>Credenciales de ingreso</strong><small>Entrégalas al estudiante. La contraseña deberá cambiarse al ingresar por primera vez.</small></div><div class="student-access-credentials"><label>Usuario<strong>${escapeHtml(student.access.username)}</strong></label><label>Contraseña temporal<strong>${escapeHtml(student.access.temporaryPassword)}</strong></label></div><p class="student-copy-status" id="student-copy-status" aria-live="polite"></p><div class="student-registration-success__actions"><button type="button" class="btn btn-light" id="copy-student-access">Copiar credenciales</button><button type="button" class="btn btn-primary" id="accept-student-access">Abrir expediente</button></div></section>`;
+    layer.innerHTML = `<section class="branch-modal student-registration-success" role="dialog" aria-modal="true" aria-labelledby="student-access-title"><button type="button" class="student-registration-success__close" id="close-student-access" aria-label="Cerrar modal">×</button><div class="student-registration-success__icon">✓</div><div class="student-registration-success__title"><span>Registro completado</span><h2 id="student-access-title">Estudiante y acceso creados</h2><p>El estudiante, su horario, instructor y cuenta fueron registrados correctamente.</p></div>${instructorSummary}<div class="student-registration-success__notice"><strong>Credenciales de ingreso</strong><small>Entrégalas al estudiante. La contraseña deberá cambiarse al ingresar por primera vez.</small></div><div class="student-access-credentials"><label>Usuario<strong>${escapeHtml(student.access.username)}</strong></label><label>Contraseña temporal<strong>${escapeHtml(student.access.temporaryPassword)}</strong></label></div><p class="student-copy-status" id="student-copy-status" aria-live="polite"></p><p class="form-error" id="student-indications-error" role="alert"></p><div class="student-registration-success__actions"><button type="button" class="btn btn-light" id="copy-student-access">Copiar credenciales</button>${student.enrollment_id ? '<button type="button" class="btn btn-secondary" id="send-registration-indications">Enviar indicaciones</button>' : ''}<button type="button" class="btn btn-primary" id="accept-student-access">Abrir expediente</button></div></section>`;
     document.body.appendChild(layer);
     document.body.style.overflow = 'hidden';
     const closeAccessModal = () => {
@@ -6340,6 +6327,20 @@ class StudentsView extends Component {
       this.closeStudentModal();
     };
     layer.querySelector('#close-student-access').onclick = closeAccessModal;
+    layer.querySelector('#send-registration-indications')?.addEventListener('click', async event => {
+      const button=event.currentTarget;
+      if (button.disabled) return;
+      const status=layer.querySelector('#student-indications-error');
+      button.disabled=true;
+      if (status) status.textContent='';
+      try {
+        const result=await ApiService.sendRegistrationIndications(student.id,student.enrollment_id);
+        if (!result.success) throw new Error(result.error || 'No se pudieron enviar las indicaciones.');
+      } catch (error) {
+        if (status) status.textContent=error.data?.error?.message || error.message || 'No se pudieron enviar las indicaciones.';
+        button.disabled=false;
+      }
+    });
     layer.querySelector('#copy-student-access').onclick = async event => {
       const text = `Usuario: ${student.access.username}\nContraseña temporal: ${student.access.temporaryPassword}`;
       const status = layer.querySelector('#student-copy-status');
@@ -6583,11 +6584,14 @@ class StudentsView extends Component {
     let previousBranch = null;
     return students.map(student => {
       const registrationBranch = student.salesBranchName || student.registeredByBranchName || 'Sucursal no registrada';
+      const registrationCity = student.salesBranchCity || student.registeredByCityName || 'Ciudad no registrada';
       const groupTitle = this.groupBy === 'instructor'
         ? (student.instructorName || 'Sin instructor') !== previousBranch
           ? `<div class="student-branch-group">Instructor: ${escapeHtml(student.instructorName || 'Sin instructor')}</div>`
           : ''
-        : '';
+        : registrationBranch !== previousBranch
+          ? `<div class="student-branch-group">${escapeHtml(registrationCity)} · ${escapeHtml(registrationBranch)}</div>`
+          : '';
       previousBranch = this.groupBy === 'instructor' ? (student.instructorName || 'Sin instructor') : registrationBranch;
       return `${groupTitle}
         <div class="table-row clickable-row" data-student-id="${escapeHtml(student.id)}" style="cursor:pointer;">
@@ -6596,7 +6600,7 @@ class StudentsView extends Component {
           <div class="table-cell">${escapeHtml(student.createdByName || 'No registrado')}</div>
           <div class="table-cell">${escapeHtml(registrationBranch)}</div>
           <div class="table-cell">${escapeHtml(student.instructorName || 'Sin instructor')}</div>
-          <div class="table-cell">${escapeHtml(this.formatReservationCreatedAt(student.createdAt))}</div>
+          <div class="table-cell">${DateHelper.format(student.createdAt, 'DD/MM/YYYY')}</div>
           <div class="table-cell"><span class="badge ${this.getStatusBadgeClass(student.status)}">${this.getStatusLabel(student.status)}</span></div>
         </div>`;
     }).join('');

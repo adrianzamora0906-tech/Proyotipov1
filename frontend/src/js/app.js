@@ -15,8 +15,8 @@ import "./data/DemoDataGenerator.js";
 // Views
 import LoginView from "./views/auth/LoginView.js?v=manos-restauradas-20261014";
 import DashboardView from "./views/dashboard/DashboardView.js?v=actualizacion-parcial-20261014";
-import StudentsView from "./views/students/StudentsView.js?v=registro-documentos-paralelo-20261119";
-import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=editar-opciones-20261113";
+import StudentsView from "./views/students/StudentsView.js?v=black-friday-20261125";
+import StudentProfileView from "./views/student-profile/StudentProfileView.js?v=corregir-cambio-horario-20261118";
 import DocumentsView from "./views/documents/DocumentsView.js?v=expedientes-por-estudiante-20260811";
 import ScheduleView from "./views/schedule/ScheduleView.js?v=estudiantes-orden-hora-20261015";
 import MissedPracticalClassesView from "./views/schedule/MissedPracticalClassesView.js?v=recuperacion-clases-20260918-3";
@@ -29,7 +29,7 @@ import CashDepositsView from "./views/cash/CashDepositsView.js";
 import RegisterPaymentView from "./views/cash/RegisterPaymentView.js";
 import PendingPaymentsView from "./views/cash/PendingPaymentsView.js?v=segunda-matricula-20261015";
 import CashHistoryView from "./views/cash/CashHistoryView.js";
-import CashOperationsView from "./views/cash/CashOperationsView.js?v=constancia-transferencia-20261016";
+import CashOperationsView from "./views/cash/CashOperationsView.js?v=banco-curso-20261116";
 import InstructorDashboardView from "./views/instructor/InstructorDashboardView.js?v=conteo-formacion-20261027";
 import InstructorAgendaView from "./views/instructor/InstructorAgendaView.js?v=estudiantes-por-formacion-20261027";
 import InstructorTheoryView from "./views/instructor/InstructorTheoryView.js?v=dashboard-profesor-teoria-20260907";
@@ -46,7 +46,7 @@ import AdminSecurityView from "./views/admin/AdminSecurityView.js?v=tipo-instruc
 import AdminWorkspaceView from "./views/admin/AdminWorkspaceView.js?v=actualizacion-parcial-20261014";
 import AdminBranchesView from "./views/admin/AdminBranchesView.js?v=suspender-instructor-20261116";
 import ManagerReportsView from "./views/manager/ManagerReportsView.js?v=periodo-compacto-20261023";
-import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=compras-confirmadas-20261020";
+import AtmAuthorizationView from "./views/admin/AtmAuthorizationView.js?v=registro-nomina-20261120";
 import AdminSettingsView from "./views/admin/AdminSettingsView.js?v=feriados-periodos-20261026";
 import AdminReferralCampaignView from "./views/admin/AdminReferralCampaignView.js";
 import ManagerWorkspaceView from "./views/manager/ManagerWorkspaceView.js";

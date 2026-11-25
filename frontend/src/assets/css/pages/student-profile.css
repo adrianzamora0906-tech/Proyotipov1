@@ -762,11 +762,6 @@
   gap: 12px;
 }
 
-.profile-edit-choice-intro {
-  margin: 0 0 18px;
-  color: var(--gray-500);
-}
-
 .profile-edit-choice {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) 20px;

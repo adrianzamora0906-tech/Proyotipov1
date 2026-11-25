@@ -4125,7 +4125,7 @@ class StudentsView extends Component {
         ? [
             { id: 'benefit:POLICE', name: 'Policía', role_name: 'Precio especial', branch_name: 'Moto $110 · Carro $170', discount_benefit: 'POLICE' },
             { id: 'benefit:UNIVERSITY_STUDENT', name: 'Estudiante universitario', role_name: 'Precio especial', branch_name: 'Moto $117 · Carro $180', discount_benefit: 'UNIVERSITY_STUDENT' },
-            { id: 'benefit:BLACK_FRIDAY', name: 'Promo Black Friday', role_name: '27 y 28 de noviembre de 2026', branch_name: 'Moto $100 · Carro $156', discount_benefit: 'BLACK_FRIDAY' },
+            { id: 'benefit:BLACK_FRIDAY', name: 'Promo Black Friday', role_name: '27 al 29 de noviembre de 2026', branch_name: 'Moto $100 · Carro $156', discount_benefit: 'BLACK_FRIDAY' },
             { id: 'benefit:HALLOWEEN', name: 'Promo Halloween', role_name: '28 al 31 de octubre de 2026', branch_name: 'Moto $114.99 · Carro $164.99', discount_benefit: 'HALLOWEEN' },
             { id: 'benefit:COMBO', name: 'Combo (2 o más personas)', role_name: 'Inscripción conjunta', branch_name: 'Moto $115 · Carro $180', discount_benefit: 'COMBO' },
           ].filter(item => (item.discount_benefit !== 'HALLOWEEN' || isHalloweenPromotionActive()) && (item.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(normalizedQuery)
@@ -4142,10 +4142,10 @@ class StudentsView extends Component {
     results.hidden = false;
     results.innerHTML = staff.length
       ? staff.map(person => `
-        <button type="button" class="staff-referral-option" data-referrer-id="${escapeHtml(person.id)}" ${person.discount_benefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive() ? 'disabled title="Disponible solo el 27 y 28 de noviembre de 2026"' : ''}>
+        <button type="button" class="staff-referral-option" data-referrer-id="${escapeHtml(person.id)}" ${person.discount_benefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive() ? 'disabled title="Disponible del 27 al 29 de noviembre de 2026"' : ''}>
           <strong>${escapeHtml(person.name)}</strong>
           <span>${escapeHtml(person.role_name || 'Personal')} · ${escapeHtml(person.branch_name || '')}</span>
-          ${person.discount_benefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive() ? '<span>Disponible solo el 27 y 28 de noviembre.</span>' : ''}
+          ${person.discount_benefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive() ? '<span>Disponible del 27 al 29 de noviembre.</span>' : ''}
         </button>`).join('')
       : '<div class="staff-referral-empty">No se encontró personal con ese nombre.</div>';
   }
@@ -5574,7 +5574,7 @@ class StudentsView extends Component {
     const discountAmount = Number(formData.get('discountAmount') || 0);
     const discountBenefit = String(formData.get('discountBenefit') || '');
     if (discountBenefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive()) {
-      this.showModalAlert('error', 'Black Friday solo está vigente el 27 y 28 de noviembre de 2026.');
+      this.showModalAlert('error', 'Black Friday solo está vigente del 27 al 29 de noviembre de 2026.');
       this.goToModalStep(1);
       return;
     }

@@ -4,6 +4,7 @@
  */
 
 import Router from "./core/router/Router.js";
+import QuickRegistrationView from './views/students/QuickRegistrationView.js';
 import BranchIncidentsView from './views/admin/BranchIncidentsView.js';
 import { authService } from "./core/auth/AuthService.js";
 import { storageService } from "./core/storage/StorageService.js";
@@ -70,6 +71,7 @@ class App {
    * Registra todas las rutas de la aplicación
    */
   registerRoutes() {
+    this.router.register('/quick-registration', QuickRegistrationView, 'quick-registration');
     // Auth
     this.router.register("/login", LoginView, "login");
     this.router.register(
@@ -258,6 +260,13 @@ class App {
       const currentRole = String(currentUser?.role || "")
         .trim()
         .toLowerCase();
+      if(isAuthenticated && currentUser?.roles?.includes('QUICK_REGISTRATION_OPERATOR')) {
+        if(!['quick-registration','student-profile'].includes(route.name) || (currentUser.mustChangePassword && route.name!=='quick-registration')) {
+          this.router.navigate('/quick-registration');return false;
+        }
+        return true;
+      }
+      if(route.name==='quick-registration' && isAuthenticated) {this.router.navigate('/dashboard');return false;}
       const isTheoryInstructor = currentRole === "instructor" && currentUser?.practiceArea === "teoria";
       const isAdminSystem = currentUser?.roles?.includes("ADMIN_SYSTEM");
       const isGeneralManager = currentUser?.roles?.includes("GENERAL_MANAGER");
@@ -427,6 +436,7 @@ class App {
    */
   getTitleByRoute(routeName) {
     const titles = {
+      "quick-registration": "Inscripción rápida",
       login: "Iniciar Sesión",
       dashboard: "Dashboard",
       students: "Estudiantes",

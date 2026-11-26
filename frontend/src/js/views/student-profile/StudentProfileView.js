@@ -7,6 +7,7 @@ import { readStudentCached, clearStudentReadCache } from '../../core/realtime/St
  */
 
 import Component from '../../components/Component.js';
+import QuickRegistrationView from '../students/QuickRegistrationView.js';
 import { renderQrDataUrl } from '../../lib/qrcodeRealLocal.js';
 import { subscribeRealtime } from '../../core/realtime/RealtimeClient.js';
 import SidebarLayout from '../../layouts/SidebarLayout.js';
@@ -47,6 +48,9 @@ class StudentProfileView extends Component {
   }
 
   async render() {
+    if(authService.getCurrentUser()?.roles?.includes('QUICK_REGISTRATION_OPERATOR')) {
+      this.quickView=new QuickRegistrationView(this.props);return this.quickView.render();
+    }
     const studentId = this.props.studentId;
     try {
       await authService.refreshAuthorization();
@@ -483,6 +487,7 @@ class StudentProfileView extends Component {
   }
 
   async mount() {
+    if(this.quickView)return this.quickView.mount();
     const studentId = this.props.studentId;
 
     // Tabs

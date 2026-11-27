@@ -24,6 +24,9 @@ export default class QuickRegistrationView extends Component {
       <form id="qr-form"><div class="qr-grid">
       ${[['identification','Cédula','text'],['firstName','Nombres','text'],['lastName','Apellidos','text'],['phone','Teléfono','tel'],['email','Correo del estudiante','email']].map(([name,label,type])=>`<label>${label}<input class="form-input" name="${name}" type="${type}" ${['identification','firstName','lastName'].includes(name)?'required':''} ${name==='identification'?'inputmode="numeric" pattern="[0-9]{10}" maxlength="10"':''}></label>`).join('')}
       <label>Fecha de nacimiento<input class="form-input" name="birthDate" type="date"></label>
+      <label>Dirección<input class="form-input" name="address" maxlength="300" autocomplete="street-address" placeholder="Calle, número y sector"></label>
+      <label>Tipo de sangre<select class="form-select" name="bloodType"><option value="">Selecciona</option>${['O+','O-','A+','A-','B+','B-','AB+','AB-','N/D'].map(type=>`<option value="${type}">${type==='N/D'?'No disponible':type}</option>`).join('')}</select></label>
+      <label>Nacionalidad<input class="form-input" name="nationality" maxlength="100" value="ECUATORIANA" placeholder="Nacionalidad"></label>
       <label>Curso<select class="form-select" name="courseId" required><option value="">Selecciona</option>${this.catalog.courses.map(course=>`<option value="${escape(course.id)}">${escape(course.name)} · $${Number(course.amount).toFixed(2)}</option>`).join('')}</select></label>
       <label>Modalidad<select class="form-select" name="modality"><option value="normal">Normal</option><option value="intensivo">Intensivo</option></select></label>
       <label class="qr-autocomplete">Instructor<input class="form-input" id="qr-instructor" autocomplete="off" placeholder="Buscar por nombres o apellidos" required aria-controls="qr-instructors"><span id="qr-instructors"></span></label>
@@ -35,6 +38,15 @@ export default class QuickRegistrationView extends Component {
       <section id="qr-result" hidden></section></section></main>`;
   }
   message(text) {const node=document.getElementById('qr-message');if(node)node.textContent=text;}
+  showRegistrationToast() {
+    document.getElementById('qr-success-toast')?.remove();
+    const toast=document.createElement('div');
+    toast.id='qr-success-toast';toast.className='qr-success-toast';
+    toast.setAttribute('role','status');toast.setAttribute('aria-live','polite');
+    toast.textContent='Éxito en el registro';
+    document.querySelector('.quick-registration')?.append(toast);
+    setTimeout(()=>toast.remove(),5000);
+  }
   values(){return Object.fromEntries(new FormData(this.form));}
   resetOptions(){this.options=[];this.form.elements.optionKey.innerHTML='<option value="">Consulta las opciones disponibles</option>';}
   async loadOptions(){
@@ -53,7 +65,7 @@ export default class QuickRegistrationView extends Component {
       this.message(dates.length?'Selecciona la fecha de inicio acordada con el instructor.':'No hay fechas con un horario completo disponible para este instructor.');
       return;
     }
-    this.options=[...new Map(this.options.map(item=>[`${item.time}:${item.endTime}`,item])).values()]
+    this.options=[...new Map(this.options.filter(item=>item.startDate===values.startDate).map(item=>[`${item.time}:${item.endTime}`,item])).values()]
       .sort((a,b)=>a.time.localeCompare(b.time));
     this.form.elements.optionKey.innerHTML='<option value="">Selecciona un horario</option>'+this.options.map(item=>`<option value="${escape(item.key)}">${escape(item.time)}–${escape(item.endTime)}</option>`).join('');
     this.message(this.options.length?'Selecciona el horario acordado.':'No hay un horario completo disponible para esa fecha. Verifica el acuerdo con Secretaría.');
@@ -64,7 +76,9 @@ export default class QuickRegistrationView extends Component {
     const result=await apiClient.get(`${endpoint}/students?search=${encodeURIComponent(identification)}`);
     if(this.form.elements.identification.value!==identification)return false;
     const found=result.data.find(item=>item.identification===identification);
-    for(const key of ['firstName','lastName','phone','email']) {const field=this.form.elements[key];field.readOnly=Boolean(found);if(found)field.value=found[key]||'';}
+    for(const key of ['firstName','lastName','phone','email','address','nationality']) {const field=this.form.elements[key];field.readOnly=Boolean(found);if(found)field.value=found[key]||'';}
+    this.form.elements.bloodType.disabled=Boolean(found);
+    if(found)this.form.elements.bloodType.value=found.bloodType||'';
     document.getElementById('qr-existing').textContent=found?'Estudiante existente. Se conserva su identidad; solo se agregará el curso autorizado.':'';
     this.checkedIdentity=identification;return true;
   }
@@ -77,7 +91,7 @@ export default class QuickRegistrationView extends Component {
     this.form=root.querySelector('#qr-form');if(!this.form)return;
     const safe=fn=>async event=>{try{await fn(event);}catch(error){this.message(error.message);}};
     this.form.addEventListener('input',()=>{root.querySelector('#qr-summary').hidden=true;});
-    this.form.elements.identification.addEventListener('input',()=>{this.checkedIdentity=null;for(const key of ['firstName','lastName','phone','email']){const field=this.form.elements[key];if(field.readOnly)field.value='';field.readOnly=false;}});
+    this.form.elements.identification.addEventListener('input',()=>{this.checkedIdentity=null;for(const key of ['firstName','lastName','phone','email','address','nationality']){const field=this.form.elements[key];if(field.readOnly)field.value=key==='nationality'?'ECUATORIANA':'';field.readOnly=false;}if(this.form.elements.bloodType.disabled)this.form.elements.bloodType.value='';this.form.elements.bloodType.disabled=false;});
     this.form.elements.identification.addEventListener('blur',safe(()=>this.lookup()));
     const resetDates=()=>{const field=this.form.elements.startDate;field.innerHTML='<option value="">Selecciona curso e instructor</option>';field.disabled=true;};
     this.form.elements.courseId.addEventListener('change',()=>{this.instructorId='';root.querySelector('#qr-instructor').value='';resetDates();this.resetOptions();++this.version;});
@@ -109,12 +123,18 @@ export default class QuickRegistrationView extends Component {
       sessionStorage.setItem('qr-pending-operation',this.draft.requestId);
       try {
         const {data}=await apiClient.post(`${endpoint}/enrollments`,this.draft);
-        if(data.status==='completed'){sessionStorage.removeItem('qr-pending-operation');this.message('Inscripción registrada. Pago pendiente en Caja.');root.querySelector('#qr-summary').hidden=true;this.form.hidden=true;
+        if(data.status==='completed'){sessionStorage.removeItem('qr-pending-operation');this.message('Inscripción registrada. Pago pendiente en Caja.');root.querySelector('#qr-summary').hidden=true;
+          this.form.reset();this.form.hidden=false;this.checkedIdentity=null;this.draft=null;
+          for(const key of ['firstName','lastName','phone','email','address','nationality'])this.form.elements[key].readOnly=false;
+          this.form.elements.bloodType.disabled=false;
+          this.instructorId='';root.querySelector('#qr-instructor').value='';resetDates();this.resetOptions();++this.version;
+          root.querySelector('#qr-existing').textContent='';
+          this.showRegistrationToast();
           const result=root.querySelector('#qr-result');result.hidden=false;result.innerHTML=`<a class="btn btn-secondary" href="/student-profile/${escape(data.studentId)}" data-result-profile>Consultar perfil</a> <button class="btn btn-primary" type="button" id="qr-next">Nueva inscripción</button>`;
           result.querySelector('a').addEventListener('click',event=>{event.preventDefault();go(event.currentTarget.getAttribute('href'));});result.querySelector('#qr-next').addEventListener('click',()=>go('/quick-registration'));
         }else {this.message(data.message||`Resultado: ${data.status}. Solicita revisión a Secretaría. Referencia: ${this.draft.requestId}`);}
       }catch(error){this.message(`No se pudo confirmar el resultado. No repitas la inscripción. Solicita revisión con referencia ${this.draft.requestId}. ${error.message}`);}
-      finally{this.busy=false;}
+      finally{this.busy=false;button.disabled=false;}
     }));
     const pending=sessionStorage.getItem('qr-pending-operation');
     if(pending){this.form.hidden=true;const result=await apiClient.get(`${endpoint}/enrollments/${encodeURIComponent(pending)}`);this.message(result.data?.status==='completed'?'La inscripción anterior fue completada. Consulta el perfil desde la búsqueda.':`Hay una inscripción pendiente de revisión. No la repitas. Referencia: ${pending}`);if(result.data?.status==='completed'){sessionStorage.removeItem('qr-pending-operation');this.form.hidden=false;}}

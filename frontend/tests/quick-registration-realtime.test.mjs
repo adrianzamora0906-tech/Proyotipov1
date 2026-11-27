@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+
+test('aplicacion y selector de horarios comparten el mismo modulo de conexion',()=>{
+ const appUrl=new URL('../src/js/app.js',import.meta.url);
+ const holdsUrl=new URL('../src/js/core/realtime/ScheduleSelectionHolds.js',import.meta.url);
+ const importedClient=url=>{
+  const text=fs.readFileSync(url,'utf8');
+  const specifier=text.match(/import\s*\{\s*realtimeClient\s*\}\s*from\s*['"]([^'"]+)['"]/)[1];
+  return new URL(specifier,url).href;
+ };
+ assert.equal(importedClient(appUrl),importedClient(holdsUrl));
+});
 const source=fs.readFileSync(new URL('../src/js/core/realtime/RealtimeClient.js',import.meta.url),'utf8')
   .replace(/^import .*;\r?\n/gm,'').replace('export const realtimeClient = new RealtimeClient();','globalThis.client = new RealtimeClient();').replace('export function subscribeRealtime','function subscribeRealtime');
 function fixture(roles){let connections=0,refreshes=0,expirations=0;const timers=[];

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v123-pruebas-black-friday-155-20261127';
+const CACHE_NAME = 'sportmancar-offline-v124-conexion-horarios-20261127';
 const APP_SHELL = [
   '/',
   '/index.html',

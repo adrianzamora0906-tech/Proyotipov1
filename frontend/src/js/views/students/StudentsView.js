@@ -4125,7 +4125,7 @@ class StudentsView extends Component {
         ? [
             { id: 'benefit:POLICE', name: 'Policía', role_name: 'Precio especial', branch_name: 'Moto $110 · Carro $170', discount_benefit: 'POLICE' },
             { id: 'benefit:UNIVERSITY_STUDENT', name: 'Estudiante universitario', role_name: 'Precio especial', branch_name: 'Moto $117 · Carro $180', discount_benefit: 'UNIVERSITY_STUDENT' },
-            { id: 'benefit:BLACK_FRIDAY', name: 'Promo Black Friday', role_name: '27 al 29 de noviembre de 2026', branch_name: 'Moto $100 · Carro $155', discount_benefit: 'BLACK_FRIDAY' },
+            { id: 'benefit:BLACK_FRIDAY', name: 'Promo Black Friday', role_name: '27 al 29 de noviembre de 2026', branch_name: 'Moto $99.99 · Carro $154.99', discount_benefit: 'BLACK_FRIDAY' },
             { id: 'benefit:HALLOWEEN', name: 'Promo Halloween', role_name: '28 al 31 de octubre de 2026', branch_name: 'Moto $114.99 · Carro $164.99', discount_benefit: 'HALLOWEEN' },
             { id: 'benefit:COMBO', name: 'Combo (2 o más personas)', role_name: 'Inscripción conjunta', branch_name: 'Moto $115 · Carro $180', discount_benefit: 'COMBO' },
           ].filter(item => (item.discount_benefit !== 'HALLOWEEN' || isHalloweenPromotionActive()) && (item.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(normalizedQuery)

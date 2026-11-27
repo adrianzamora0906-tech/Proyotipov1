@@ -10,7 +10,7 @@ const server=http.createServer(async(req,res)=>{
   const url=new URL(req.url,'http://localhost');
   const json=data=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({success:true,data}));};
   if(url.pathname.startsWith('/api/')){
-    if(url.pathname.endsWith('/catalog'))return json({promotionActive:true,courses:[{id:courseId,name:'Clase B Automovil',amount:156}]});
+    if(url.pathname.endsWith('/catalog'))return json({promotionActive:true,courses:[{id:courseId,name:'Clase B Automovil',amount:154.99}]});
     if(url.pathname.endsWith('/instructors'))return json([{id:instructorId,name:'INSTRUCTOR SINTETICO'}]);
     if(url.pathname.endsWith('/options'))return json([option]);
     if(url.pathname.endsWith('/students'))return json(identityExists?[identity]:[]);
@@ -34,7 +34,7 @@ const server=http.createServer(async(req,res)=>{
     await page.locator('[name=identification]').fill(identity.identification);await page.locator('[name=firstName]').fill(identity.firstName);await page.locator('[name=lastName]').fill(identity.lastName);
     await page.locator('[name=courseId]').selectOption(courseId);await page.locator('#qr-instructor').fill('SINTETICO');await page.getByRole('button',{name:'INSTRUCTOR SINTETICO',exact:true}).click();
     await page.locator('[name=startDate]').selectOption('2026-11-30');await page.locator('[name=optionKey]').selectOption(option.key);await page.getByRole('button',{name:'Revisar inscripción'}).click();await page.locator('#qr-summary').waitFor({state:'visible'});
-    assert.match(await page.locator('#qr-summary-content').innerText(),/156.00/);
+    assert.match(await page.locator('#qr-summary-content').innerText(),/154\.99/);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     await page.locator('#qr-confirm').evaluate(button=>{button.click();button.click();});await page.locator('#qr-next').waitFor();assert.equal(writes,1);
     identityExists=true;await page.goto(url);await page.waitForFunction(()=>window.fixtureReady);await page.locator('[name=identification]').fill(identity.identification);await page.locator('[name=identification]').blur();await page.waitForFunction(()=>document.querySelector('[name=firstName]').readOnly);assert.equal(await page.locator('[name=firstName]').inputValue(),identity.firstName);

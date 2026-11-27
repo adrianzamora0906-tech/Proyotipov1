@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v126-fechas-instructor-20261127';
+const CACHE_NAME = 'sportmancar-offline-v127-promo-centavos-20261127';
 const APP_SHELL = [
   '/',
   '/index.html',

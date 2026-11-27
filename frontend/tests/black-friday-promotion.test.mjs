@@ -14,14 +14,14 @@ async function fixture(kind='carro'){
  const {default:View}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64')+'#'+kind+Math.random());
  return {view:new View(),fields,runSearch:()=>scheduled()};
 }
-for(const [kind,price] of [['carro','156.00'],['moto','100.00']])test('Resumen real del formulario: '+kind+' $'+price,async()=>{const {view,fields}=await fixture(kind);view.updateRegistrationPaymentSummary();assert(fields.summary.innerHTML.includes('$'+price));assert(fields.summary.innerHTML.includes('Black Friday'));assert.equal(Number(fields.discount.value),kind==='carro'?34:25)});
+for(const [kind,price] of [['carro','155.00'],['moto','100.00']])test('Resumen real del formulario: '+kind+' $'+price,async()=>{const {view,fields}=await fixture(kind);view.updateRegistrationPaymentSummary();assert(fields.summary.innerHTML.includes('$'+price));assert(fields.summary.innerHTML.includes('Black Friday'));assert.equal(Number(fields.discount.value),kind==='carro'?35:25)});
 for(const [now,active] of [['2026-11-25T12:00:00-05:00',false],['2026-11-27T00:00:00-05:00',true],['2026-11-28T23:59:59-05:00',true],['2026-11-29T00:00:00-05:00',true],['2026-11-29T23:59:59-05:00',true],['2026-11-30T00:00:00-05:00',false]])test('Black Friday visible y seleccionable solo en vigencia '+now,async()=>{
  const {view,fields,runSearch}=await fixture();fields.now=now;
  view.scheduleReferralStaffSearch('black',0);await runSearch();
  assert(view.referralStaffResults.some(r=>r.discount_benefit==='BLACK_FRIDAY'));
  assert(fields.results.innerHTML.includes('Promo Black Friday'));
  assert(fields.results.innerHTML.includes('Moto $100'));
- assert(fields.results.innerHTML.includes('Carro $156'));
+ assert(fields.results.innerHTML.includes('Carro $155'));
  assert.equal(/\bdisabled\b/.test(fields.results.innerHTML),!active);
  view.selectReferralStaff('benefit:BLACK_FRIDAY');
  assert.equal(fields.benefitInput.value,active?'BLACK_FRIDAY':'');

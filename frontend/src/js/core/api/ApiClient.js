@@ -121,7 +121,14 @@ class ApiClient {
     try { session = JSON.parse(sessionStorage.getItem('erp_session') || 'null'); } catch { return false; }
     if (!session?.refreshToken) return false;
     const response = await this.fetchWithFallback('/auth/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: session.refreshToken }) });
-    if (!response.ok) return false;
+    if (!response.ok) {
+      if (response.status === 401) return false;
+      const error = new Error(response.status === 429
+        ? 'El servidor limita temporalmente las solicitudes. Espera un momento y vuelve a intentar.'
+        : 'No se pudo renovar la sesion temporalmente. Vuelve a intentar.');
+      error.status = response.status;
+      throw error;
+    }
     const data = (await response.json()).data;
     if (!data?.token || !data?.refreshToken) return false;
     let activeSession;

@@ -17,13 +17,29 @@ class PaymentVoidInbox {
   }
 
   async refresh() {
-    if (this.busy) { this.again = true; return; }
+    const user = authService.getCurrentUser();
+    if (!user || user.mustChangePassword || user.roles?.includes('QUICK_REGISTRATION_OPERATOR')) {
+      this.pending = []; this.reviewed = []; this.error = '';
+      document.getElementById('payment-void-button')?.remove();
+      document.getElementById('payment-void-inbox')?.remove();
+      return;
+    }
+    if (this.busy) return;
     const userId = currentUserId();
     if (!userId) { document.getElementById('payment-void-button')?.remove(); return; }
+    const key = `${userId}:${user.sessionId || ''}`;
+    if (this.deniedKey === key) return;
+    if (this.lastKey === key && Date.now() - this.lastRefresh < 5000) return;
+    this.lastKey = key; this.lastRefresh = Date.now();
     this.busy = true;
     try {
       const [pending, reviewed] = await Promise.all([ApiService.getPendingPaymentVoidRequests(), ApiService.getMyReviewedPaymentVoidRequests()]);
       if (userId !== currentUserId()) return;
+      if (pending.status === 403 || reviewed.status === 403) {
+        this.deniedKey = key;
+        this.pending = []; this.reviewed = []; this.error = '';
+        return;
+      }
       if (!pending.success || !reviewed.success) throw new Error('No se pudieron consultar las anulaciones.');
       this.pending = pending.data || []; this.reviewed = reviewed.data || []; this.error = '';
     } catch (error) { this.error = error.message || 'No se pudieron consultar las anulaciones.'; }
@@ -34,7 +50,6 @@ class PaymentVoidInbox {
         window.dispatchEvent(new CustomEvent('erp:payment-void-inbox'));
         if (document.getElementById('payment-void-inbox') && !document.querySelector('#payment-void-inbox textarea:focus')) this.renderInbox();
       }
-      if (this.again) { this.again = false; this.refresh(); }
     }
   }
 

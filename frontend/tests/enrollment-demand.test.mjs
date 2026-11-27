@@ -21,6 +21,23 @@ function setup(respond) {
 const cycles = [{ id: 'first' }, { id: 'second' }, { id: 'third' }];
 const detail = id => ({ id, instructors: [{ id: 'instructor' }], slots: [{ available: 1 }] });
 
+test('pulsar Talía conserva su selección aunque otro instructor sea primero del grupo', async () => {
+  const { view, calls } = setup(p => ({ success: true, data: p.catalog_only ? cycles : [{
+    ...detail(p.cycle_id), instructors: [{ id: 'first-instructor' }, { id: 'talia' }],
+  }] }));
+  const start = source.indexOf('      const instructorId = instructorButton.dataset.courseInstructorId || null;');
+  const end = source.indexOf('      document.querySelectorAll', start);
+  const click = vm.runInNewContext(`(function () { ${source.slice(start, end)} })`, {
+    instructorButton: { dataset: { courseInstructorId: 'talia' } },
+  });
+  click.call(view);
+  assert.equal(view.scheduleInstructorExplicit, true);
+  const loaded = await view.loadDemandEnrollmentSchedules('branch', 'talia', null, {}, 1);
+  assert.equal(loaded.instructorId, 'talia');
+  assert.ok(calls.every(p => p.instructor_id === 'talia'));
+  assert.equal(calls.length, 2, 'No debe volver a consultar al primero del grupo');
+});
+
 test('solo consulta moto normal y el detalle del ciclo solicitado', async () => {
   const { view, calls } = setup(p => ({ success: true, data: p.catalog_only ? cycles : [detail(p.cycle_id)] }));
   const loaded = await view.loadDemandEnrollmentSchedules('branch', null, null, { demandCycleId: 'second' }, 1);

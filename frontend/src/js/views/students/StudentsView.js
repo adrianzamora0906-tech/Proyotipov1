@@ -1411,6 +1411,7 @@ class StudentsView extends Component {
         return;
       }
       const instructorId = instructorButton.dataset.courseInstructorId || null;
+      this.scheduleInstructorExplicit = Boolean(instructorId);
       document.querySelectorAll('#student-schedule-calendar [data-course-instructor-id]').forEach(button => {
         const selected = String(button.dataset.courseInstructorId || '') === String(instructorId || '');
         button.classList.toggle('active', selected);

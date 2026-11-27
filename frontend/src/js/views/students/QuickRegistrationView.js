@@ -27,7 +27,7 @@ export default class QuickRegistrationView extends Component {
       <label>Modalidad<select class="form-select" name="modality"><option value="normal">Normal</option><option value="intensivo">Intensivo</option></select></label>
       <label class="qr-autocomplete">Instructor<input class="form-input" id="qr-instructor" autocomplete="off" placeholder="Buscar por nombres o apellidos" required aria-controls="qr-instructors"><span id="qr-instructors"></span></label>
       <label>Fecha de inicio acordada<select class="form-select" name="startDate" required disabled><option value="">Selecciona curso e instructor</option></select></label>
-      <label>Ciclo y horario<select class="form-select" name="optionKey" required><option value="">Completa curso, instructor y fecha</option></select></label>
+      <label>Horario disponible<select class="form-select" name="optionKey" required><option value="">Completa curso, instructor y fecha</option></select></label>
       <label>Teoría<select class="form-select" name="theorySchedule"><option value="pendiente">Pendiente de confirmar</option><option value="virtual">Virtual</option></select></label>
       </div><p id="qr-existing" role="status"></p><p id="qr-dates"></p><button class="btn btn-primary" type="submit" ${this.catalog.promotionActive?'':'disabled'}>Revisar inscripción</button>
       <section id="qr-summary" class="qr-summary" hidden><h3>Confirmar inscripción</h3><div id="qr-summary-content"></div><button class="btn btn-primary" type="button" id="qr-confirm">Confirmar inscripción</button><button class="btn btn-secondary" type="button" id="qr-cancel">Volver al formulario</button></section></form>
@@ -42,7 +42,7 @@ export default class QuickRegistrationView extends Component {
     const query=new URLSearchParams({courseId:values.courseId,modality:values.modality,instructorId:this.instructorId});
     if(values.startDate)query.set('startDate',values.startDate);
     const result=await apiClient.get(`${endpoint}/options?${query}`);if(version!==this.version)return;
-    this.options=result.data;
+    this.options=(result.data||[]).filter(item=>!values.startDate||item.startDate===values.startDate);
     if(!values.startDate){
       const dates=[...new Set(this.options.map(item=>item.startDate))].sort();
       const field=this.form.elements.startDate;
@@ -52,7 +52,9 @@ export default class QuickRegistrationView extends Component {
       this.message(dates.length?'Selecciona la fecha de inicio acordada con el instructor.':'No hay fechas con un horario completo disponible para este instructor.');
       return;
     }
-    this.form.elements.optionKey.innerHTML='<option value="">Selecciona un horario</option>'+this.options.map(item=>`<option value="${escape(item.key)}">${escape(item.code)} · ${escape(item.time)}–${escape(item.endTime)} · ${item.dates.length} clases</option>`).join('');
+    this.options=[...new Map(this.options.map(item=>[`${item.time}:${item.endTime}`,item])).values()]
+      .sort((a,b)=>a.time.localeCompare(b.time));
+    this.form.elements.optionKey.innerHTML='<option value="">Selecciona un horario</option>'+this.options.map(item=>`<option value="${escape(item.key)}">${escape(item.time)}–${escape(item.endTime)}</option>`).join('');
     this.message(this.options.length?'Selecciona el horario acordado.':'No hay un horario completo disponible para esa fecha. Verifica el acuerdo con Secretaría.');
   }
   async lookup(){

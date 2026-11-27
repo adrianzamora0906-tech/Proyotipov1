@@ -30,13 +30,13 @@ export default class QuickRegistrationView extends Component {
       <label>Fecha de inicio acordada<select class="form-select" name="startDate" required disabled><option value="">Selecciona curso e instructor</option></select></label>
       <label>Horario disponible<select class="form-select" name="optionKey" required><option value="">Completa curso, instructor y fecha</option></select></label>
       <label>Teoría<select class="form-select" name="theorySchedule"><option value="pendiente">Pendiente de confirmar</option><option value="virtual">Virtual</option></select></label>
-      </div><p id="qr-existing" role="status"></p><p id="qr-dates"></p><button class="btn btn-primary" type="submit" ${this.catalog.promotionActive?'':'disabled'}>Revisar inscripción</button>
+      </div><p id="qr-existing" role="status"></p><button class="btn btn-primary" type="submit" ${this.catalog.promotionActive?'':'disabled'}>Revisar inscripción</button>
       <section id="qr-summary" class="qr-summary" hidden><h3>Confirmar inscripción</h3><div id="qr-summary-content"></div><button class="btn btn-primary" type="button" id="qr-confirm">Confirmar inscripción</button><button class="btn btn-secondary" type="button" id="qr-cancel">Volver al formulario</button></section></form>
       <section id="qr-result" hidden></section></section></main>`;
   }
   message(text) {const node=document.getElementById('qr-message');if(node)node.textContent=text;}
   values(){return Object.fromEntries(new FormData(this.form));}
-  resetOptions(){this.options=[];this.form.elements.optionKey.innerHTML='<option value="">Consulta las opciones disponibles</option>';document.getElementById('qr-dates').textContent='';}
+  resetOptions(){this.options=[];this.form.elements.optionKey.innerHTML='<option value="">Consulta las opciones disponibles</option>';}
   async loadOptions(){
     this.resetOptions();const values=this.values();const version=++this.version;
     if(!values.courseId||!this.instructorId)return;
@@ -92,7 +92,6 @@ export default class QuickRegistrationView extends Component {
         const list=root.querySelector('#qr-instructors');list.innerHTML=result.data.map(item=>`<button type="button" class="btn btn-secondary" data-instructor="${escape(item.id)}">${escape(instructorName(item.name))}</button>`).join('')||'Sin coincidencias';
         list.querySelectorAll('button').forEach(button=>button.addEventListener('click',safe(async()=>{++instructorVersion;this.instructorId=button.dataset.instructor;root.querySelector('#qr-instructor').value=button.textContent;list.innerHTML='';await this.loadOptions();})));}),180);
     });
-    this.form.elements.optionKey.addEventListener('change',()=>{const option=this.options.find(item=>item.key===this.form.elements.optionKey.value);root.querySelector('#qr-dates').textContent=option?`Clases: ${option.dates.join(', ')}`:'';});
     let searchVersion=0;let searchTimer;
     root.querySelector('#qr-search').addEventListener('input',event=>{clearTimeout(searchTimer);const version=++searchVersion;const search=event.target.value;root.querySelector('#qr-search-results').innerHTML='';if(search.trim().length<3)return;
       searchTimer=setTimeout(safe(async()=>{const {data}=await apiClient.get(`${endpoint}/students?search=${encodeURIComponent(search)}`);if(version!==searchVersion)return;const results=root.querySelector('#qr-search-results');results.innerHTML=data.map(item=>`<p><a href="/student-profile/${escape(item.id)}">${escape(item.firstName)} ${escape(item.lastName)} · ${escape(item.identification)}</a></p>`).join('')||'Sin resultados en tu sucursal';results.querySelectorAll('a').forEach(link=>link.addEventListener('click',event=>{event.preventDefault();go(link.getAttribute('href'));}));}),180);

@@ -16,6 +16,7 @@ class RealtimeClient {
   }
 
   syncSession() {
+    if (this.isQuickRegistrationSession()) { this.disconnect(); return; }
     const token = apiClient.getToken();
     if (!token) { this.disconnect(); return; }
     if (this.socket && this.token === token) return;
@@ -24,6 +25,7 @@ class RealtimeClient {
   }
 
   connect() {
+    if (this.isQuickRegistrationSession()) { this.disconnect(); return; }
     if (this.socket) return;
     const token = apiClient.getToken();
     if (!token || !navigator.onLine) return;
@@ -72,6 +74,11 @@ class RealtimeClient {
       const delay = Math.min(30000,1000 * (2 ** Math.min(this.attempts++,5))) + Math.random()*500;
       this.retry = setTimeout(() => this.connect(),delay);
     };
+  }
+
+  isQuickRegistrationSession() {
+    try { return JSON.parse(sessionStorage.getItem('erp_session') || 'null')?.roles?.includes('QUICK_REGISTRATION_OPERATOR') === true; }
+    catch { return false; }
   }
 
   disconnect() {

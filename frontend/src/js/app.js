@@ -8,7 +8,7 @@ import QuickRegistrationView from './views/students/QuickRegistrationView.js';
 import BranchIncidentsView from './views/admin/BranchIncidentsView.js';
 import { authService } from "./core/auth/AuthService.js";
 import { storageService } from "./core/storage/StorageService.js";
-import { realtimeClient } from "./core/realtime/RealtimeClient.js";
+import { realtimeClient } from "./core/realtime/RealtimeClient.js?v=sesion-operador-20261127";
 import { relevantRealtimeTopics } from "./core/realtime/RealtimeRoutePolicy.js";
 import StudentService from "./services/StudentService.js";
 import "./data/DemoDataGenerator.js";

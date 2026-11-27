@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sportmancar-offline-v120-pruebas-inscripcion-rapida-20261126';
+const CACHE_NAME = 'sportmancar-offline-v121-pruebas-sesion-operador-20261127';
 const APP_SHELL = [
   '/',
   '/index.html',

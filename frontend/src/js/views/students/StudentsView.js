@@ -1492,6 +1492,7 @@ class StudentsView extends Component {
       this.useInstructorFirstAvailability = false;
       this.instructorFirstAvailabilityDate = null;
       this.scheduleInstructorFilterId = null;
+      this.scheduleInstructorExplicit = false;
       const preferredInstructor = document.getElementById('preferred-instructor-select');
       if (preferredInstructor) preferredInstructor.value = '';
       const branchId = branchSelect?.selectedOptions?.[0]?.dataset?.branchId;
@@ -1515,6 +1516,7 @@ class StudentsView extends Component {
     form?.querySelector('[name="discountAmount"]')?.addEventListener('input', () => this.updateRegistrationPaymentSummary());
     form?.querySelector('[name="preferredInstructorId"]')?.addEventListener('change', async event => {
       this.scheduleInstructorFilterId = event.target.value || null;
+      this.scheduleInstructorExplicit = Boolean(event.target.value);
       const branchId = branchSelect?.selectedOptions?.[0]?.dataset?.branchId;
       this.useInstructorFirstAvailability = false;
       this.instructorFirstAvailabilityDate = null;
@@ -2353,7 +2355,7 @@ class StudentsView extends Component {
       instructorBaseStart: schedule.instructorBaseStart,
     }).replace(/"/g, '&quot;');
     const showOccupied = Boolean(this.useInstructorFirstAvailability)
-      || Boolean(this.recordEditContext && schedule.fullNormalSchedule);
+      || Boolean(this.recordEditContext && schedule.fullNormalSchedule) || this.isReservedSchedule(schedule);
     if (disabled && !showOccupied) {
       return `<div class="enrollment-calendar-empty-cell" data-day-index="${schedule.dayIndex ?? ''}" aria-label="Horario no disponible"></div>`;
     }
@@ -2398,6 +2400,18 @@ class StudentsView extends Component {
         <span class="schedule-option-capacity">${normalAvailable} ${normalAvailable === 1 ? 'cupo disponible' : 'cupos disponibles'}</span>
       </button>
     `;
+  }
+
+  isReservedSchedule(schedule, matchDate = true) {
+    const reservation = this.activatingReservation;
+    if (!reservation || String(schedule.cycleId) !== String(reservation.cycle_id)) return false;
+    const normalizeTime = value => (String(value || '').match(/\d{1,2}:\d{2}(?::\d{2})?/g) || [])
+      .map(time => time.split(':').slice(0, 2).map(part => part.padStart(2, '0')).join(':')).join('-');
+    const selections = reservation.draft_data?.schedulePlan?.selections || [];
+    if (selections.length) return selections.some(item => (!matchDate || String(item.date).slice(0, 10) === String(schedule.date).slice(0, 10))
+      && normalizeTime(item.time) === normalizeTime(schedule.time));
+    const time = normalizeTime(`${reservation.start_time || reservation.reserved_start_time || ''} - ${reservation.end_time || reservation.reserved_end_time || ''}`);
+    return Boolean(time) && time === normalizeTime(schedule.time);
   }
 
   renderScheduleModalitySelector() {
@@ -2473,6 +2487,7 @@ class StudentsView extends Component {
           durationBusinessDays: schedule.durationBusinessDays,
           calendarDates: schedule.calendarDates,
           instructors: schedule.instructors || [],
+          scheduledInstructors: schedule.scheduledInstructors || [],
         });
         cycles.push(cycleMap.get(cycleKey));
       }
@@ -2522,7 +2537,8 @@ class StudentsView extends Component {
         String(schedule.branch || '').trim().toLowerCase() === 'manta 2000')))));
     const times = [...new Set(cycleSchedules.map(schedule => schedule.time))]
       .filter(time => showCompleteHours || cycleSchedules.filter(schedule => schedule.time === time)
-        .some(schedule => Object.values(schedule.availabilityByDate || {}).some(availability => Number(availability?.available || 0) > 0)))
+        .some(schedule => this.isReservedSchedule(schedule, false)
+          || Object.values(schedule.availabilityByDate || {}).some(availability => Number(availability?.available || 0) > 0)))
       .sort((first, second) => first.localeCompare(second));
     const displayStartDate = String(cycle.officialStartDate || cycle.startDate) < String(cycle.startDate)
       ? cycle.officialStartDate : cycle.startDate;
@@ -2598,7 +2614,7 @@ class StudentsView extends Component {
               const rowSchedule = cycleSchedules.find(item => item.time === time);
               const normalRowUnavailable = !rowSchedule || Number(rowSchedule.available) <= 0;
               return `
-              <div class="enrollment-calendar-row ${normalRowUnavailable && !showCompleteHours ? 'normal-row-unavailable' : ''}">
+              <div class="enrollment-calendar-row ${normalRowUnavailable && !showCompleteHours && !this.isReservedSchedule(rowSchedule || {}, false) ? 'normal-row-unavailable' : ''}">
               <div class="enrollment-calendar-time">${time}</div>
               ${days.map((day, dayIndex) => {
                 const schedule = rowSchedule;
@@ -3102,21 +3118,8 @@ class StudentsView extends Component {
       allSchedules ||= await this.getSchedulesForModal(branchId, null, selectedPracticalStart || null, selectedPracticalCycleId);
       this.modalAllSchedules = allSchedules;
       this.modalAllSchedulesKey = allSchedulesKey;
-      const selectedSchedules = schedules;
-      const selectedBySlot = new Map(selectedSchedules.map(schedule => [
-        `${schedule.cycleId || schedule.day}|${schedule.time}`,
-        schedule,
-      ]));
-      const baseScheduleKeys = new Set(allSchedules.map(schedule =>
-        `${schedule.cycleId || schedule.day}|${schedule.time}`));
-      schedules = [...allSchedules.map(schedule => {
-        const selected = selectedBySlot.get(`${schedule.cycleId || schedule.day}|${schedule.time}`);
-        if (selected) return { ...schedule, ...selected, instructors: schedule.instructors || selected.instructors || [] };
-        // El instructor seleccionado pertenece solo a su curso. Los demás
-        // ciclos deben conservarse para que Próximo respete G1, G2, G3, etc.
-        return schedule;
-      }), ...selectedSchedules.filter(schedule =>
-        !baseScheduleKeys.has(`${schedule.cycleId || schedule.day}|${schedule.time}`))];
+      schedules = this.mergeEnrollmentSchedules(allSchedules, schedules, selectedInstructorId,
+        Boolean(this.scheduleInstructorExplicit || this.recordEditContext || this.activatingReservation));
     }
     }
     this.scheduleInstructorFilterId = selectedInstructorId || null;
@@ -3330,6 +3333,7 @@ class StudentsView extends Component {
         availabilityByDate: slot.occupancyByDate || {},
         calendarDates: Array.isArray(slot.dates) ? slot.dates : Array.isArray(cycle.dates) ? cycle.dates : Object.keys(slot.occupancyByDate || {}).sort(),
         instructors: cycle.instructors || [],
+        scheduledInstructors: cycle.scheduledInstructors || [],
       };
     }));
   }
@@ -3910,7 +3914,10 @@ class StudentsView extends Component {
       }
       if (!context.canFinance && form.elements.discountAmount) form.elements.discountAmount.disabled = true;
       if (!context.canSchedule && form.elements.course_id) form.elements.course_id.disabled = true;
-      form.querySelector('[name="firstName"]')?.focus();
+      const editSection = new URLSearchParams(window.location.search).get('editSection');
+      if (editSection === 'datos') this.goToModalStep(2);
+      else if (editSection === 'horario') this.goToModalStep(1);
+      if (editSection !== 'horario') form.querySelector('[name="firstName"]')?.focus();
     } catch (error) {
       this.preparingRecordEdit = false;
       if (!document.getElementById('student-modal-overlay')?.classList.contains('active')) this.openStudentModal();
@@ -4032,9 +4039,13 @@ class StudentsView extends Component {
     const modality = reservation.modality || reservedPlan.selections?.[0]?.modality || (weekend ? 'intensivo' : 'normal');
     const modalityInput = document.getElementById('selected-enrollment-modality');
     if (modalityInput) modalityInput.value = modality;
-    if (instructor && [...instructor.options].some(item => item.value === reservation.instructor_id)) {
+    if (instructor && reservation.instructor_id) {
+      if (![...instructor.options].some(item => item.value === reservation.instructor_id)) {
+        instructor.add(new Option(reservation.instructor_name || 'Instructor de la reserva', reservation.instructor_id));
+      }
       instructor.value = reservation.instructor_id;
       this.scheduleInstructorFilterId = reservation.instructor_id;
+      this.scheduleInstructorExplicit = true;
       await this.reloadModalSchedules(reservation.branch_id, reservation.instructor_id, null, {
         reservationId: reservation.id,
         practicalCycleId: reservation.cycle_id,
@@ -4092,6 +4103,10 @@ class StudentsView extends Component {
       cell.classList.add('selected', 'reservation-activation-slot');
       cell.setAttribute('aria-disabled', 'false');
       cell.setAttribute('aria-hidden', 'false');
+      const status = cell.querySelector?.('.schedule-option-status');
+      if (status) status.textContent = 'Seleccionado';
+      const capacity = cell.querySelector?.('.schedule-option-capacity');
+      if (capacity) capacity.textContent = 'Horario reservado';
     });
     calendar.dataset.rotationEnabled = String(Boolean(reservation.draft_data?.schedulePlan?.rotation));
     calendar.querySelectorAll('.schedule-rotation-toggle').forEach(toggle => {
@@ -4154,6 +4169,7 @@ class StudentsView extends Component {
     if (form?.elements.scheduleId) form.elements.scheduleId.value = '';
     if (form?.elements.schedulePlan) form.elements.schedulePlan.value = '';
     this.scheduleInstructorFilterId = null;
+    this.scheduleInstructorExplicit = false;
     this.useInstructorFirstAvailability = false;
     this.instructorFirstAvailabilityDate = null;
     this.showCantonReferralInstructors = false;
@@ -4780,7 +4796,7 @@ class StudentsView extends Component {
       return;
     }
     const calendars = [...cycleSet.querySelectorAll(':scope > .enrollment-calendar')];
-    const currentIndex = Number(currentCalendar.dataset.cycleIndex || 0);
+    const currentIndex = Number(cycleSet.dataset.activeCycleIndex ?? currentCalendar.dataset.cycleIndex ?? 0);
     const nextIndex = Math.max(0, Math.min(calendars.length - 1, currentIndex + direction));
     if (nextIndex === currentIndex && direction > 0 && button.dataset.loadNext === 'true') {
       await this.loadNextEnrollmentCycle(button, currentIndex);
@@ -4789,9 +4805,11 @@ class StudentsView extends Component {
     if (nextIndex === currentIndex) return;
     calendars.forEach(calendar => this.resetCalendarSelection(calendar));
     const nextCalendar = calendars[nextIndex];
+    if (!nextCalendar) return;
     const nextCycleId = nextCalendar?.dataset.cycleId;
     const nextInstructorId = this.scheduleInstructorExplicit ? this.scheduleInstructorFilterId : nextCalendar?.querySelector('.course-instructor-chip.active, .course-instructor-chip')?.dataset.courseInstructorId || null;
     if (nextInstructorId && String(nextInstructorId) !== String(this.scheduleInstructorFilterId || '')) {
+      this.scheduleInstructorExplicit = false;
       const form = document.getElementById('student-modal-form');
       const branchId = form?.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId;
       const preferredSelect = document.getElementById('preferred-instructor-select');
@@ -4807,6 +4825,9 @@ class StudentsView extends Component {
       }
     } else {
       cycleSet.dataset.activeCycleIndex = String(nextIndex);
+      calendars.forEach(calendar => {
+        calendar.style.display = calendar === nextCalendar ? 'block' : 'none';
+      });
     }
     const form = document.getElementById('student-modal-form');
     if (form?.elements.scheduleId) form.elements.scheduleId.value = '';

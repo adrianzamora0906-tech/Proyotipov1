@@ -26,7 +26,7 @@ export default class QuickRegistrationView extends Component {
       <label>Curso<select class="form-select" name="courseId" required><option value="">Selecciona</option>${this.catalog.courses.map(course=>`<option value="${escape(course.id)}">${escape(course.name)} · $${Number(course.amount).toFixed(2)}</option>`).join('')}</select></label>
       <label>Modalidad<select class="form-select" name="modality"><option value="normal">Normal</option><option value="intensivo">Intensivo</option></select></label>
       <label class="qr-autocomplete">Instructor<input class="form-input" id="qr-instructor" autocomplete="off" placeholder="Buscar por nombres o apellidos" required aria-controls="qr-instructors"><span id="qr-instructors"></span></label>
-      <label>Fecha de inicio acordada<input class="form-input" name="startDate" type="date" required></label>
+      <label>Fecha de inicio acordada<select class="form-select" name="startDate" required disabled><option value="">Selecciona curso e instructor</option></select></label>
       <label>Ciclo y horario<select class="form-select" name="optionKey" required><option value="">Completa curso, instructor y fecha</option></select></label>
       <label>Teoría<select class="form-select" name="theorySchedule"><option value="pendiente">Pendiente de confirmar</option><option value="virtual">Virtual</option></select></label>
       </div><p id="qr-existing" role="status"></p><p id="qr-dates"></p><button class="btn btn-primary" type="submit" ${this.catalog.promotionActive?'':'disabled'}>Revisar inscripción</button>
@@ -38,10 +38,20 @@ export default class QuickRegistrationView extends Component {
   resetOptions(){this.options=[];this.form.elements.optionKey.innerHTML='<option value="">Consulta las opciones disponibles</option>';document.getElementById('qr-dates').textContent='';}
   async loadOptions(){
     this.resetOptions();const values=this.values();const version=++this.version;
-    if(!values.courseId||!this.instructorId||!values.startDate)return;
-    const query=new URLSearchParams({courseId:values.courseId,startDate:values.startDate,modality:values.modality,instructorId:this.instructorId});
+    if(!values.courseId||!this.instructorId)return;
+    const query=new URLSearchParams({courseId:values.courseId,modality:values.modality,instructorId:this.instructorId});
+    if(values.startDate)query.set('startDate',values.startDate);
     const result=await apiClient.get(`${endpoint}/options?${query}`);if(version!==this.version)return;
     this.options=result.data;
+    if(!values.startDate){
+      const dates=[...new Set(this.options.map(item=>item.startDate))].sort();
+      const field=this.form.elements.startDate;
+      field.innerHTML='<option value="">'+(dates.length?'Selecciona una fecha disponible':'Sin fechas disponibles')+'</option>'+dates.map(date=>`<option value="${escape(date)}">${escape(new Date(`${date}T12:00:00`).toLocaleDateString('es-EC',{weekday:'long',day:'numeric',month:'long',year:'numeric'}))}</option>`).join('');
+      field.disabled=!dates.length;
+      this.options=[];
+      this.message(dates.length?'Selecciona la fecha de inicio acordada con el instructor.':'No hay fechas con un horario completo disponible para este instructor.');
+      return;
+    }
     this.form.elements.optionKey.innerHTML='<option value="">Selecciona un horario</option>'+this.options.map(item=>`<option value="${escape(item.key)}">${escape(item.code)} · ${escape(item.time)}–${escape(item.endTime)} · ${item.dates.length} clases</option>`).join('');
     this.message(this.options.length?'Selecciona el horario acordado.':'No hay un horario completo disponible para esa fecha. Verifica el acuerdo con Secretaría.');
   }
@@ -66,11 +76,13 @@ export default class QuickRegistrationView extends Component {
     this.form.addEventListener('input',()=>{root.querySelector('#qr-summary').hidden=true;});
     this.form.elements.identification.addEventListener('input',()=>{this.checkedIdentity=null;for(const key of ['firstName','lastName','phone','email']){const field=this.form.elements[key];if(field.readOnly)field.value='';field.readOnly=false;}});
     this.form.elements.identification.addEventListener('blur',safe(()=>this.lookup()));
-    this.form.elements.courseId.addEventListener('change',()=>{this.instructorId='';root.querySelector('#qr-instructor').value='';this.resetOptions();++this.version;});
-    for(const key of ['modality','startDate'])this.form.elements[key].addEventListener('change',safe(()=>this.loadOptions()));
+    const resetDates=()=>{const field=this.form.elements.startDate;field.innerHTML='<option value="">Selecciona curso e instructor</option>';field.disabled=true;};
+    this.form.elements.courseId.addEventListener('change',()=>{this.instructorId='';root.querySelector('#qr-instructor').value='';resetDates();this.resetOptions();++this.version;});
+    this.form.elements.modality.addEventListener('change',safe(()=>{resetDates();return this.loadOptions();}));
+    this.form.elements.startDate.addEventListener('change',safe(()=>this.loadOptions()));
     let instructorVersion=0;let timer;
     root.querySelector('#qr-instructor').addEventListener('input',event=>{
-      this.instructorId='';this.resetOptions();++this.version;clearTimeout(timer);const version=++instructorVersion;
+      this.instructorId='';resetDates();this.resetOptions();++this.version;clearTimeout(timer);const version=++instructorVersion;
       root.querySelector('#qr-instructors').innerHTML='';const search=event.target.value.trim();
       if(search.length<2)return;
       timer=setTimeout(safe(async()=>{const result=await apiClient.get(`${endpoint}/instructors?${new URLSearchParams({search,courseId:this.form.elements.courseId.value})}`);if(version!==instructorVersion)return;

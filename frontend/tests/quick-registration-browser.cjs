@@ -32,8 +32,8 @@ const server=http.createServer(async(req,res)=>{
     browser=await chromium.launch({headless:true,channel:'msedge'});const page=await browser.newPage({viewport:{width:390,height:844}});const errors=[];page.on('pageerror',error=>errors.push(error.message));
     const url=`http://127.0.0.1:${server.address().port}`;await page.goto(url);await page.waitForFunction(()=>window.fixtureReady);
     await page.locator('[name=identification]').fill(identity.identification);await page.locator('[name=firstName]').fill(identity.firstName);await page.locator('[name=lastName]').fill(identity.lastName);
-    await page.locator('[name=courseId]').selectOption(courseId);await page.locator('[name=startDate]').fill('2026-11-30');await page.locator('#qr-instructor').fill('SINTETICO');await page.getByRole('button',{name:'INSTRUCTOR SINTETICO',exact:true}).click();
-    await page.locator('[name=optionKey]').selectOption(option.key);await page.getByRole('button',{name:'Revisar inscripción'}).click();await page.locator('#qr-summary').waitFor({state:'visible'});
+    await page.locator('[name=courseId]').selectOption(courseId);await page.locator('#qr-instructor').fill('SINTETICO');await page.getByRole('button',{name:'INSTRUCTOR SINTETICO',exact:true}).click();
+    await page.locator('[name=startDate]').selectOption('2026-11-30');await page.locator('[name=optionKey]').selectOption(option.key);await page.getByRole('button',{name:'Revisar inscripción'}).click();await page.locator('#qr-summary').waitFor({state:'visible'});
     assert.match(await page.locator('#qr-summary-content').innerText(),/156.00/);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     await page.locator('#qr-confirm').evaluate(button=>{button.click();button.click();});await page.locator('#qr-next').waitFor();assert.equal(writes,1);

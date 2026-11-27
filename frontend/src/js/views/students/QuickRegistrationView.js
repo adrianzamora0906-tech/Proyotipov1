@@ -3,6 +3,7 @@ import {apiClient} from '../../core/api/ApiClient.js';
 import {authService} from '../../core/auth/AuthService.js';
 import Validator from '../../helpers/Validator.js';
 const escape = value => String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const instructorName=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 const endpoint='/quick-registration';
 const go=path=>{window.history.pushState(null,'',path);window.dispatchEvent(new PopStateEvent('popstate'));};
 
@@ -14,7 +15,7 @@ export default class QuickRegistrationView extends Component {
     if(user.mustChangePassword)return `<main class="quick-registration">${header}<section class="card"><h2>Cambia tu contraseña temporal</h2><form id="qr-password"><label>Contraseña actual<input class="form-input" type="password" name="currentPassword" autocomplete="current-password" required></label><label>Nueva contraseña<input class="form-input" type="password" name="newPassword" autocomplete="new-password" minlength="8" required></label><p>Usa mayúsculas, minúsculas, números y símbolos.</p><button class="btn btn-primary">Guardar contraseña</button></form></section></main>`;
     if(this.props.studentId) {
       const {data:student}=await apiClient.get(`${endpoint}/students/${encodeURIComponent(this.props.studentId)}`);
-      return `<main class="quick-registration">${header}<a href="/quick-registration" data-qr-link>Volver a inscripciones</a><section class="card student-profile"><h2>${escape(student.firstName)} ${escape(student.lastName)}</h2><p>Perfil de consulta</p><div class="info-grid"><p>Cédula: ${escape(student.identification)}</p><p>Teléfono: ${escape(student.phone)}</p><p>Correo: ${escape(student.email)}</p><p>Estado: ${escape(student.status)}</p></div><h3>Cursos matriculados</h3>${student.enrollments.map(item=>`<p>${escape(item.course)} · ${escape(item.status)}</p>`).join('')}<h3>Clases e instructor</h3><div class="qr-table"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Instructor</th></tr></thead><tbody>${student.schedule.map(item=>`<tr><td>${escape(String(item.schedule_date).slice(0,10))}</td><td>${escape(item.start_time)} – ${escape(item.end_time)}</td><td>${escape(item.instructor)}</td></tr>`).join('')}</tbody></table></div></section></main>`;
+      return `<main class="quick-registration">${header}<a href="/quick-registration" data-qr-link>Volver a inscripciones</a><section class="card student-profile"><h2>${escape(student.firstName)} ${escape(student.lastName)}</h2><p>Perfil de consulta</p><div class="info-grid"><p>Cédula: ${escape(student.identification)}</p><p>Teléfono: ${escape(student.phone)}</p><p>Correo: ${escape(student.email)}</p><p>Estado: ${escape(student.status)}</p></div><h3>Cursos matriculados</h3>${student.enrollments.map(item=>`<p>${escape(item.course)} · ${escape(item.status)}</p>`).join('')}<h3>Clases e instructor</h3><div class="qr-table"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Instructor</th></tr></thead><tbody>${student.schedule.map(item=>`<tr><td>${escape(String(item.schedule_date).slice(0,10))}</td><td>${escape(item.start_time)} – ${escape(item.end_time)}</td><td>${escape(instructorName(item.instructor))}</td></tr>`).join('')}</tbody></table></div></section></main>`;
     }
     this.catalog=(await apiClient.get(`${endpoint}/catalog`)).data;
     return `<main class="quick-registration">${header}
@@ -88,7 +89,7 @@ export default class QuickRegistrationView extends Component {
       root.querySelector('#qr-instructors').innerHTML='';const search=event.target.value.trim();
       if(search.length<2)return;
       timer=setTimeout(safe(async()=>{const result=await apiClient.get(`${endpoint}/instructors?${new URLSearchParams({search,courseId:this.form.elements.courseId.value})}`);if(version!==instructorVersion)return;
-        const list=root.querySelector('#qr-instructors');list.innerHTML=result.data.map(item=>`<button type="button" class="btn btn-secondary" data-instructor="${escape(item.id)}">${escape(item.name)}</button>`).join('')||'Sin coincidencias';
+        const list=root.querySelector('#qr-instructors');list.innerHTML=result.data.map(item=>`<button type="button" class="btn btn-secondary" data-instructor="${escape(item.id)}">${escape(instructorName(item.name))}</button>`).join('')||'Sin coincidencias';
         list.querySelectorAll('button').forEach(button=>button.addEventListener('click',safe(async()=>{++instructorVersion;this.instructorId=button.dataset.instructor;root.querySelector('#qr-instructor').value=button.textContent;list.innerHTML='';await this.loadOptions();})));}),180);
     });
     this.form.elements.optionKey.addEventListener('change',()=>{const option=this.options.find(item=>item.key===this.form.elements.optionKey.value);root.querySelector('#qr-dates').textContent=option?`Clases: ${option.dates.join(', ')}`:'';});

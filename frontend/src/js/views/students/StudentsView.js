@@ -16,6 +16,7 @@ import DocumentService from '../../services/DocumentService.js';
 import NotificationService from '../../services/NotificationService.js';
 import Validator from '../../helpers/Validator.js';
 import DateHelper from '../../helpers/DateHelper.js';
+import { BLACK_FRIDAY_PRICES, isBlackFridayPromotionActive } from '../../helpers/BlackFridayPromotion.js';
 import { isHalloweenPromotionActive } from '../../helpers/HalloweenPromotion.js';
 import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
@@ -1949,6 +1950,7 @@ class StudentsView extends Component {
     const isCarCourse = catalogType === 'carro';
     const benefit = form?.querySelector('[name="discountBenefit"]')?.value || '';
     const benefitPrices = {
+      BLACK_FRIDAY: BLACK_FRIDAY_PRICES,
       UNIVERSITY_STUDENT: { moto: 117, carro: 180 },
       HALLOWEEN: { moto: 114.99, carro: 164.99 },
       POLICE: { moto: 110, carro: 170 },
@@ -1981,7 +1983,7 @@ class StudentsView extends Component {
       summary.textContent = 'Este convenio solo aplica a los cursos de Moto y Carro.';
       return;
     }
-    const benefitLabel = benefit === 'COMBO' ? 'Combo' : benefit === 'POLICE' ? 'Policía' : 'Estudiante universitario';
+    const benefitLabel = benefit === 'BLACK_FRIDAY' ? 'Black Friday' : benefit === 'HALLOWEEN' ? 'Promo Halloween' : benefit === 'COMBO' ? 'Combo' : benefit === 'POLICE' ? 'Policía' : 'Estudiante universitario';
     summary.innerHTML = `Valor del curso: <strong>$${price.toFixed(2)}</strong> · Descuento: <strong>$${Math.min(discount, maximumDiscount).toFixed(2)}</strong> · Total final: <strong>$${Math.max(price - discount, minimumFinalAmount).toFixed(2)}</strong>${hasApplicableBenefit ? ` · Convenio: <strong>${benefitLabel}</strong>` : (isCarCourse ? ' · Mínimo permitido: <strong>$175.00</strong>' : '')}`;
   }
 
@@ -4123,6 +4125,7 @@ class StudentsView extends Component {
         ? [
             { id: 'benefit:POLICE', name: 'Policía', role_name: 'Precio especial', branch_name: 'Moto $110 · Carro $170', discount_benefit: 'POLICE' },
             { id: 'benefit:UNIVERSITY_STUDENT', name: 'Estudiante universitario', role_name: 'Precio especial', branch_name: 'Moto $117 · Carro $180', discount_benefit: 'UNIVERSITY_STUDENT' },
+            { id: 'benefit:BLACK_FRIDAY', name: 'Promo Black Friday', role_name: '27 al 29 de noviembre de 2026', branch_name: 'Moto $100 · Carro $156', discount_benefit: 'BLACK_FRIDAY' },
             { id: 'benefit:HALLOWEEN', name: 'Promo Halloween', role_name: '28 al 31 de octubre de 2026', branch_name: 'Moto $114.99 · Carro $164.99', discount_benefit: 'HALLOWEEN' },
             { id: 'benefit:COMBO', name: 'Combo (2 o más personas)', role_name: 'Inscripción conjunta', branch_name: 'Moto $115 · Carro $180', discount_benefit: 'COMBO' },
           ].filter(item => (item.discount_benefit !== 'HALLOWEEN' || isHalloweenPromotionActive()) && (item.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(normalizedQuery)
@@ -4139,9 +4142,10 @@ class StudentsView extends Component {
     results.hidden = false;
     results.innerHTML = staff.length
       ? staff.map(person => `
-        <button type="button" class="staff-referral-option" data-referrer-id="${escapeHtml(person.id)}">
+        <button type="button" class="staff-referral-option" data-referrer-id="${escapeHtml(person.id)}" ${person.discount_benefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive() ? 'disabled title="Disponible del 27 al 29 de noviembre de 2026"' : ''}>
           <strong>${escapeHtml(person.name)}</strong>
           <span>${escapeHtml(person.role_name || 'Personal')} · ${escapeHtml(person.branch_name || '')}</span>
+          ${person.discount_benefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive() ? '<span>Disponible del 27 al 29 de noviembre.</span>' : ''}
         </button>`).join('')
       : '<div class="staff-referral-empty">No se encontró personal con ese nombre.</div>';
   }
@@ -4149,6 +4153,10 @@ class StudentsView extends Component {
   selectReferralStaff(userId) {
     const person = (this.referralStaffResults || []).find(item => String(item.id) === String(userId));
     if (!person) return;
+    if (person.discount_benefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive()) {
+      this.renderReferralStaffResults(this.referralStaffResults);
+      return;
+    }
     const idInput = document.getElementById('student-referrer-id');
     const search = document.getElementById('student-referrer-search');
     const results = document.getElementById('student-referrer-results');
@@ -5565,6 +5573,11 @@ class StudentsView extends Component {
     const shouldCollectPayment = authService.can('PAYMENT_CREATE') && formData.get('collectPayment') === 'on';
     const discountAmount = Number(formData.get('discountAmount') || 0);
     const discountBenefit = String(formData.get('discountBenefit') || '');
+    if (discountBenefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive()) {
+      this.showModalAlert('error', 'Black Friday solo está vigente del 27 al 29 de noviembre de 2026.');
+      this.goToModalStep(1);
+      return;
+    }
     const selectedCourseOption = form.querySelector('[name="course_id"]')?.selectedOptions?.[0];
     const selectedCoursePrice = Number(selectedCourseOption?.dataset?.price || 0);
     const benefitCatalogType = selectedCourseOption?.dataset?.catalogType || selectedCourseOption?.dataset?.courseType;

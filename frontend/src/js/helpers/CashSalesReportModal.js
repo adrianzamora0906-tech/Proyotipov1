@@ -27,7 +27,7 @@ export class CashReportsPanel {
   document.getElementById('cash-report-pages').onclick=event=>{const button=event.target.closest('[data-cash-page]');if(button&&!button.disabled){this.page=Number(button.dataset.cashPage);this.paintTable();}};
   this.exportButton.onclick=()=>this.export();await this.load();
  }
- columns(){return [['record_date',this.type==='sales'?'Inscripción':'Cobro'],['identification','Cédula'],['student_name','Estudiante / cliente'],['branch','Sucursal'],['course','Curso / servicio'],...(this.type==='sales'?[['amount','Precio final','money'],['discount','Descuento','money'],['paid','Cobrado confirmado','money'],['balance','Saldo pendiente','money']]:[['paid','Cobrado confirmado','money'],['receipt','Comprobante']]),['payment_methods','Método de pago'],['promotion','Promoción'],['registered_by',this.type==='sales'?'Registrado por':'Cobrado por']];}
+ columns(){return [['record_date',this.type==='sales'?'Inscripción':'Cobro'],['identification','Cédula'],['student_name','Estudiante / cliente'],['branch','Sucursal'],['course','Curso / servicio'],...(this.type==='sales'?[['amount','Precio final','money'],['balance','Saldo pendiente','money']]:[['paid','Cobrado confirmado','money'],['receipt','Comprobante']]),['payment_methods','Método de pago'],['promotion','Promoción'],['registered_by',this.type==='sales'?'Registrado por':'Cobrado por']];}
  async load(){
   clearTimeout(this.timer);if(!this.active)return;
   if(!this.form.checkValidity()){this.status.textContent='Selecciona fechas válidas.';return;}

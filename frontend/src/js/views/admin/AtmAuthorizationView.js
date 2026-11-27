@@ -326,6 +326,7 @@ export default class AtmAuthorizationView extends Component {
             <tr>
               <th>Oficio</th>
               <th>Sucursal</th>
+              <th>Tipo de curso</th>
               <th>Curso(s)</th>
               <th>Periodo</th>
               <th>Generado</th>
@@ -355,6 +356,13 @@ export default class AtmAuthorizationView extends Component {
                       },
                     ];
 
+              const courseTypes = [...new Set(courses.map(course => {
+                const type = String(course.courseType || item.course_type || '').toUpperCase();
+                if (type === 'AUTO') return 'Carro';
+                if (type === 'MOTO') return 'Moto';
+                const code = String(course.courseCode || item.course_code || '').toUpperCase();
+                return /SP[-_]IC/.test(code) ? 'Carro' : /SP[-_]IM/.test(code) ? 'Moto' : '';
+              }).filter(Boolean))].join(' / ') || 'Sin dato';
               return `
                 <tr>
 
@@ -374,12 +382,10 @@ export default class AtmAuthorizationView extends Component {
                   </td>
 
                   <td>
-                    ${esc(item.branch_name)}
-
-                    <small>
-                      ${esc(item.city || '')}
-                    </small>
+                    ${esc(item.document_type === 'PERMIT' ? (item.city || item.branch_name) : item.branch_name)}
+                    ${item.document_type !== 'PERMIT' && item.city ? `<small>${esc(item.city)}</small>` : ''}
                   </td>
+                  <td>${esc(courseTypes)}</td>
 
                   <td>
                     <span class="atm-count-pill">

@@ -5,6 +5,7 @@
 
 import { authService } from '../core/auth/AuthService.js';
 import ApiService from '../core/api/apiService.js';
+import { isCashReportUser } from '../helpers/ReportAccess.js';
 
 class SidebarLayout {
   static async render(content) {
@@ -17,6 +18,7 @@ class SidebarLayout {
     const isOperationalInstructor = isInstructor && user?.permissions?.includes('STUDENT_CREATE');
     const isTheoryInstructor = isInstructor && user?.practiceArea === 'teoria';
     const isCashOnly = role === 'caja';
+    const cashReports = isCashReportUser(user);
     const isBranchSecretary = role === 'secretaria_sucursal' || role === 'secretaria';
     const canViewPayments = user?.permissions?.includes('PAYMENT_VIEW');
     const isAdminSystem = user?.roles?.includes('ADMIN_SYSTEM');
@@ -234,8 +236,8 @@ class SidebarLayout {
               <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"></path><circle cx="18" cy="18" r="3"></circle></svg><span class="nav-text">Confirmar transferencias</span>
             </a>` : ''}
 
-            ${!isAdminSystem && !isGeneralManager && user?.permissions?.includes('REPORT_VIEW') ? `<a href="/reports" class="nav-item ${currentPath === '/reports' ? 'active' : ''}">
-              <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"></path></svg><span class="nav-text">Reportes</span>
+            ${!isAdminSystem && !isGeneralManager && (cashReports ? canViewPayments : user?.permissions?.includes('REPORT_VIEW')) ? `<a href="/reports" class="nav-item ${currentPath === '/reports' ? 'active' : ''}">
+              <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"></path></svg><span class="nav-text">${cashReports ? 'Reportes de Caja' : 'Reportes'}</span>
             </a>` : ''}
             ${!isAdminSystem && !isGeneralManager && user?.permissions?.includes('REFERRAL_REPORT_VIEW') ? `<a href="/referrals" class="nav-item ${currentPath === '/referrals' ? 'active' : ''}">
               <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4"></path><circle cx="9" cy="7" r="4"></circle><path d="m17 11 2 2 4-4"></path></svg><span class="nav-text">Campaña de referidos</span>
@@ -435,6 +437,19 @@ class SidebarLayout {
       this.initializeEventListeners();
     }
     this.updateNotificationBadge();
+    import('../services/RegistrationUploadQueue.js').then(module => module.registrationUploadQueue.start())
+      .catch(error => console.warn('No se pudo iniciar la carga de documentos:', error.message));
+    if (!this._personalNotificationEvents) {
+      this._personalNotificationEvents = event => {
+        if (event.type === 'erp:sessionChanged'
+          || event.detail?.collection === 'notifications'
+          || event.detail?.topics?.some(topic => ['notifications','resync'].includes(topic))) {
+          this.updateNotificationBadge();
+        }
+      };
+      ['erp:dataChanged', 'erp:realtime', 'erp:sessionChanged'].forEach(name =>
+        window.addEventListener(name, this._personalNotificationEvents));
+    }
     import('../services/InstructorChangeFeedback.js').then(module=>module.instructorChangeFeedback.start()).catch(error=>console.warn('Seguimiento:',error.message));
     import('../services/PaymentVoidInbox.js').then(module => module.paymentVoidInbox.mount()).catch(error => console.warn('Bandeja de anulaciones:',error.message));
     this.startInstructorScheduleChangePolling();
@@ -463,7 +478,7 @@ class SidebarLayout {
     try {
       const response = await ApiService.getInstructorScheduleChangeNotifications();
       const notifications = response?.success && Array.isArray(response.data) ? response.data : [];
-      this.renderInstructorNotificationBadge(notifications.length);
+      this.updateNotificationBadge();
       if (notifications.length) this.showInstructorScheduleChangeModal(notifications[0]);
     } catch (error) {
       console.warn('No se pudieron consultar los cambios de horario del instructor:', error.message);
@@ -534,11 +549,17 @@ class SidebarLayout {
     }
   }
 
-  static updateNotificationBadge() {
+  static async updateNotificationBadge() {
     const badge = document.getElementById('notification-badge');
     if (badge) {
-      const NotificationService = import('../services/NotificationService.js').then(module => module.default);
-      // Will be updated from views
+      badge.style.display = 'none';
+      try {
+        const { default: NotificationService } = await import('../services/NotificationService.js');
+        const notifications = await NotificationService.getPersonalNotifications();
+        if (document.getElementById('notification-badge') === badge) {
+          this.renderInstructorNotificationBadge(notifications.filter(item => !item.read).length);
+        }
+      } catch (_) { /* No mostrar conteos anteriores si no se puede consultar la bandeja. */ }
     }
   }
 }

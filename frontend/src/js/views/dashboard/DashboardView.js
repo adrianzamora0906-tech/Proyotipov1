@@ -290,16 +290,7 @@ class DashboardView extends Component {
   }
 
   updateNotificationBadge() {
-    const badge = document.getElementById('notification-badge');
-    if (badge) {
-      const unreadCount = NotificationService.getAllNotifications().filter(n => !n.read).length;
-      if (unreadCount > 0) {
-        badge.textContent = unreadCount;
-        badge.style.display = 'flex';
-      } else {
-        badge.style.display = 'none';
-      }
-    }
+    return SidebarLayout.updateNotificationBadge();
   }
 }
 

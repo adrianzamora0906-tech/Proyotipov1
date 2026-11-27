@@ -4,13 +4,18 @@
  */
 
 import { storageService } from '../core/storage/StorageService.js';
+import { authService } from '../core/auth/AuthService.js';
+import ApiService from '../core/api/apiService.js';
 
 class NotificationService {
   /**
    * Crea una notificación
    */
   static createNotification(studentId, title, message, type = 'info') {
+    const userId = authService.getCurrentUser()?.userId;
+    if (!userId) return null;
     const notification = storageService.insert('notifications', {
+      userId,
       studentId,
       title,
       message,
@@ -26,20 +31,21 @@ class NotificationService {
    * Obtiene notificaciones de un estudiante
    */
   static getStudentNotifications(studentId) {
-    return storageService.findBy('notifications', { studentId }).reverse();
+    return this.getAllNotifications().filter(item => item.studentId === studentId);
   }
 
   /**
    * Obtiene todas las notificaciones no leídas
    */
   static getUnreadNotifications(studentId) {
-    return storageService.findBy('notifications', { studentId, read: false });
+    return this.getStudentNotifications(studentId).filter(item => !item.read);
   }
 
   /**
    * Marca una notificación como leída
    */
   static markAsRead(notificationId) {
+    if (!this.getAllNotifications().some(item => item.id === notificationId)) return null;
     return storageService.update('notifications', notificationId, { read: true });
   }
 
@@ -112,7 +118,35 @@ class NotificationService {
    * Obtiene todas las notificaciones
    */
   static getAllNotifications() {
-    return storageService.findAll('notifications').reverse();
+    const userId = authService.getCurrentUser()?.userId;
+    if (!userId) return [];
+    return storageService.findBy('notifications', { userId }).reverse();
+  }
+
+  static async getPersonalNotifications() {
+    const userId = authService.getCurrentUser()?.userId;
+    if (!userId) return [];
+    let response;
+    try { response = await ApiService.getNotifications(); }
+    catch (error) {
+      if (authService.getCurrentUser()?.userId !== userId) return [];
+      const local = this.getAllNotifications();
+      if (local.length) return local;
+      throw error;
+    }
+    if (authService.getCurrentUser()?.userId !== userId) return [];
+    if (!response.success) throw new Error('No se pudieron consultar tus notificaciones');
+    const remote = (response.data || []).filter(item => item.user_id === userId)
+      .map(item => ({ ...item, createdAt: item.created_at, remote: true }));
+    return [...this.getAllNotifications(), ...remote]
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }
+
+  static async markPersonalAsRead(notification) {
+    if (!notification.remote) return this.markAsRead(notification.id);
+    const response = await ApiService.markNotificationAsRead(notification.id);
+    if (!response.success) throw new Error('No se pudo marcar la notificacion');
+    return response.data;
   }
 }
 

@@ -32,3 +32,23 @@ test('una seleccion explicita de instructor referido conserva los ciclos compati
   assert.equal(merged[1].startDate, '2026-11-09');
   assert.equal(merged[2].cycleId, 'antonio');
 });
+
+test('un ciclo compartido usa la lista actual de instructores y los cupos del seleccionado', () => {
+  const cached = [{ cycleId: 'shared', time: '16:00 - 17:40', instructors: [{ id: 'dario' }],
+    available: 0, availabilityByDate: { '2026-11-30': { available: 0, occupied: 1 } } }];
+  const fresh = [{ ...cached[0], instructors: [{ id: 'dario' }, { id: 'benito' }],
+    available: 1, availabilityByDate: { '2026-11-30': { available: 1, occupied: 0 } } }];
+  const merged = view.mergeEnrollmentSchedules(cached, fresh, 'benito');
+  assert.equal(merged[0].available, 1);
+  assert.equal(merged[0].availabilityByDate['2026-11-30'].occupied, 0);
+  assert(merged[0].instructors.some(instructor => instructor.id === 'benito'));
+  assert.equal(cached[0].available, 0);
+  assert.equal(cached[0].instructors.length, 1);
+});
+
+test('una respuesta actual vacia de instructores no recupera los retirados de la cache', () => {
+  const merged = view.mergeEnrollmentSchedules(
+    [{ cycleId: 'shared', time: '16', instructors: [{ id: 'retired' }] }],
+    [{ cycleId: 'shared', time: '16', instructors: [], available: 0 }], 'benito', true);
+  assert.equal(merged[0].instructors.length, 0);
+});

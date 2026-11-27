@@ -12,7 +12,7 @@ export default class AtmNominaEditor {
     this.excluded = new Set();
     this.editIndex = null;
     host.innerHTML = `<div class="atm-section-heading" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h3>Nómina de alumnos</h3></div><input type="search" data-nomina-search aria-label="Buscar por cédula" placeholder="Buscar por cédula" maxlength="30" style="width:240px;max-width:100%;margin:0"></div>
-      <div class="atm-nomina-scroll"><table class="atm-nomina-table"><thead><tr><th>Incluir</th><th>Apellidos y nombres</th><th>Identificación</th><th>Origen</th><th>Acciones</th></tr></thead><tbody></tbody></table></div>
+      <div class="atm-nomina-scroll"><table class="atm-nomina-table"><thead><tr><th>Incluir</th><th>Apellidos y nombres</th><th>Identificación</th><th>Sucursal</th><th>Origen</th><th>Acciones</th></tr></thead><tbody></tbody></table></div>
       <details class="atm-manual-editor"><summary>Añadir alumno manualmente</summary>
         <div class="atm-form-grid">
           <label>Cédula o pasaporte *<input data-manual-key="identification" maxlength="20" placeholder="Identificación"></label>
@@ -126,11 +126,11 @@ export default class AtmNominaEditor {
     }
   }
   renderRows() {
-    this.host.querySelector('tbody').innerHTML = this.rows.map(row=>({name:row.last_name_first||row.student_name,html:`<tr><td><input type="checkbox" aria-label="Incluir a ${esc(row.last_name_first||row.student_name)}" data-enrollment="${esc(row.enrollment_id)}" ${this.excluded.has(row.enrollment_id)?'':'checked'}></td><td>${esc(row.last_name_first||row.student_name)}</td><td>${esc(row.identification)}</td><td>Sistema</td><td>—</td></tr>`}))
-      .concat(this.manual.map((row,index)=>({name:row.student_name,html:`<tr class="atm-manual-row"><td>✓</td><td>${esc(row.last_name_first||row.student_name)}</td><td>${esc(row.identification)}</td><td>Manual · solo nómina</td><td><button type="button" class="btn btn-small" data-edit="${index}">Editar</button><button type="button" class="btn btn-small" data-remove="${index}">Quitar</button></td></tr>`})))
+    this.host.querySelector('tbody').innerHTML = this.rows.map(row=>({name:row.last_name_first||row.student_name,html:`<tr><td><input type="checkbox" aria-label="Incluir a ${esc(row.last_name_first||row.student_name)}" data-enrollment="${esc(row.enrollment_id)}" ${this.excluded.has(row.enrollment_id)?'':'checked'}></td><td>${esc(row.last_name_first||row.student_name)}</td><td>${esc(row.identification)}</td><td>${esc(row.branch_name || row.branchName || '—')}</td><td>Sistema</td><td>—</td></tr>`}))
+      .concat(this.manual.map((row,index)=>({name:row.student_name,html:`<tr class="atm-manual-row"><td>✓</td><td>${esc(row.last_name_first||row.student_name)}</td><td>${esc(row.identification)}</td><td>${esc(row.branch_name || '—')}</td><td>Manual · solo nómina</td><td><button type="button" class="btn btn-small" data-edit="${index}">Editar</button><button type="button" class="btn btn-small" data-remove="${index}">Quitar</button></td></tr>`})))
       .sort((a,b)=>a.name.trim().localeCompare(b.name.trim(),'es',{sensitivity:'base'}))
       .map(row=>row.html).join('')
-      || '<tr><td colspan="5">Sin alumnos en la nómina. Selecciona un curso y sus fechas o añade una fila manual.</td></tr>';
+      || '<tr><td colspan="6">Sin alumnos en la nómina. Selecciona un curso y sus fechas o añade una fila manual.</td></tr>';
     this.filterRows();
   }
 }

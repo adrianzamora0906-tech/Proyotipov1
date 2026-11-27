@@ -22,7 +22,7 @@ import StringHelper from '../../helpers/StringHelper.js';
 import { authService } from '../../core/auth/AuthService.js';
 import ApiService from '../../core/api/apiService.js?v=registro-documentos-agil-20261118';
 import { createDocumentImageSheet } from '../../services/DocumentImageSheet.js';
-import { saveRegistrationDocuments } from '../../services/RegistrationDocuments.js';
+import { registrationUploadQueue } from '../../services/RegistrationUploadQueue.js';
 import { isCedulaOcrPilotUser } from '../../services/CedulaOcrPilot.js';
 import { openScannerDeviceDialog } from '../../components/ScannerDeviceDialog.js';
 
@@ -671,7 +671,10 @@ class StudentsView extends Component {
   }
 
   async renderStudentModal(pageMode = false) {
-    const schedules = await this.getSchedulesForModal();
+    // La sucursal y el curso se resuelven al abrir el formulario. No consultar
+    // las cuatro combinaciones antes de que exista una selección.
+    const schedules = [];
+    this.modalDemandNavigation = null;
     const canRegisterPayment = authService.can('PAYMENT_CREATE');
     const paymentMethods = canRegisterPayment ? await PaymentService.getAvailableMethods(authService.getEffectiveBranchId()) : [];
     const paymentOptions = paymentMethods.map(method => `<option value="${method.code}" data-requires-reference="${method.requires_reference ? 'true' : 'false'}">${method.name}</option>`).join('');
@@ -1021,6 +1024,13 @@ class StudentsView extends Component {
                 ${this.renderScheduleModalitySelector()}
                 </section>
                 </div>
+                <label class="registration-schedule-pending" id="registration-schedule-pending-control" for="registration-schedule-pending">
+                  <input type="checkbox" name="schedulePending" id="registration-schedule-pending">
+                  <span><strong>Registrar sin horario pr&aacute;ctico</strong><small>La persona puede pagar ahora y coordinar las pr&aacute;cticas despu&eacute;s desde su expediente.</small></span>
+                </label>
+                <div class="registration-schedule-pending-note" id="registration-schedule-pending-note" role="status" hidden>
+                  El horario pr&aacute;ctico quedar&aacute; pendiente. Podr&aacute;s asignarlo despu&eacute;s desde el perfil del estudiante.
+                </div>
                 <div class="schedule-calendar-fullwidth">
                 <div class="practical-schedule-panel">
                 <div id="student-schedule-calendar">
@@ -1290,6 +1300,7 @@ class StudentsView extends Component {
       }
     });
     document.getElementById('additional-practice-toggle')?.addEventListener('change', event => this.toggleAdditionalPracticeMode(event.target.checked));
+    form?.querySelector('#registration-schedule-pending')?.addEventListener('change', () => this.setRegistrationSchedulePendingMode());
     form?.querySelectorAll('[name="registrationMode"]').forEach(input => input.addEventListener('change', event => this.setRegistrationMode(event.target.value)));
     form?.querySelectorAll('[data-practical-mode]').forEach(button => button.addEventListener('click', () => this.setPracticalMode(button.dataset.practicalMode)));
     const referrerSearch = document.getElementById('student-referrer-search');
@@ -1427,13 +1438,15 @@ class StudentsView extends Component {
       await this.reloadModalSchedules(branchId, instructorId, null);
     });
     document.querySelectorAll('.enrollment-modality-button[data-modality]').forEach(button => {
-      button.addEventListener('click', () => {
+      button.addEventListener('click', async () => {
         document.querySelectorAll('.enrollment-modality-button[data-modality]').forEach(item => {
           item.classList.toggle('active', item === button);
           item.setAttribute('aria-pressed', String(item === button));
         });
         document.getElementById('selected-enrollment-modality').value = button.dataset.modality;
         document.querySelectorAll('.enrollment-calendar').forEach(calendar => this.resetCalendarSelection(calendar));
+        const branchId = document.querySelector('#student-modal-form [name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId;
+        if (branchId && !this.recordEditContext) await this.reloadModalSchedules(branchId);
         this.syncScheduleOptions();
       });
     });
@@ -1836,6 +1849,7 @@ class StudentsView extends Component {
       }
       const student=StudentService.normalizeStudent(found);
       this.registrationIdentityStudent=student;
+      this.syncRegistrationSchedulePendingControl();
       const values={firstName:student.firstName,lastName:student.lastName,birthDate:String(student.birthDate || '').slice(0,10),
         email:student.email,phone:student.phone,address:student.address,bloodType:student.bloodType,nationality:student.nationality};
       this.registrationIdentityFields=[];
@@ -1951,12 +1965,22 @@ class StudentsView extends Component {
     const benefit = form?.querySelector('[name="discountBenefit"]')?.value || '';
     const benefitPrices = {
       BLACK_FRIDAY: BLACK_FRIDAY_PRICES,
+      SPONSORSHIP_PRIZE: { moto: 0, carro: 0 },
       UNIVERSITY_STUDENT: { moto: 117, carro: 180 },
       HALLOWEEN: { moto: 114.99, carro: 164.99 },
       POLICE: { moto: 110, carro: 170 },
       COMBO: { moto: 115, carro: 180 },
     };
     const benefitFinalPrice = benefitPrices[benefit]?.[catalogType];
+    const prize = benefit === 'SPONSORSHIP_PRIZE';
+    for (const id of ['student-collect-payment','student-transfer-payment']) {
+      const toggle = document.getElementById(id);
+      if (toggle) {
+        if (prize && toggle.checked) { toggle.checked = false; toggle.dispatchEvent(new Event('change',{bubbles:true})); }
+        toggle.disabled = prize;
+      }
+    }
+
     const comboField=document.getElementById('student-combo-size-field');
     const comboInput=document.getElementById('student-combo-size');
     if(comboField)comboField.hidden=benefit!=='COMBO';
@@ -1983,7 +2007,7 @@ class StudentsView extends Component {
       summary.textContent = 'Este convenio solo aplica a los cursos de Moto y Carro.';
       return;
     }
-    const benefitLabel = benefit === 'BLACK_FRIDAY' ? 'Black Friday' : benefit === 'HALLOWEEN' ? 'Promo Halloween' : benefit === 'COMBO' ? 'Combo' : benefit === 'POLICE' ? 'Policía' : 'Estudiante universitario';
+    const benefitLabel = benefit === 'SPONSORSHIP_PRIZE' ? 'Premios por auspicio' : benefit === 'BLACK_FRIDAY' ? 'Black Friday' : benefit === 'HALLOWEEN' ? 'Promo Halloween' : benefit === 'COMBO' ? 'Combo' : benefit === 'POLICE' ? 'Policía' : 'Estudiante universitario';
     summary.innerHTML = `Valor del curso: <strong>$${price.toFixed(2)}</strong> · Descuento: <strong>$${Math.min(discount, maximumDiscount).toFixed(2)}</strong> · Total final: <strong>$${Math.max(price - discount, minimumFinalAmount).toFixed(2)}</strong>${hasApplicableBenefit ? ` · Convenio: <strong>${benefitLabel}</strong>` : (isCarCourse ? ' · Mínimo permitido: <strong>$175.00</strong>' : '')}`;
   }
 
@@ -2460,6 +2484,9 @@ class StudentsView extends Component {
       && Number(schedule.available) > 0
     ));
     const activeCycleIndex = firstAvailableCycleIndex >= 0 ? firstAvailableCycleIndex : 0;
+    const demandNavigation = this.modalDemandNavigation;
+    const demandCycles = demandNavigation?.vehicleType === courseKey && demandNavigation?.modality === modality
+      ? demandNavigation.cycles : null;
 
     return `
       <div class="enrollment-cycle-set" data-course="${courseKey}" data-modality="${modality}" data-active-cycle-index="${activeCycleIndex}">
@@ -2472,12 +2499,15 @@ class StudentsView extends Component {
           cycleIndex,
           cycleCount: cycles.length,
           activeCycleIndex,
+          demandCycles,
         })).join('')}
       </div>
     `;
   }
 
-  renderEnrollmentCycleCalendar({ courseKey, modality, title, schedules, cycle, cycleIndex, cycleCount, activeCycleIndex }) {
+  renderEnrollmentCycleCalendar({ courseKey, modality, title, schedules, cycle, cycleIndex, cycleCount, activeCycleIndex, demandCycles = null }) {
+    const navigationIndex = demandCycles ? demandCycles.findIndex(item => String(item.id) === String(cycle.key)) : cycleIndex;
+    const navigationCount = demandCycles ? demandCycles.length : cycleCount;
     // No se filtran las filas con capacidad cero: cuando se consulta un
     // instructor concreto también debemos mostrar sus bloques ocupados o no
     // habilitados, no solo los que aún tienen cupo.
@@ -2516,10 +2546,10 @@ class StudentsView extends Component {
           </div>
           <div class="calendar-toolbar">
             <div class="course-cycle-controls" aria-label="Cambiar curso próximo">
-              <button type="button" class="course-cycle-btn" data-cycle-direction="-1" ${cycleIndex === 0 ? 'disabled' : ''}>Anterior</button>
-              <span>Curso ${cycleIndex + 1}${cycleCount > 1 ? ` de ${cycleCount}` : ''}</span>
+              <button type="button" class="course-cycle-btn" data-cycle-direction="-1" ${navigationIndex <= 0 ? 'disabled' : ''}>Anterior</button>
+              <span>Curso ${navigationIndex + 1}${navigationCount > 1 ? ` de ${navigationCount}` : ''}</span>
               <button type="button" class="course-cycle-btn" data-cycle-direction="1"
-                data-load-next="${cycleIndex === cycleCount - 1 ? 'true' : 'false'}">Próximo</button>
+                data-load-next="${navigationIndex === navigationCount - 1 ? 'true' : 'false'}">Próximo</button>
             </div>
             <button type="button" class="schedule-rotation-toggle" aria-pressed="false" data-course="${courseKey}">
               <span class="schedule-rotation-switch" aria-hidden="true"></span>
@@ -2852,6 +2882,18 @@ class StudentsView extends Component {
         ...(practicalCycleId ? { practical_cycle_id: practicalCycleId } : {}),
         ...(this.activatingReservation?.id ? { reservation_id: this.activatingReservation.id } : {}),
       };
+      const course = document.querySelector('#student-modal-form [name="course_id"]')?.selectedOptions?.[0]?.dataset?.courseType;
+      if (course && !this.recordEditContext) {
+        const cycleId = practicalCycleId || [...document.querySelectorAll('#student-schedule-calendar .enrollment-calendar')]
+          .find(calendar => calendar.style.display !== 'none' && calendar.dataset.cycleId)?.dataset.cycleId;
+        const response = await ApiService.getCourseEnrollmentOptions({
+          ...branchFilter, vehicle_type: course,
+          modality: document.getElementById('selected-enrollment-modality')?.value || 'normal',
+          ...(cycleId ? { cycle_id: cycleId } : {}),
+        });
+        if (!response?.success) throw new Error('No se pudo comprobar la disponibilidad.');
+        return this.flattenEnrollmentOptions(response.data || []);
+      }
       const results = await Promise.allSettled([
         ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'carro', modality: 'normal' }),
         this.modalNormalOnly ? Promise.resolve({success:true,data:[]}) : ApiService.getCourseEnrollmentOptions({ ...branchFilter, vehicle_type: 'carro', modality: 'intensivo' }),
@@ -2874,6 +2916,54 @@ class StudentsView extends Component {
     return branchId ? [] : ScheduleService.getAvailableSchedules();
   }
 
+  async loadDemandEnrollmentSchedules(branchId, instructorId, practicalStartDate, options, requestId) {
+    const course = document.querySelector('#student-modal-form [name="course_id"]')?.selectedOptions?.[0]?.dataset?.courseType;
+    const modality = document.getElementById('selected-enrollment-modality')?.value || 'normal';
+    if (!course) return { schedules: [], instructorId: null, navigation: null };
+    const params = {
+      branch_id: branchId, vehicle_type: course, modality,
+      ...((this.scheduleInstructorExplicit || this.activatingReservation) && instructorId ? { instructor_id: instructorId } : {}),
+      ...((options.reservationId || this.activatingReservation?.id) ? { reservation_id: options.reservationId || this.activatingReservation.id } : {}),
+      ...(practicalStartDate ? { practical_start_date: practicalStartDate } : {}),
+      ...(options.practicalCycleId ? { practical_cycle_id: options.practicalCycleId } : {}),
+    };
+    const catalog = await ApiService.getCourseEnrollmentOptions({ ...params, catalog_only: 'true', ...(options.extend ? { extend: true } : {}) });
+    if (requestId !== this.modalScheduleRequestId) return null;
+    if (!catalog?.success) throw new Error('No se pudo cargar la lista de cursos.');
+    const cycles = catalog.data || [];
+    const previous = this.modalDemandNavigation;
+    const sameScope = previous?.branchId === branchId && previous.vehicleType === course && previous.modality === modality;
+    const requestedId = options.demandCycleId || options.practicalCycleId || (sameScope ? previous.cycleId : null);
+    let index = Math.max(0, cycles.findIndex(cycle => String(cycle.id) === String(requestedId)));
+    if (options.demandAfterCurrent) index += 1;
+    const direction = options.demandDirection === -1 ? -1 : 1;
+    // La lista no promete cupos. Si un curso está lleno, comprobar el siguiente
+    // solo al navegar; nunca calcular todos los calendarios de antemano.
+    for (; index >= 0 && index < cycles.length; index += direction) {
+      const cycle = cycles[index];
+      const result = await ApiService.getCourseEnrollmentOptions({ ...params, cycle_id: cycle.id });
+      if (requestId !== this.modalScheduleRequestId) return null;
+      if (!result?.success) throw new Error('No se pudo cargar la disponibilidad del curso.');
+      let data = result.data || [];
+      if (!data.length) continue;
+      let selectedId = params.instructor_id || data[0].instructors?.[0]?.id || null;
+      if (selectedId && !params.instructor_id) {
+        const filtered = await ApiService.getCourseEnrollmentOptions({ ...params, cycle_id: cycle.id, instructor_id: selectedId });
+        if (requestId !== this.modalScheduleRequestId) return null;
+        if (!filtered?.success) throw new Error('No se pudo comprobar el instructor.');
+        data = filtered.data || [];
+        if (!data.length) continue;
+      }
+      return {
+        schedules: this.flattenEnrollmentOptions(data), instructorId: selectedId,
+        theoryOptions: data[0]?.theoryOptions,
+        navigation: { branchId, vehicleType: course, modality, cycles, cycleId: cycle.id },
+      };
+    }
+    if (options.demandCycleId) throw new Error('No hay otro curso con cupos disponibles en esa dirección.');
+    return { schedules: [], instructorId: null, navigation: null };
+  }
+
   mergeEnrollmentSchedules(allSchedules, selectedSchedules, instructorId, allowReferred = false) {
     const eligible = selectedSchedules.filter(schedule => allowReferred
       || (schedule.instructors || []).some(instructor => String(instructor.id) === String(instructorId)));
@@ -2884,13 +2974,20 @@ class StudentsView extends Component {
       `${schedule.cycleId || schedule.day}|${schedule.time}`));
     return [...allSchedules.map(schedule => {
       const selected = selectedBySlot.get(`${schedule.cycleId || schedule.day}|${schedule.time}`);
-      return selected ? { ...schedule, ...selected, instructors: schedule.instructors || selected.instructors || [] } : schedule;
+      // La respuesta individual es la fuente actual; la lista agregada puede
+      // ser anterior a una incorporacion o retiro de instructores del ciclo.
+      return selected ? { ...schedule, ...selected, instructors: selected.instructors ?? schedule.instructors ?? [] } : schedule;
     }), ...eligible.filter(schedule => !baseScheduleKeys.has(`${schedule.cycleId || schedule.day}|${schedule.time}`))];
   }
 
   async reloadModalSchedules(branchId, instructorId = null, practicalStartDate = null, options = {}) {
     const host = document.getElementById('student-schedule-calendar');
     if (!host || !branchId) return;
+    const pendingForm = document.getElementById('student-modal-form');
+    if (pendingForm?.elements.scheduleId) pendingForm.elements.scheduleId.value = '';
+    if (pendingForm?.elements.schedulePlan) pendingForm.elements.schedulePlan.value = '';
+    this.modalNormalOnly = this.modalLocationCatalog?.branches?.some(branch =>
+      String(branch.id) === String(branchId) && branch.code === 'SP_MC') || false;
     this.loadModalTheoryGroups(branchId);
     const requestId = (this.modalScheduleRequestId || 0) + 1;
     this.modalScheduleRequestId = requestId;
@@ -2925,6 +3022,23 @@ class StudentsView extends Component {
     const allSchedulesKey = `${branchId}|${selectedPracticalStart || ''}|${selectedPracticalCycleId || ''}`;
     let allSchedules = null;
     let schedules;
+    if (!this.recordEditContext) {
+      const loaded = await this.loadDemandEnrollmentSchedules(branchId, selectedInstructorId, selectedPracticalStart, options, requestId);
+      if (!loaded || requestId !== this.modalScheduleRequestId || !host.isConnected) return;
+      schedules = loaded.schedules;
+      selectedInstructorId = loaded.instructorId;
+      this.modalDemandNavigation = loaded.navigation;
+      this.modalTheoryOptions = loaded.theoryOptions || this.modalTheoryOptions;
+      const preferred = document.getElementById('preferred-instructor-select');
+      if (preferred) {
+        if (selectedInstructorId && ![...preferred.options].some(option => option.value === String(selectedInstructorId))) {
+          const instructor = schedules.flatMap(item => item.instructors || []).find(item => String(item.id) === String(selectedInstructorId));
+          preferred.add(new Option(instructor?.name || 'Instructor seleccionado', selectedInstructorId));
+        }
+        preferred.value = selectedInstructorId || '';
+      }
+    } else {
+    this.modalDemandNavigation = null;
     if (shouldFilterByInstructor && selectedCourse) {
       const result = await ApiService.getCourseEnrollmentOptions({
         branch_id: branchId,
@@ -3003,6 +3117,8 @@ class StudentsView extends Component {
       }), ...selectedSchedules.filter(schedule =>
         !baseScheduleKeys.has(`${schedule.cycleId || schedule.day}|${schedule.time}`))];
     }
+    }
+    this.scheduleInstructorFilterId = selectedInstructorId || null;
     // Si el modal se cerró o se hizo otra selección mientras esperaba la API,
     // esta respuesta ya no puede modificar el calendario actual.
     if (requestId !== this.modalScheduleRequestId || !host.isConnected) return;
@@ -3035,7 +3151,9 @@ class StudentsView extends Component {
     const nextUsesAdvancedStart = Boolean(nextCalendar.querySelector('.advanced-practical-start-official'));
     const currentUsesInstructorBase = Boolean(host.querySelector('.instructor-base-start-official'));
     const nextUsesInstructorBase = Boolean(nextCalendar.querySelector('.instructor-base-start-official'));
-    const canUpdateOnlyGrids = !forceAllSchedulesRefresh && currentGrids.length > 0
+    const instructorKey = calendar => JSON.stringify([...calendar.querySelectorAll('[data-course-instructor-id]')]
+      .map(button => button.dataset.courseInstructorId));
+    const canUpdateOnlyGrids = !this.modalDemandNavigation && !forceAllSchedulesRefresh && currentGrids.length > 0
       && currentGrids.length === nextGrids.length
       // Al cambiar entre el inicio oficial y la primera disponibilidad debe
       // reconstruirse también el encabezado (fecha inicial y curso oficial),
@@ -3048,6 +3166,9 @@ class StudentsView extends Component {
         const updatedCalendar = nextCalendarByKey.get(key);
         return nextGridByKey.has(key)
           && updatedCalendar
+          // Los chips tambien determinan el instructor enviado al guardar.
+          // Si cambiaron, renovar el encabezado junto con las celdas.
+          && instructorKey(currentCalendar) === instructorKey(updatedCalendar)
           && currentCalendar?.dataset.cycleIndex === updatedCalendar.dataset.cycleIndex
           && currentCalendar?.dataset.dayCount === updatedCalendar.dataset.dayCount;
       });
@@ -3532,6 +3653,8 @@ class StudentsView extends Component {
     if (!modal) return;
     const form = document.getElementById('student-modal-form');
     if (form) form.dataset.theoryConfirmationAccepted = 'false';
+    this.syncRegistrationSchedulePendingControl();
+    this.setRegistrationSchedulePendingMode();
     this.restoreSubmitButton(document.getElementById('student-modal-submit'));
     
     // Limpiar el estado anterior del overlay
@@ -4059,6 +4182,8 @@ class StudentsView extends Component {
     const reservationToggle = document.getElementById('temporary-reservation-toggle');
     reservationToggle?.classList.remove('active');
     if (reservationToggle) reservationToggle.textContent = 'Reservar este cupo';
+    this.syncRegistrationSchedulePendingControl();
+    this.setRegistrationSchedulePendingMode();
     this.restoreSubmitButton(document.getElementById('student-modal-submit'));
     const title = document.getElementById('student-modal-title');
     if (title) title.textContent = 'Nuevo Estudiante';
@@ -4123,6 +4248,7 @@ class StudentsView extends Component {
       const registrationMode = document.querySelector('[name="registrationMode"]:checked')?.value || 'regular';
       const benefitReferrals = registrationMode === 'regular'
         ? [
+            { id: 'benefit:SPONSORSHIP_PRIZE', name: 'Premios por auspicio', role_name: 'Inscripcion sin costo', branch_name: 'Moto $0 - Carro $0', discount_benefit: 'SPONSORSHIP_PRIZE' },
             { id: 'benefit:POLICE', name: 'Policía', role_name: 'Precio especial', branch_name: 'Moto $110 · Carro $170', discount_benefit: 'POLICE' },
             { id: 'benefit:UNIVERSITY_STUDENT', name: 'Estudiante universitario', role_name: 'Precio especial', branch_name: 'Moto $117 · Carro $180', discount_benefit: 'UNIVERSITY_STUDENT' },
             { id: 'benefit:BLACK_FRIDAY', name: 'Promo Black Friday', role_name: '27 al 29 de noviembre de 2026', branch_name: 'Moto $100 · Carro $156', discount_benefit: 'BLACK_FRIDAY' },
@@ -4219,7 +4345,8 @@ class StudentsView extends Component {
     const registrationMode = document.querySelector('#student-modal-form [name="registrationMode"]:checked')?.value;
     const theorySchedule = document.querySelector('#student-modal-form [name="theorySchedule"]:checked')?.value;
     const theoryAccepted = document.querySelector('#student-modal-form')?.dataset.theoryConfirmationAccepted === 'true';
-    if (currentStep === 1 && registrationMode === 'regular' && theorySchedule === 'por_confirmar' && !theoryAccepted) {
+    if (currentStep === 1 && registrationMode === 'regular' && theorySchedule === 'por_confirmar' && !theoryAccepted
+      && !document.getElementById('registration-schedule-pending')?.checked) {
       this.showTheoryConfirmationModal(() => this.goToNextModalStep());
       return;
     }
@@ -4282,13 +4409,76 @@ class StudentsView extends Component {
         return false;
       }
     }
-    if (!form?.elements.scheduleId?.value) {
+    const schedulePending = Boolean(form?.elements.schedulePending?.checked)
+      && !this.recordEditContext && !this.activatingReservation && !this.registrationIdentityStudent;
+    if (!form?.elements.scheduleId?.value && !schedulePending) {
       const error = document.getElementById('schedule-error');
       if (error) error.textContent = 'Selecciona uno de los horarios disponibles.';
       this.showModalAlert('error', 'Selecciona uno de los horarios disponibles.');
       return false;
     }
     return true;
+  }
+
+  syncRegistrationSchedulePendingControl() {
+    const form = document.getElementById('student-modal-form');
+    const control = form?.querySelector('#registration-schedule-pending-control');
+    const toggle = form?.querySelector('#registration-schedule-pending');
+    if (!control || !toggle) return;
+    control.hidden = Boolean(this.recordEditContext || this.activatingReservation || this.registrationIdentityStudent);
+    if (control.hidden && toggle.checked) {
+      toggle.checked = false;
+      this.setRegistrationSchedulePendingMode();
+    }
+  }
+
+  setRegistrationSchedulePendingMode() {
+    const form = document.getElementById('student-modal-form');
+    const toggle = form?.querySelector('#registration-schedule-pending');
+    const pending = Boolean(toggle?.checked) && !this.recordEditContext
+      && !this.activatingReservation && !this.registrationIdentityStudent;
+    if (toggle && toggle.checked !== pending) toggle.checked = pending;
+    form?.querySelector('.practical-schedule-panel')?.toggleAttribute('hidden', pending);
+    form?.querySelector('.schedule-setup-grid')?.toggleAttribute('hidden', pending);
+    form?.querySelector('#registration-instructor-search')?.closest('.form-group')?.toggleAttribute('hidden', pending);
+    form?.querySelector('.schedule-workflow-card--theory')?.toggleAttribute('hidden', pending);
+    const pendingNote = form?.querySelector('#registration-schedule-pending-note');
+    if (pendingNote) pendingNote.hidden = !pending;
+    const reservationButton = form?.querySelector('#temporary-reservation-toggle');
+    if (reservationButton) reservationButton.hidden = pending;
+    const summary = form?.querySelector('#schedule-selection-summary');
+    if (pending) {
+      form.querySelectorAll('.enrollment-calendar .schedule-option.selected').forEach(option => option.classList.remove('selected'));
+      if (form.elements.scheduleId) form.elements.scheduleId.value = '';
+      if (form.elements.schedulePlan) form.elements.schedulePlan.value = '';
+      holdScheduleSelection([], null);
+      const advanced = form.querySelector('#advanced-practical-start-enabled');
+      if (advanced) advanced.checked = false;
+      const advancedFields = form.querySelector('#advanced-practical-start-fields');
+      if (advancedFields) advancedFields.hidden = true;
+      const startDate = form.querySelector('#practical-start-date');
+      if (startDate) startDate.value = '';
+      const pendingTheory = form.querySelector('[name="theorySchedule"][value="por_confirmar"]');
+      if (pendingTheory) {
+        pendingTheory.checked = true;
+        pendingTheory.closest('.enrollment-modality-button')?.classList.add('active');
+      }
+      if (summary) {
+        summary.classList.add('is-empty');
+        const title = summary.querySelector('strong');
+        if (title) title.textContent = 'Horario práctico pendiente de asignar';
+        const detail = summary.querySelector('.schedule-selection-instructor');
+        if (detail) detail.hidden = true;
+      }
+      const error = form.querySelector('#schedule-error');
+      if (error) error.textContent = '';
+    } else if (summary) {
+      summary.classList.add('is-empty');
+      const title = summary.querySelector('strong');
+      if (title) title.textContent = 'Aún no has elegido un horario';
+      const detail = summary.querySelector('.schedule-selection-instructor');
+      if (detail) detail.hidden = true;
+    }
   }
 
   /* OCR pilot removed */
@@ -4575,6 +4765,19 @@ class StudentsView extends Component {
     if (!cycleSet || !Number.isFinite(direction) || this.changingEnrollmentCycle) return;
     this.changingEnrollmentCycle = true;
     try {
+    const navigation = this.modalDemandNavigation;
+    if (navigation && !this.recordEditContext) {
+      const index = navigation.cycles.findIndex(cycle => String(cycle.id) === String(currentCalendar.dataset.cycleId));
+      const next = navigation.cycles[index + direction];
+      if (next) {
+        await this.reloadModalSchedules(navigation.branchId, this.scheduleInstructorFilterId, null, {
+          demandCycleId: next.id, demandDirection: direction,
+        });
+      } else if (direction > 0) {
+        await this.loadNextEnrollmentCycle(button, index);
+      }
+      return;
+    }
     const calendars = [...cycleSet.querySelectorAll(':scope > .enrollment-calendar')];
     const currentIndex = Number(currentCalendar.dataset.cycleIndex || 0);
     const nextIndex = Math.max(0, Math.min(calendars.length - 1, currentIndex + direction));
@@ -4623,6 +4826,18 @@ class StudentsView extends Component {
     const branchId = form?.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId;
     const instructorId = form?.querySelector('[name="preferredInstructorId"]')?.value || null;
     if (!branchId || !courseKey) return;
+
+    if (this.modalDemandNavigation && !this.recordEditContext) {
+      this.loadingNextEnrollmentCycle = true;
+      try {
+        await this.reloadModalSchedules(branchId, instructorId, null, {
+          extend: true, demandCycleId: currentCycleId, demandDirection: 1, demandAfterCurrent: true,
+        });
+      } finally {
+        this.loadingNextEnrollmentCycle = false;
+      }
+      return;
+    }
 
     const originalText = button.textContent;
     const showNextLoadedCycle = () => {
@@ -4819,6 +5034,7 @@ class StudentsView extends Component {
   }
 
   async handleScheduleCellClick(option) {
+    if (document.getElementById('student-schedule-calendar')?.getAttribute('aria-busy') === 'true') return;
     if (this.scheduleSelectionChecking || option?.dataset.selectionHeld) return;
     const previousSelection = [...(option?.closest('.enrollment-calendar')?.querySelectorAll('.schedule-option.selected') || [])];
     const examOnly = document.getElementById('selected-practical-mode')?.value === 'exam_only';
@@ -5356,6 +5572,11 @@ class StudentsView extends Component {
   }
 
   async handleStudentSubmit(event) {
+    if (document.getElementById('student-schedule-calendar')?.getAttribute('aria-busy') === 'true') {
+      event.preventDefault();
+      this.showModalAlert('error', 'Espera a que termine de consultar el horario.');
+      return;
+    }
     if (this.registrationCapture?.busy) { event?.preventDefault(); this.showModalAlert('error','Espera a que termine la captura o lectura antes de registrar.'); return; }
     if (this.scheduleSelectionChecking) { event.preventDefault(); return; }
     if (document.getElementById('student-modal-form')?.dataset.initializing === 'true') {
@@ -5474,6 +5695,14 @@ class StudentsView extends Component {
 
     const scheduleId = formData.get('scheduleId');
     const schedulePlan = this.parseSchedulePlan(formData.get('schedulePlan'));
+    const schedulePendingRequested = formData.get('schedulePending') === 'on';
+    const schedulePending = schedulePendingRequested && !this.recordEditContext
+      && !this.activatingReservation && !this.registrationIdentityStudent;
+    if (schedulePendingRequested && !schedulePending) {
+      this.showModalAlert('error', 'La opción de registrar sin horario está disponible para una matrícula nueva. Selecciona un horario para esta operación.');
+      this.goToModalStep(1);
+      return;
+    }
     const normalizePendingTheorySchedule = value => {
       const normalized = String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
       if (!normalized) return 'por_confirmar';
@@ -5506,7 +5735,12 @@ class StudentsView extends Component {
     const requiredClasses = examOnly ? 1 : Number(activeCalendar?.dataset.requiredClasses || activeCalendar?.dataset.dayCount || 8);
     const rotationEnabled = Boolean(schedulePlan.rotation) && !examOnly;
     const minimumClasses = rotationEnabled ? Math.ceil(requiredClasses / 2) : requiredClasses;
-    const invalidSelectionCount = examOnly
+    if (schedulePending && examOnly) {
+      this.showModalAlert('error', 'Para registrar sin horario práctico, selecciona el modo de clases y deja el examen para cuando se asigne el instructor.');
+      this.goToModalStep(1);
+      return;
+    }
+    const invalidSelectionCount = schedulePending ? false : examOnly
       ? schedulePlan.selections.length !== 1
       : schedulePlan.selections.length < minimumClasses || schedulePlan.selections.length > requiredClasses;
     if (invalidSelectionCount) {
@@ -5523,7 +5757,8 @@ class StudentsView extends Component {
     }
     const selectedBranchId = form.querySelector('[name="branch"]')?.selectedOptions?.[0]?.dataset?.branchId || null;
     const selectedPracticalCycleId = schedulePlan.selections[0]?.cycleId || activeCalendar?.dataset.cycleId || null;
-    const availableSchedules = await this.getSchedulesForModal(selectedBranchId, preferredInstructorId, practicalStartDate || null, selectedPracticalCycleId);
+    const availableSchedules = schedulePending ? []
+      : await this.getSchedulesForModal(selectedBranchId, preferredInstructorId, practicalStartDate || null, selectedPracticalCycleId);
     if (examOnly && !preferredInstructorId) {
       const scheduleError = document.getElementById('schedule-error');
       if (scheduleError) scheduleError.textContent = 'Selecciona el instructor para Solo examen.';
@@ -5531,7 +5766,7 @@ class StudentsView extends Component {
       this.goToModalStep(1);
       return;
     }
-    const selectedCellsAreAvailable = examOnly ? schedulePlan.selections.length === 1 : this.activatingReservation
+    const selectedCellsAreAvailable = schedulePending ? true : examOnly ? schedulePlan.selections.length === 1 : this.activatingReservation
       && String(preferredInstructorId) === String(this.activatingReservation.instructor_id)
       && schedulePlan.selections.every(selection => String(selection.cycleId) === String(this.activatingReservation.cycle_id))
       ? schedulePlan.selections.length > 0 && schedulePlan.selections.every(selection => String(selection.cycleId) === String(this.activatingReservation.cycle_id))
@@ -5547,30 +5782,34 @@ class StudentsView extends Component {
         return schedule && (continuesAfterVisibleCourse
           || (dateAvailability && Number(dateAvailability.available) > 0));
       });
-    if (!scheduleId || !selectedCellsAreAvailable) {
+    if (!schedulePending && (!scheduleId || !selectedCellsAreAvailable)) {
       const scheduleError = document.getElementById('schedule-error');
       if (scheduleError) scheduleError.textContent = 'Uno de los días y horas seleccionados ya no está disponible';
       this.showModalAlert('error', 'Uno de los días y horas seleccionados ya no está disponible.');
       this.goToModalStep(1);
       return;
     }
-    if (theorySchedule === 'por_confirmar' && !theoryConfirmationAccepted) {
+    if (!schedulePending && theorySchedule === 'por_confirmar' && !theoryConfirmationAccepted) {
       this.showTheoryConfirmationModal(() => form.requestSubmit(submitBtn));
       return;
     }
-    schedulePlan.theorySchedule = theorySchedule || 'por_confirmar';
+    schedulePlan.theorySchedule = schedulePending ? 'por_confirmar' : theorySchedule || 'por_confirmar';
     schedulePlan.theoryConfirmationAccepted = theoryConfirmationAccepted;
-    schedulePlan.practicalMode = examOnly ? 'exam_only' : 'classes';
-    schedulePlan.preferredInstructorId = preferredInstructorId;
+    schedulePlan.practicalMode = schedulePending ? 'classes' : examOnly ? 'exam_only' : 'classes';
+    schedulePlan.preferredInstructorId = schedulePending ? null : preferredInstructorId;
+    if (schedulePending) {
+      schedulePlan.selections = [];
+      schedulePlan.rotation = false;
+    }
     const selectedScheduleModality = schedulePlan.selections[0]?.modality
       || document.querySelector(`.enrollment-calendar[data-cycle-id="${schedulePlan.selections[0]?.cycleId || ''}"]`)?.dataset?.modality
       || 'normal';
-    schedulePlan.practicalStartDate = practicalStartDate
+    schedulePlan.practicalStartDate = schedulePending ? null : practicalStartDate
       || (selectedScheduleModality === 'normal' ? schedulePlan.selections[0]?.practicalStartDate : null)
       || null;
     schedulePlan.practicalStartReason = practicalStartDate ? String(formData.get('practicalStartReason') || '').trim() : null;
 
-    const shouldCollectPayment = authService.can('PAYMENT_CREATE') && formData.get('collectPayment') === 'on';
+    const shouldCollectPayment = formData.get('discountBenefit') !== 'SPONSORSHIP_PRIZE' && authService.can('PAYMENT_CREATE') && formData.get('collectPayment') === 'on';
     const discountAmount = Number(formData.get('discountAmount') || 0);
     const discountBenefit = String(formData.get('discountBenefit') || '');
     if (discountBenefit === 'BLACK_FRIDAY' && !isBlackFridayPromotionActive()) {
@@ -5663,6 +5902,7 @@ class StudentsView extends Component {
       topTransferReference ? `Transferencia declarada. Comprobante: ${topTransferReference}` : '',
     ].filter(Boolean).join('\n');
 
+    const registrationUserId = authService.getCurrentUser()?.userId;
     const result = await StudentService.createStudent({
       firstName: formData.get('firstName'),
       lastName: formData.get('lastName'),
@@ -5676,6 +5916,7 @@ class StudentsView extends Component {
       pickupBranchId: formData.get('pickupBranchId'),
       course_id: formData.get('course_id'),
       schedulePlan,
+      schedulePending,
       disabilityPercentage: selectedCatalogType === 'tipo-f' ? disabilityPercentage : null,
       city_id: this.modalLocationCatalog?.branches?.find(branch => String(branch.id) === String(selectedBranchId))?.city_id || formData.get('city_id'),
       branch_id: selectedBranchId || authService.getEffectiveBranchId() || null,
@@ -5702,38 +5943,37 @@ class StudentsView extends Component {
     let registrationStage = 'documents';
 
     try {
-      if (submitBtn) submitBtn.textContent = 'Guardando documentos...';
-      await saveRegistrationDocuments({
-        saveIdentity: async () => {
-          if (registrationDocumentsUrl || hasRegistrationPdf) {
-            await this.uploadRegistrationDocumentPackage(student.id, registrationDocumentsUrl || registrationDocumentsPdf,
-              registrationDocumentsUrl ? formData.get('registrationDocumentsMobileIncludesBloodCard') === 'true' : true);
-          } else {
-            await this.saveTwoSideDocument(student.id, 'cedula', cedulaDoc, `cedula-${student.id}.pdf`, 'Cédula de Identidad');
-            await this.saveTwoSideDocument(student.id, 'carnet_tipo_sangre', bloodTypeCardDoc, `carnet-tipo-sangre-${student.id}.pdf`, 'Carnet de Tipo de Sangre');
-          }
-        },
-        certificateNeedsIdentity: Boolean(formData.get('cedulaIndicatesBachiller')),
-        saveCertificate: async () => {
-          if (formData.get('cedulaIndicatesBachiller')) {
-            const response = await ApiService.createDocument(student.id, {
-              type: 'certificado_bachiller', cedulaIndicatesBachiller: true,
-            }, { compact: true });
-            if (!response.success) throw new Error(response.error || 'No se pudo guardar la confirmacion de bachiller.');
-          } else if (formData.get('certificadoBachillerMobileFileUrl')) {
-            await this.uploadModalDocumentFromDataUrl(student.id, 'certificado_bachiller', formData.get('certificadoBachillerMobileFileUrl'), 'Certificado de estudio');
-          } else {
-            await this.uploadModalDocument(student.id, 'certificado_bachiller', formData.get('certificadoBachillerFile'), 'Certificado de estudio');
-          }
-        },
-        saveDisability: selectedCatalogType === 'tipo-f'
-          ? () => this.uploadModalDocument(student.id, 'certificado_discapacidad', disabilityCertificate, 'Certificado de discapacidad')
-          : null,
-      });
-      registrationStage = 'instructor';
-      if (submitBtn) submitBtn.textContent = 'Reservando horario...';
+      const tasks = [];
+      const addFile = (type, name, source, extra = {}) => {
+        if (typeof source === 'string' ? Boolean(source) : source?.size > 0) tasks.push({ type, name, source, ...extra });
+      };
+      const addSides = (type, name, doc) => {
+        if (doc.hasMobile) addFile(type, name, doc.mobileFileUrl);
+        else if (doc.hasPdf) addFile(type, name, doc.pdfFile);
+        else if (doc.hasImages) tasks.push({ type, name, images: [doc.frontFile, doc.backFile] });
+      };
+      if (registrationDocumentsUrl || hasRegistrationPdf) {
+        addFile('registro_documentos', 'Cedula y carnet de tipo sanguineo', registrationDocumentsUrl || registrationDocumentsPdf,
+          { includesBloodCard: registrationDocumentsUrl ? formData.get('registrationDocumentsMobileIncludesBloodCard') === 'true' : true });
+      } else {
+        addSides('cedula', 'Cedula de identidad', cedulaDoc);
+        addSides('carnet_tipo_sangre', 'Carnet de tipo sanguineo', bloodTypeCardDoc);
+      }
+      // Keep the certificate after identity, including on a retry.
+      if (formData.get('cedulaIndicatesBachiller')) tasks.push({ type: 'certificado_bachiller', name: 'Confirmacion de bachiller en cedula', cedulaIndicatesBachiller: true });
+      else addFile('certificado_bachiller', 'Certificado de estudio', formData.get('certificadoBachillerMobileFileUrl') || formData.get('certificadoBachillerFile'));
+      if (selectedCatalogType === 'tipo-f') addFile('certificado_discapacidad', 'Certificado de discapacidad', disabilityCertificate);
+      if (tasks.length) {
+        const jobId = await registrationUploadQueue.enqueue({ studentId: student.id, userId: registrationUserId,
+          studentName: [formData.get('firstName'), formData.get('lastName')].filter(Boolean).join(' '), tasks });
+        void registrationUploadQueue.run(jobId);
+      }
+      if (submitBtn) submitBtn.textContent = schedulePending ? 'Finalizando registro...' : 'Reservando horario...';
+      if (!student.scheduleReserved && !schedulePending) registrationStage = 'instructor';
       const scheduleReservation = student.scheduleReserved ? {instructor:student.assignedInstructor}
-        : await this.selectStudentSchedule(student.id, scheduleId, {...schedulePlan,enrollmentId:student.enrollment_id});
+        : schedulePending ? null
+          : await this.selectStudentSchedule(student.id, scheduleId, {...schedulePlan,enrollmentId:student.enrollment_id});
+      student.schedulePending = schedulePending || Boolean(student.schedulePending);
       student.assignedInstructor = scheduleReservation?.instructor || null;
       // ================================================================
       // REGLA PROTEGIDA: CIERRE OBLIGATORIO DEL MODAL DE NUEVO ESTUDIANTE
@@ -5783,7 +6023,7 @@ class StudentsView extends Component {
       if (!paymentResult.success) {
         this.showModalAlert(
           'error',
-          `El estudiante y su horario se registraron correctamente, pero el pago quedó pendiente: ${paymentResult.error || 'no se pudo completar el cobro'}.`
+          `El estudiante se registró${student.schedulePending ? ' con el horario práctico pendiente' : ' y su horario quedó registrado'}, pero el pago quedó pendiente: ${paymentResult.error || 'no se pudo completar el cobro'}.`
         );
         if (submitBtn) submitBtn.textContent = 'Registro guardado';
         setTimeout(() => {
@@ -5799,7 +6039,9 @@ class StudentsView extends Component {
       NotificationService.createNotification(
         student.id,
         'Registro Completado',
-        'El registro fue completado con documentos y horario seleccionados.',
+        student.schedulePending
+          ? 'El registro fue completado. El horario práctico quedó pendiente de asignar desde el perfil del estudiante.'
+          : 'La inscripcion y el horario quedaron guardados. Consulta el estado de los documentos en tus notificaciones.',
         'info'
       );
     } catch (error) {
@@ -5811,8 +6053,12 @@ class StudentsView extends Component {
       if (shouldCollectPayment) PaymentService.notifyPaymentChanged();
     } else {
       this.showModalAlert('success', shouldCollectPayment
-        ? 'Estudiante, horario y pago registrados exitosamente'
-        : 'Estudiante registrado exitosamente');
+        ? student.schedulePending
+          ? 'Estudiante y pago registrados. El horario práctico quedó pendiente; podrás asignarlo desde su perfil.'
+          : 'Estudiante, horario y pago registrados exitosamente'
+        : student.schedulePending
+          ? 'Estudiante registrado. El horario práctico quedó pendiente; podrás asignarlo desde su perfil.'
+          : 'Estudiante registrado exitosamente');
       if (shouldCollectPayment) PaymentService.notifyPaymentChanged();
       setTimeout(() => {
         const url = `/student-profile/${student.id}`;
@@ -6324,7 +6570,10 @@ class StudentsView extends Component {
     const instructorSummary = student.assignedInstructor?.name
       ? `<div class="student-registration-success__notice"><strong>Instructor asignado</strong><small>${escapeHtml(student.assignedInstructor.name)}</small></div>`
       : '';
-    layer.innerHTML = `<section class="branch-modal student-registration-success" role="dialog" aria-modal="true" aria-labelledby="student-access-title"><button type="button" class="student-registration-success__close" id="close-student-access" aria-label="Cerrar modal">×</button><div class="student-registration-success__icon">✓</div><div class="student-registration-success__title"><span>Registro completado</span><h2 id="student-access-title">Estudiante y acceso creados</h2><p>El estudiante, su horario, instructor y cuenta fueron registrados correctamente.</p></div>${instructorSummary}<div class="student-registration-success__notice"><strong>Credenciales de ingreso</strong><small>Entrégalas al estudiante. La contraseña deberá cambiarse al ingresar por primera vez.</small></div><div class="student-access-credentials"><label>Usuario<strong>${escapeHtml(student.access.username)}</strong></label><label>Contraseña temporal<strong>${escapeHtml(student.access.temporaryPassword)}</strong></label></div><p class="student-copy-status" id="student-copy-status" aria-live="polite"></p><p class="form-error" id="student-indications-error" role="alert"></p><div class="student-registration-success__actions"><button type="button" class="btn btn-light" id="copy-student-access">Copiar credenciales</button>${student.enrollment_id ? '<button type="button" class="btn btn-secondary" id="send-registration-indications">Enviar indicaciones</button>' : ''}<button type="button" class="btn btn-primary" id="accept-student-access">Abrir expediente</button></div></section>`;
+    const registrationSummary = student.schedulePending
+      ? 'El estudiante, su matrícula y su cuenta fueron creados. El horario práctico queda pendiente para asignarlo desde el expediente.'
+      : 'El estudiante, su horario, instructor y cuenta fueron registrados correctamente.';
+    layer.innerHTML = `<section class="branch-modal student-registration-success" role="dialog" aria-modal="true" aria-labelledby="student-access-title"><button type="button" class="student-registration-success__close" id="close-student-access" aria-label="Cerrar modal">×</button><div class="student-registration-success__icon">✓</div><div class="student-registration-success__title"><span>Registro completado</span><h2 id="student-access-title">Estudiante y acceso creados</h2><p>${escapeHtml(registrationSummary)}</p></div>${instructorSummary}<div class="student-registration-success__notice"><strong>Credenciales de ingreso</strong><small>Entrégalas al estudiante. La contraseña deberá cambiarse al ingresar por primera vez.</small></div><div class="student-access-credentials"><label>Usuario<strong>${escapeHtml(student.access.username)}</strong></label><label>Contraseña temporal<strong>${escapeHtml(student.access.temporaryPassword)}</strong></label></div><p class="student-copy-status" id="student-copy-status" aria-live="polite"></p><p class="form-error" id="student-indications-error" role="alert"></p><div class="student-registration-success__actions"><button type="button" class="btn btn-light" id="copy-student-access">Copiar credenciales</button>${student.enrollment_id ? '<button type="button" class="btn btn-secondary" id="send-registration-indications">Enviar indicaciones</button>' : ''}<button type="button" class="btn btn-primary" id="accept-student-access">Abrir expediente</button></div></section>`;
     document.body.appendChild(layer);
     document.body.style.overflow = 'hidden';
     const closeAccessModal = () => {
@@ -6751,16 +7000,7 @@ class StudentsView extends Component {
   }
 
   updateNotificationBadge() {
-    const badge = document.getElementById('notification-badge');
-    if (badge) {
-      const unreadCount = NotificationService.getAllNotifications().filter(n => !n.read).length;
-      if (unreadCount > 0) {
-        badge.textContent = unreadCount;
-        badge.style.display = 'flex';
-      } else {
-        badge.style.display = 'none';
-      }
-    }
+    return SidebarLayout.updateNotificationBadge();
   }
 
   getInitials(name) {

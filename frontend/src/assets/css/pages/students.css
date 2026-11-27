@@ -1436,6 +1436,30 @@
   gap: 1rem;
 }
 
+.registration-schedule-pending {
+  display: flex;
+  align-items: flex-start;
+  gap: .7rem;
+  margin: .75rem 0;
+  padding: .85rem 1rem;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  background: var(--gray-50);
+  cursor: pointer;
+}
+
+.registration-schedule-pending input { margin-top: .2rem; }
+.registration-schedule-pending span { display: grid; gap: .2rem; }
+.registration-schedule-pending small,
+.registration-schedule-pending-note { color: var(--gray-600); font-size: .82rem; }
+.registration-schedule-pending-note {
+  margin: .75rem 0;
+  padding: .85rem 1rem;
+  border-radius: var(--radius-md);
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 .enrollment-calendar {
   overflow-x: hidden;
   border: 1px solid var(--gray-200);

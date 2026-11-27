@@ -203,15 +203,18 @@ class PendingPaymentsView extends Component {
       if (event.target.closest('[data-retry-voids]')) paymentVoidInbox.refresh();
     });
     const openModal = async (studentId, branchIdFromRow = '', serviceTransactionId = '',enrollmentId=null) => {
-      const student = await StudentService.getStudent(studentId);
-      if (!student) return;
-
       const pendingRow = (this.pendingAll || []).find(item => serviceTransactionId
         ? String(item.serviceTransactionId || '') === String(serviceTransactionId)
         : !item.serviceTransactionId && String(item.student?.id || item.studentId) === String(studentId)
           && (!enrollmentId || String(item.enrollmentId)===String(enrollmentId)));
+      if (!pendingRow?.student) {
+        this.showMessageModal('Actualiza la lista de pagos antes de cobrar.', { title: 'Cuenta no disponible', type: 'warning' });
+        return;
+      }
+      const student = pendingRow.student;
+      enrollmentId = pendingRow.enrollmentId || enrollmentId;
       const isServicePayment = Boolean(serviceTransactionId);
-      const accountingBalance = isServicePayment ? Number(pendingRow?.balance || 0) : (await PaymentService.getStudentBalance(student.id,enrollmentId)).balance;
+      const accountingBalance = Number(pendingRow.balance || 0);
       const pendingVerification = Number(pendingRow?.pendingVerification || 0);
       const balance = Math.max(Number(pendingRow?.availableToCollect ?? accountingBalance), 0);
       const concept = pendingRow?.student?.course || pendingRow?.course || student.course || 'Curso';

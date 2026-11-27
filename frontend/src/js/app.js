@@ -6,6 +6,7 @@
 import Router from "./core/router/Router.js";
 import BranchIncidentsView from './views/admin/BranchIncidentsView.js';
 import { authService } from "./core/auth/AuthService.js";
+import { reportPermission } from './helpers/ReportAccess.js';
 import { storageService } from "./core/storage/StorageService.js";
 import { realtimeClient } from "./core/realtime/RealtimeClient.js";
 import { relevantRealtimeTopics } from "./core/realtime/RealtimeRoutePolicy.js";
@@ -391,7 +392,7 @@ class App {
         this.router.navigate("/manager");
         return false;
       }
-      const requiredPermission = routePermissions[route.name];
+      const requiredPermission = route.name === 'course-reports' ? reportPermission(currentUser) : routePermissions[route.name];
       if (
         isAuthenticated &&
         requiredPermission &&

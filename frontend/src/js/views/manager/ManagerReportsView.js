@@ -4,6 +4,8 @@ import AdminService from "../../services/AdminService.js";
 import ManagerService from "../../services/ManagerService.js";
 import { addInstructorScheduleColumns, formatInstructorCoursePeriod } from '../../helpers/InstructorReportColumns.js?v=periodo-compacto-20261023';
 import { authService } from "../../core/auth/AuthService.js";
+import { isCashReportUser } from '../../helpers/ReportAccess.js';
+import { CashReportsPanel } from '../../helpers/CashSalesReportModal.js';
 
 const esc = (value) =>
   String(value ?? "").replace(
@@ -152,6 +154,7 @@ export default class ManagerReportsView extends Component {
       local = (value) =>
         `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
     this.user = authService.getCurrentUser();
+    this.cashReports = isCashReportUser(this.user) ? new CashReportsPanel() : null;
     this.isBranchAdmin = (this.user?.roles || []).includes("BRANCH_ADMIN");
     this.isAdminSystemReport = (this.user?.roles || []).includes("ADMIN_SYSTEM");
     this.isGeneralManagerReport = (this.user?.roles || []).includes("GENERAL_MANAGER");
@@ -179,6 +182,7 @@ export default class ManagerReportsView extends Component {
     this.canExport = Boolean(this.user?.permissions?.includes("REPORT_EXPORT"));
   }
   async render() {
+    if (this.cashReports) return SidebarLayout.render(this.cashReports.render());
     const reportTitle = this.isBranchScopedReport ? "Reportes de sucursal" : "Centro de reportes";
     const reportIntro = this.isBranchScopedReport
       ? "Consulta los resultados de las sucursales pertenecientes a tu cantón."
@@ -195,6 +199,7 @@ export default class ManagerReportsView extends Component {
     </main>`);
   }
   async mount() {
+    if (this.cashReports) return this.cashReports.mount();
     this.injectReportStyles();
     document
       .getElementById("universal-report-filters")
@@ -355,6 +360,12 @@ export default class ManagerReportsView extends Component {
       @media(max-width:650px){.report-summary{grid-template-columns:1fr}}
     `;
     document.head.appendChild(style);
+  }
+  unmount() {
+    this.cashReports?.unmount();
+    clearTimeout(this.filterTimer);
+    this.loadSequence++;
+    super.unmount();
   }
   readFilters() {
     const form = new FormData(

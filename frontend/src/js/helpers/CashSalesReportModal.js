@@ -1,6 +1,63 @@
 import {apiClient} from '../core/api/ApiClient.js';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=value=>value===null?'Sin cuenta':Number(value||0).toLocaleString('es-EC',{style:'currency',currency:'USD'});
+// Panel del reporte existente, compartiendo API y descarga con el modal de ventas.
+export class CashReportsPanel {
+ constructor(){
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+  const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));this.today=`${p.year}-${p.month}-${p.day}`;
+  this.type='sales';this.sequence=0;this.page=1;this.pageSize=20;this.ready=null;this.report=null;this.active=true;this.timer=null;
+ }
+ render(){return `<main class="universal-reports cash-reports"><style>
+ .cash-reports{padding:28px;max-width:1500px;margin:auto}.cash-reports h1{margin:0 0 8px}.cash-reports p{color:#667085}.cash-report-tabs{display:flex;gap:12px;margin:22px 0;flex-wrap:wrap}.cash-report-tabs button[aria-pressed=true]{background:#4f46e5;color:#fff}.cash-reports .report-filters{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:14px;padding:20px;background:#fff;border:1px solid #e4e7ec;border-radius:14px}.cash-reports label{display:grid;gap:6px;font-size:13px;color:#475467;min-width:0}.cash-reports input,.cash-reports select{width:100%;min-width:0;height:44px;border:1px solid #d0d5dd;border-radius:8px;padding:0 10px;background:#fff;box-sizing:border-box}.cash-report-actions{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.cash-report-totals{display:flex;gap:14px;flex-wrap:wrap;margin:20px 0}.cash-report-totals div{flex:1;min-width:150px;padding:18px;border:1px solid #e4e7ec;border-radius:12px;background:#fff}.cash-report-totals strong{display:block;font-size:23px;margin-top:6px}.cash-report-panel{background:#fff;border:1px solid #e4e7ec;border-radius:14px;overflow:hidden}.cash-report-panel header{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:18px;flex-wrap:wrap}.cash-report-panel h2{font-size:19px;margin:0}.cash-report-table-wrap{overflow:auto}.cash-reports table{width:100%;border-collapse:collapse}.cash-reports th,.cash-reports td{padding:13px 15px;border-top:1px solid #eaecf0;text-align:left;white-space:nowrap;font-size:13px}.cash-reports th{background:#f9fafb;color:#475467}.cash-reports td small{display:block;color:#667085;margin-top:5px}.cash-report-pagination{display:flex;justify-content:flex-end;gap:14px;align-items:center;padding:16px;flex-wrap:wrap}.cash-reports [role=status]{min-height:24px;margin:16px 0;color:#475467}.cash-report-note{font-size:13px;line-height:1.6}@media(max-width:800px){.cash-reports .report-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.cash-reports{padding:16px}.cash-reports .report-filters{grid-template-columns:1fr}.cash-report-tabs .btn{flex:1}}
+ </style><h1>Reportes de Caja</h1><p>Consulta ventas y cobros confirmados. Exporta los resultados con los filtros seleccionados.</p>
+ <div class="cash-report-tabs" aria-label="Reportes de Caja"><button type="button" class="btn" data-cash-report="sales" aria-pressed="true">Ventas</button><button type="button" class="btn" data-cash-report="collections" aria-pressed="false">Cobros registrados</button></div>
+ <form id="cash-report-filters" class="report-filters"><label>Desde<input type="date" name="from" value="${this.today.slice(0,8)}01" required></label><label>Hasta<input type="date" name="to" value="${this.today}" required></label><label>Promoción<select name="promotion"><option value="">Todas las promociones</option></select></label><label>Sucursal<select name="branchId"><option value="">Todas las sucursales permitidas</option></select></label><label>Curso / servicio<select name="courseType"><option value="">Todos</option><option value="moto">Moto</option><option value="carro">Automóvil</option><option value="services">Servicios independientes</option><option value="other">Otros cursos</option></select></label><label>Método de pago<select name="method"><option value="">Todos</option><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia bancaria</option><option value="tarjeta">Tarjeta</option></select></label><div class="cash-report-actions"><button class="btn btn-primary" type="submit">Actualizar</button><button class="btn btn-secondary" type="button" id="cash-report-clear">Limpiar filtros</button></div></form>
+ <p class="cash-report-note" id="cash-report-description"></p><div role="status" aria-live="polite" id="cash-report-status"></div><section class="cash-report-totals" id="cash-report-totals" aria-label="Totales del reporte"></section>
+ <section class="cash-report-panel"><header><h2 id="cash-report-title">Ventas</h2><button type="button" id="cash-report-export" class="btn btn-primary" disabled>Exportar Excel</button></header><div class="cash-report-table-wrap"><table aria-label="Resultados de Caja"><thead id="cash-report-head"></thead><tbody id="cash-report-body"></tbody></table></div><div class="cash-report-pagination" id="cash-report-pages"></div></section></main>`;}
+ query(){const params=new URLSearchParams(new FormData(this.form));params.set('type',this.type);return params;}
+ invalidate(){this.sequence++;this.ready=null;this.exportButton.disabled=true;this.report=null;this.page=1;document.getElementById('cash-report-totals').innerHTML='';document.getElementById('cash-report-body').innerHTML='';document.getElementById('cash-report-pages').innerHTML='';}
+ async mount(){
+  this.form=document.getElementById('cash-report-filters');this.exportButton=document.getElementById('cash-report-export');this.status=document.getElementById('cash-report-status');
+  this.form.addEventListener('input',()=>{this.invalidate();this.status.textContent='Actualizando filtros…';});
+  this.form.addEventListener('change',()=>{this.invalidate();clearTimeout(this.timer);this.timer=setTimeout(()=>this.load(),180);});
+  this.form.addEventListener('submit',event=>{event.preventDefault();clearTimeout(this.timer);this.invalidate();this.load();});
+  document.getElementById('cash-report-clear').onclick=()=>{this.form.reset();this.invalidate();this.load();};
+  document.querySelectorAll('[data-cash-report]').forEach(button=>button.onclick=()=>{if(this.type===button.dataset.cashReport)return;this.type=button.dataset.cashReport;document.querySelectorAll('[data-cash-report]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));this.invalidate();clearTimeout(this.timer);this.load();});
+  document.getElementById('cash-report-pages').onclick=event=>{const button=event.target.closest('[data-cash-page]');if(button&&!button.disabled){this.page=Number(button.dataset.cashPage);this.paintTable();}};
+  this.exportButton.onclick=()=>this.export();await this.load();
+ }
+ columns(){return [['record_date',this.type==='sales'?'Inscripción':'Cobro'],['identification','Cédula'],['student_name','Estudiante / cliente'],['branch','Sucursal'],['course','Curso / servicio'],...(this.type==='sales'?[['amount','Precio final','money'],['discount','Descuento','money'],['paid','Cobrado confirmado','money'],['balance','Saldo pendiente','money']]:[['paid','Cobrado confirmado','money'],['receipt','Comprobante']]),['payment_methods','Método de pago'],['promotion','Promoción'],['registered_by',this.type==='sales'?'Registrado por':'Cobrado por']];}
+ async load(){
+  clearTimeout(this.timer);if(!this.active)return;
+  if(!this.form.checkValidity()){this.status.textContent='Selecciona fechas válidas.';return;}
+  const params=this.query(),version=++this.sequence;this.ready=null;this.exportButton.disabled=true;this.status.textContent='Consultando reporte…';
+  document.getElementById('cash-report-description').textContent=this.type==='sales'?'Ventas según fecha de inscripción y sucursal de venta. Los cobros son los pagos confirmados acumulados de esas ventas; las transferencias pendientes se identifican sin sumarse al cobrado.':'Cobros confirmados dentro del periodo, incluidos los servicios independientes, según la sucursal de la cuenta o servicio. Las transferencias pendientes no se contabilizan.';
+  document.getElementById('cash-report-title').textContent=this.type==='sales'?'Ventas':'Cobros registrados';
+  try{
+   const response=await apiClient.get('/payments/sales-report?'+params);
+   if(!this.active||version!==this.sequence)return;
+   if(!response.success||!response.data)throw Error(response.error||'No se pudo consultar el reporte');
+   this.report=response.data;this.ready=params.toString();
+   for(const[name,options,empty]of[['promotion',this.report.options.promotions,'Todas las promociones'],['branchId',this.report.options.branches.map(b=>({value:b.id,label:b.name})),'Todas las sucursales permitidas']]){const field=this.form.elements.namedItem(name),value=field.value;field.innerHTML=`<option value="">${empty}</option>`+options.map(o=>`<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');field.value=value;}
+   const t=this.report.totals;document.getElementById('cash-report-totals').innerHTML=[['Registros',t.records],['Cobrado confirmado',money(t.paid)],...(this.type==='sales'?[['Precio final total',money(t.amount)],['Saldo pendiente',money(t.balance)]]:[])].map(([label,value])=>`<div>${label}<strong>${esc(value)}</strong></div>`).join('');
+   this.status.textContent=t.records?`${t.records} registros encontrados${t.withoutAccount?' · '+t.withoutAccount+' sin cuenta de pago':''}`:'No hay registros con los filtros seleccionados.';this.page=1;this.paintTable();this.exportButton.disabled=!this.report.rows.length;
+  }catch(error){if(!this.active||version!==this.sequence)return;this.ready=null;this.report=null;this.exportButton.disabled=true;this.status.textContent=error.message;document.getElementById('cash-report-totals').innerHTML='';document.getElementById('cash-report-body').innerHTML='';document.getElementById('cash-report-pages').innerHTML='';}
+ }
+ paintTable(){if(!this.report)return;const columns=this.columns(),rows=this.report.rows,start=(this.page-1)*this.pageSize;
+  document.getElementById('cash-report-head').innerHTML='<tr>'+columns.map(([,label])=>`<th scope="col">${label}</th>`).join('')+'</tr>';
+  document.getElementById('cash-report-body').innerHTML=rows.slice(start,start+this.pageSize).map(row=>'<tr>'+columns.map(([key,,kind])=>`<td>${kind==='money'?esc(money(row[key])):esc(key==='record_date'?String(row[key]||'').slice(0,19).replace('T',' '):row[key])}${key==='payment_methods'&&row.pending_transfer?'<small>Transferencia pendiente; no incluida en el cobrado.</small>':''}</td>`).join('')+'</tr>').join('')||`<tr><td colspan="${columns.length}">Sin resultados</td></tr>`;
+  const pages=Math.max(1,Math.ceil(rows.length/this.pageSize));document.getElementById('cash-report-pages').innerHTML=`<button class="btn btn-secondary" data-cash-page="${this.page-1}" ${this.page===1?'disabled':''}>Anterior</button><span>Página ${this.page} de ${pages}</span><button class="btn btn-secondary" data-cash-page="${this.page+1}" ${this.page>=pages?'disabled':''}>Siguiente</button>`;
+ }
+ async export(){
+  if(!this.ready||this.ready!==this.query().toString())return;const query=this.ready;
+  const controls=[...this.form.querySelectorAll('input,select,button'),...document.querySelectorAll('[data-cash-report]')];controls.forEach(c=>c.disabled=true);this.exportButton.disabled=true;
+  try{const file=await apiClient.downloadGet('/payments/sales-report/export?'+query);if(!this.active)return;const url=URL.createObjectURL(file.blob),link=document.createElement('a');link.href=url;link.download=file.filename||'reporte-caja.xlsx';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);this.status.textContent='Reporte exportado con los filtros seleccionados.';}
+  catch(error){if(this.active)this.status.textContent=error.message;}
+  finally{if(this.active){controls.forEach(c=>c.disabled=false);this.exportButton.disabled=!this.ready;}}
+ }
+ unmount(){this.active=false;this.sequence++;this.ready=null;clearTimeout(this.timer);}
+}
 export function openCashSalesReport(){
  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  const dialog=document.createElement('dialog');dialog.setAttribute('aria-labelledby','cash-sales-title');
